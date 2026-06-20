@@ -20,6 +20,8 @@
 *.sig
 *.exe
 *.dll
+!/prebuilt/
+!/prebuilt/MecchaCamouflage.dll
 *.pdb
 *.lib
 *.exp

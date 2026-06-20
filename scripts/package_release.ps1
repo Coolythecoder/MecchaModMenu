@@ -1,5 +1,6 @@
 param(
     [string]$BuildDir = "",
+    [string]$DllPath = "",
     [string]$Version = "1.0.0",
     [string]$OutDir = "",
     [string]$UE4SSRuntimeRoot = $env:UE4SS_RUNTIME_ROOT,
@@ -30,11 +31,19 @@ function Resolve-FileFromRoot([string]$Root, [string[]]$RelativePaths, [string]$
     throw "$Name was not found under $Root"
 }
 
-$Dll = Get-ChildItem $BuildDir -Recurse -Filter "$ModName.dll" |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-if (-not $Dll) {
-    throw "$ModName.dll was not found under $BuildDir"
+if ($DllPath) {
+    if (-not (Test-Path $DllPath -PathType Leaf)) {
+        throw "$ModName.dll was not found at $DllPath"
+    }
+    $DllFile = Get-Item $DllPath
+}
+else {
+    $DllFile = Get-ChildItem $BuildDir -Recurse -Filter "$ModName.dll" |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $DllFile) {
+        throw "$ModName.dll was not found under $BuildDir"
+    }
 }
 
 if (-not (Test-Path $UE4SSRuntimeRoot -PathType Container)) {
@@ -73,7 +82,7 @@ $ModDllDir = Join-Path $ModsRoot "$ModName\dlls"
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $ModDllDir | Out-Null
 
-Copy-Item -Force $Dll.FullName (Join-Path $ModDllDir "main.dll")
+Copy-Item -Force $DllFile.FullName (Join-Path $ModDllDir "main.dll")
 Copy-Item -Force $Dwmapi (Join-Path $Win64Root "dwmapi.dll")
 Copy-Item -Force $UE4SSDll (Join-Path $UE4SSRoot "UE4SS.dll")
 Copy-Item -Force (Join-Path $RepoRoot "README.md") (Join-Path $Stage "README.md")
