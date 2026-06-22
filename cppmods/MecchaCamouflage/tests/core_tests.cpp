@@ -220,6 +220,84 @@ int main()
     }
 
     {
+        const auto order = Core::stratified_grid_order(5, 4, 4);
+        assert(order.size() == 4);
+        std::vector<int> rows{};
+        for (const auto linear : order)
+        {
+            rows.push_back(linear / 5);
+        }
+        assert(rows[0] == 0);
+        assert(rows[1] == 1);
+        assert(rows[2] == 2);
+        assert(rows[3] == 3);
+        assert(Core::stratified_grid_linear_index(5, 4, 4) == 1);
+    }
+
+    {
+        const auto latest_log_like = Core::evaluate_front_coverage(Core::FrontCoverageInput{
+            0.4537,
+            0.35,
+            0.5463,
+            0.6167,
+            0.4419,
+            0.3326,
+            0.5581,
+            0.4071,
+            140,
+            117,
+            5853,
+            2048,
+            5853,
+            16361,
+            16380,
+            32,
+            117,
+            true});
+        assert(!latest_log_like.ok);
+        assert(latest_log_like.failed);
+        assert(!latest_log_like.reaches_coarse_bottom);
+        assert(latest_log_like.failure == "front_coverage_bottom_not_reached");
+
+        const auto covered_front = Core::evaluate_front_coverage(Core::FrontCoverageInput{
+            0.45,
+            0.35,
+            0.55,
+            0.62,
+            0.449,
+            0.348,
+            0.551,
+            0.619,
+            96,
+            96,
+            7000,
+            2048,
+            5853,
+            9216,
+            9216,
+            90,
+            96,
+            false});
+        assert(covered_front.ok);
+        assert(!covered_front.failed);
+        assert(covered_front.reaches_coarse_bottom);
+        assert(covered_front.failure == "ok");
+    }
+
+    {
+        const auto dev_partial = Core::plan_replicated_stroke_apply(Core::ReplicatedStrokePlanInput{
+            5853,
+            5854,
+            24,
+            true,
+            true});
+        assert(dev_partial.ok);
+        assert(dev_partial.partial);
+        assert(!dev_partial.quality_success);
+        assert(dev_partial.failure == "dev_replicated_partial_apply");
+    }
+
+    {
         const auto views = Core::generate_golden_angle_views(12, 35.0);
         assert(views.size() == 12);
         for (const auto& view : views)

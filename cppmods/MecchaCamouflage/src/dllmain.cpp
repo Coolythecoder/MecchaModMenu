@@ -8015,7 +8015,8 @@ namespace
                                     double soft_budget_ms = 0.0,
                                     int min_hits_before_budget_stop = 0,
                                     int start_linear_index = 0,
-                                    int* next_linear_index = nullptr) -> std::vector<ScreenHitSample>
+                                    int* next_linear_index = nullptr,
+                                    bool stratified_traversal = false) -> std::vector<ScreenHitSample>
     {
         const auto collection_start = SteadyClock::now();
         std::vector<ScreenHitSample> samples{};
@@ -8028,18 +8029,21 @@ namespace
                 *next_linear_index = std::max(0, std::min(total_cells, value));
             }
         };
-        for (int linear = std::max(0, start_linear_index); linear < total_cells; ++linear)
+        for (int ordinal = std::max(0, start_linear_index); ordinal < total_cells; ++ordinal)
         {
+            const auto linear = stratified_traversal
+                                    ? MecchaCamouflage::Core::stratified_grid_linear_index(grid_width, grid_height, ordinal)
+                                    : ordinal;
             const auto y = linear / std::max(1, grid_width);
             const auto x = linear - y * std::max(1, grid_width);
             if (state.cancelled)
             {
-                set_next(linear);
+                set_next(ordinal);
                 return samples;
             }
             if (hard_max_attempts > 0 && stats.attempts >= hard_max_attempts)
             {
-                set_next(linear);
+                set_next(ordinal);
                 return samples;
             }
             if (soft_budget_ms > 0.0 &&
@@ -8047,7 +8051,7 @@ namespace
                 elapsed_ms_since(collection_start) > soft_budget_ms)
             {
                 stats.budget_exhausted = true;
-                set_next(linear);
+                set_next(ordinal);
                 return samples;
             }
                 const auto local_nx = (static_cast<double>(x) + 0.5) / static_cast<double>(std::max(1, grid_width));
@@ -8167,7 +8171,7 @@ namespace
                 ++stats.color_samples;
                 if (target_hits > 0 && stats.hit_uv_count >= target_hits)
                 {
-                    set_next(linear + 1);
+                    set_next(ordinal + 1);
                     return samples;
                 }
         }
@@ -8207,6 +8211,27 @@ namespace
             stats.has_world_bounds ? stats.max_world.Z() : 0.0,
             stats.budget_exhausted ? 1 : 0,
             stats.first_failure.empty() ? STR("<none>") : stats.first_failure);
+    }
+
+
+    auto count_vertical_band_hits(const std::vector<ScreenHitSample>& samples,
+                                  double min_ny,
+                                  double max_ny,
+                                  int band_count) -> int
+    {
+        if (samples.empty() || band_count <= 0 || max_ny <= min_ny)
+        {
+            return 0;
+        }
+        std::vector<std::uint8_t> bands(static_cast<size_t>(band_count), 0);
+        for (const auto& sample : samples)
+        {
+            const auto t = clamp((sample.ny - min_ny) / std::max(0.000001, max_ny - min_ny), 0.0, 0.999999);
+            const auto band = std::min(band_count - 1,
+                                       std::max(0, static_cast<int>(t * static_cast<double>(band_count))));
+            bands[static_cast<size_t>(band)] = 1;
+        }
+        return static_cast<int>(std::count(bands.begin(), bands.end(), static_cast<std::uint8_t>(1)));
     }
 
 
@@ -10043,11 +10068,14 @@ namespace
             MecchaCamouflage::Core::RuntimeAtlasProbeReport atlas_probe{};
             MecchaCamouflage::Core::ApplyBackendProbe apply_backend{};
             MecchaCamouflage::Core::AtlasCoverageReport atlas_coverage{};
+            MecchaCamouflage::Core::FrontCoverageReport front_coverage{};
             MecchaCamouflage::Core::SurfaceSampleEvidence surface_evidence{};
             MecchaCamouflage::Core::ReplicatedStrokePlan stroke_plan{};
             MecchaCamouflage::Core::PhaseTiming timing{};
             RuntimePaintBrushSettings brush{};
             std::vector<ScreenHitSample> apply_samples{};
+            int vertical_band_hits{0};
+            int vertical_band_count{0};
             int apply_cursor{0};
             int replicated_strokes_sent{0};
             int replicated_strokes_failed{0};
@@ -10059,6 +10087,8 @@ namespace
             bool camera_state_restored{true};
             bool preflight_done{false};
             bool atlas_probe_done{false};
+            bool front_coverage_ok{false};
+            bool front_coverage_failed{false};
         };
 
         ProbeState m_state{};
@@ -10344,12 +10374,14 @@ namespace
             m_state.paint_uv_success = 0;
             m_state.paint_world_success = 0;
             m_state.commit_calls = 0;
+            m_state.side_enabled = 0;
+            m_state.side_backend = STR("front_first_deferred");
             m_state.side_budget_exhausted = 0;
             m_state.verified_paint_function = STR("PaintAtScreenPosition.body_mask");
             m_state.verified_paint_channel = PaintChannelAlbedoMetallicRoughness;
 
             RC::Output::send<RC::LogLevel::Warning>(
-                STR("{} play started id={} version={} route=f10_v2_runtime_atlas backend=tick_bounded_runtime_probe actual_model_paint=1 viewport_resolution_capture=0 scene_capture_color=0 trace_primary=1 capture_alignment=disabled alignment_used=0 front_screen_paint=0 import_fallback=0 fallback_used=0 side_enabled=0 no_gui=1 no_umg_overlay=1 no_material_shader=1 no_clear=1 no_commit=1 no_mesh_hide=1 no_trace_color_fallback=1 legacy_splat_success=0 job_stage=started frame_budget_soft_ms=4 frame_budget_hard_ms=8 scheduler=v2_tick_state_machine atlas_source=runtime_probe atlas_probe_ok=0 apply_backend=unknown exact_material_source=unavailable material_confidence=unknown no_import=0 camera_state_restored=1 fresh_probe=1 cached_runtime_state_cleared=1\n"),
+                STR("{} play started id={} version={} route=f10_v2_runtime_atlas backend=tick_bounded_runtime_probe actual_model_paint=1 viewport_resolution_capture=0 scene_capture_color=0 trace_primary=1 capture_alignment=disabled alignment_used=0 front_screen_paint=0 import_fallback=0 fallback_used=0 side_enabled=0 side_backend=front_first_deferred no_gui=1 no_umg_overlay=1 no_material_shader=1 no_clear=1 no_commit=1 no_mesh_hide=1 no_trace_color_fallback=1 legacy_splat_success=0 job_stage=started frame_budget_soft_ms=4 frame_budget_hard_ms=8 scheduler=v2_tick_state_machine atlas_source=runtime_probe atlas_probe_ok=0 apply_backend=unknown exact_material_source=unavailable material_confidence=unknown no_import=0 camera_state_restored=1 fresh_probe=1 cached_runtime_state_cleared=1\n"),
                 ModTag,
                 m_state.play_id,
                 ModVersion);
@@ -10619,7 +10651,7 @@ namespace
                 m_pipeline_job.samples.clear();
                 m_pipeline_job.samples.reserve(static_cast<size_t>(std::max(1, m_pipeline_job.target_paint_hits)));
                 RC::Output::send<RC::LogLevel::Warning>(
-                    STR("{} adaptive_sampling_policy viewport={}x{} bbox_px={}x{} target_front_hits={} preferred_front_hits={} min_front_hits={} hard_max_attempts={} refine_grid={}x{} target_side_seeds={} side_views={} side_grid={}x{} duplicate_limited={} job_stage=refined_hit scheduler=tick\n"),
+                    STR("{} adaptive_sampling_policy viewport={}x{} bbox_px={}x{} target_front_hits={} preferred_front_hits={} min_front_hits={} hard_max_attempts={} refine_grid={}x{} target_side_seeds={} side_views={} side_grid={}x{} duplicate_limited={} sampling_order=stratified_grid_y_first job_stage=refined_hit scheduler=tick\n"),
                     ModTag,
                     viewport.width,
                     viewport.height,
@@ -10660,25 +10692,57 @@ namespace
                                                         m_pipeline_job.max_nx,
                                                         m_pipeline_job.min_ny,
                                                         m_pipeline_job.max_ny,
-                                                        m_pipeline_job.target_paint_hits,
+                                                        0,
                                                         m_pipeline_job.hard_max_attempts,
                                                         false,
                                                         4.0,
                                                         0,
                                                         m_pipeline_job.refine_cursor,
-                                                        &next_cursor);
+                                                        &next_cursor,
+                                                        true);
                 m_pipeline_job.refine_cursor = next_cursor;
                 m_pipeline_job.samples.insert(m_pipeline_job.samples.end(), batch.begin(), batch.end());
                 m_state.uv_hits = m_pipeline_job.refined_stats.hit_uv_count;
                 m_state.body_trace_hits = m_pipeline_job.refined_stats.hit_success;
 
+                const auto& active_coarse_stats = m_pipeline_job.use_normalized_coords
+                                                      ? m_pipeline_job.normalized_coarse_stats
+                                                      : m_pipeline_job.coarse_stats;
+                m_pipeline_job.vertical_band_count = std::max(1, m_pipeline_job.refine_grid_y);
+                m_pipeline_job.vertical_band_hits = count_vertical_band_hits(m_pipeline_job.samples,
+                                                                             active_coarse_stats.min_ny,
+                                                                             active_coarse_stats.max_ny,
+                                                                             m_pipeline_job.vertical_band_count);
+                m_pipeline_job.front_coverage = MecchaCamouflage::Core::evaluate_front_coverage(MecchaCamouflage::Core::FrontCoverageInput{
+                    active_coarse_stats.min_nx,
+                    active_coarse_stats.min_ny,
+                    active_coarse_stats.max_nx,
+                    active_coarse_stats.max_ny,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.min_nx : 1.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.min_ny : 1.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.max_nx : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.max_ny : 0.0,
+                    m_pipeline_job.refine_grid_x,
+                    m_pipeline_job.refine_grid_y,
+                    static_cast<int>(m_pipeline_job.samples.size()),
+                    m_pipeline_job.min_paint_hits,
+                    m_pipeline_job.target_paint_hits,
+                    m_pipeline_job.refine_cursor,
+                    m_pipeline_job.refine_total_cells,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
+                    m_pipeline_job.refined_stats.budget_exhausted});
+                m_pipeline_job.front_coverage_ok = m_pipeline_job.front_coverage.ok;
+                m_pipeline_job.front_coverage_failed = !m_pipeline_job.front_coverage.ok;
+
                 const auto complete =
-                    static_cast<int>(m_pipeline_job.samples.size()) >= m_pipeline_job.target_paint_hits ||
+                    (m_pipeline_job.front_coverage_ok &&
+                     static_cast<int>(m_pipeline_job.samples.size()) >= m_pipeline_job.target_paint_hits) ||
                     m_pipeline_job.refine_cursor >= m_pipeline_job.refine_total_cells ||
                     (m_pipeline_job.hard_max_attempts > 0 &&
                      m_pipeline_job.refined_stats.attempts >= m_pipeline_job.hard_max_attempts);
                 RC::Output::send<RC::LogLevel::Verbose>(
-                    STR("{} refined_hit_tick cursor={}/{} attempts={} samples={} target_samples={} min_samples={} batch={} frame_budget_overrun={} job_stage=refined_hit\n"),
+                    STR("{} refined_hit_tick cursor={}/{} attempts={} samples={} target_samples={} min_samples={} batch={} front_coverage_ok={} front_coverage_failed={} coverage_failure={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} coarse_bbox=({}, {})-({}, {}) refined_bbox=({}, {})-({}, {}) frame_budget_overrun={} hit_budget_exhausted={} job_stage=refined_hit\n"),
                     ModTag,
                     m_pipeline_job.refine_cursor,
                     m_pipeline_job.refine_total_cells,
@@ -10687,6 +10751,21 @@ namespace
                     m_pipeline_job.target_paint_hits,
                     m_pipeline_job.min_paint_hits,
                     batch.size(),
+                    m_pipeline_job.front_coverage_ok ? 1 : 0,
+                    m_pipeline_job.front_coverage_failed ? 1 : 0,
+                    RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str()),
+                    m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
+                    active_coarse_stats.min_nx,
+                    active_coarse_stats.min_ny,
+                    active_coarse_stats.max_nx,
+                    active_coarse_stats.max_ny,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.min_nx : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.min_ny : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.max_nx : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.max_ny : 0.0,
+                    m_pipeline_job.refined_stats.budget_exhausted ? 1 : 0,
                     m_pipeline_job.refined_stats.budget_exhausted ? 1 : 0);
                 if (!complete)
                 {
@@ -10696,14 +10775,45 @@ namespace
                 log_screen_hit_stats(STR("screen_body_refined_deferred"),
                                      m_pipeline_job.use_normalized_coords ? STR("normalized_0_1") : STR("viewport_pixels"),
                                      m_pipeline_job.refined_stats);
-                if (static_cast<int>(m_pipeline_job.samples.size()) < m_pipeline_job.min_paint_hits && !DiagnosticsEnabled)
+                RC::Output::send<RC::LogLevel::Warning>(
+                    STR("{} front_coverage_report front_coverage_ok={} front_coverage_failed={} coverage_failure={} refined_reaches_coarse_bottom={} refined_reaches_coarse_top={} refined_reaches_coarse_left={} refined_reaches_coarse_right={} vertical_band_hits={}/{} coarse_bbox=({}, {})-({}, {}) refined_bbox=({}, {})-({}, {}) refined_grid_cursor={} refined_total_cells={} samples={} target_samples={} min_samples={} hit_budget_exhausted={} job_stage=refined_hit\n"),
+                    ModTag,
+                    m_pipeline_job.front_coverage_ok ? 1 : 0,
+                    m_pipeline_job.front_coverage_failed ? 1 : 0,
+                    RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str()),
+                    m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                    m_pipeline_job.front_coverage.reaches_coarse_top ? 1 : 0,
+                    m_pipeline_job.front_coverage.reaches_coarse_left ? 1 : 0,
+                    m_pipeline_job.front_coverage.reaches_coarse_right ? 1 : 0,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
+                    active_coarse_stats.min_nx,
+                    active_coarse_stats.min_ny,
+                    active_coarse_stats.max_nx,
+                    active_coarse_stats.max_ny,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.min_nx : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.min_ny : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.max_nx : 0.0,
+                    m_pipeline_job.refined_stats.hit_uv_count > 0 ? m_pipeline_job.refined_stats.max_ny : 0.0,
+                    m_pipeline_job.refine_cursor,
+                    m_pipeline_job.refine_total_cells,
+                    m_pipeline_job.samples.size(),
+                    m_pipeline_job.target_paint_hits,
+                    m_pipeline_job.min_paint_hits,
+                    m_pipeline_job.refined_stats.budget_exhausted ? 1 : 0);
+                if ((!m_pipeline_job.front_coverage_ok ||
+                     static_cast<int>(m_pipeline_job.samples.size()) < m_pipeline_job.min_paint_hits) &&
+                    !DiagnosticsEnabled)
                 {
                     m_state.failures = 1;
-                    m_state.last_failure = STR("play_screen_body_quality_insufficient");
+                    m_state.last_failure = m_pipeline_job.front_coverage_failed
+                                               ? RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str())
+                                               : STR("play_screen_body_quality_insufficient");
                     RC::Output::send<RC::LogLevel::Warning>(
-                        STR("{} play screen_body refused reason={} samples={} min_samples={} target_samples={} hard_max_attempts={} bbox_norm=({}, {})-({}, {}) bbox_px={}x{} refine_grid={}x{} hit_ms={} no_import=1 no_clear=1 no_commit=1 no_mesh_hide=1 fallback_used=0 job_stage=refined_hit frame_budget_overrun=0 hit_budget_exhausted={}\n"),
+                        STR("{} play screen_body refused reason={} failure={} samples={} min_samples={} target_samples={} hard_max_attempts={} bbox_norm=({}, {})-({}, {}) bbox_px={}x{} refine_grid={}x{} front_coverage_ok={} front_coverage_failed={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} refined_grid_cursor={} refined_total_cells={} hit_ms={} no_import=1 no_apply=1 no_clear=1 no_commit=1 no_mesh_hide=1 fallback_used=0 side_enabled=0 side_backend=front_first_deferred job_stage=refined_hit frame_budget_overrun=0 hit_budget_exhausted={}\n"),
                         ModTag,
                         m_pipeline_job.reason,
+                        m_state.last_failure,
                         m_pipeline_job.samples.size(),
                         m_pipeline_job.min_paint_hits,
                         m_pipeline_job.target_paint_hits,
@@ -10716,19 +10826,33 @@ namespace
                         m_pipeline_job.bbox_h_px,
                         m_pipeline_job.refine_grid_x,
                         m_pipeline_job.refine_grid_y,
+                        m_pipeline_job.front_coverage_ok ? 1 : 0,
+                        m_pipeline_job.front_coverage_failed ? 1 : 0,
+                        m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                        m_pipeline_job.vertical_band_hits,
+                        m_pipeline_job.vertical_band_count,
+                        m_pipeline_job.refine_cursor,
+                        m_pipeline_job.refine_total_cells,
                         elapsed_ms_since(m_pipeline_job.hit_start),
                         m_pipeline_job.refined_stats.budget_exhausted ? 1 : 0);
                     finish_pipeline_job();
                     return;
                 }
-                if (static_cast<int>(m_pipeline_job.samples.size()) < m_pipeline_job.min_paint_hits)
+                if (!m_pipeline_job.front_coverage_ok ||
+                    static_cast<int>(m_pipeline_job.samples.size()) < m_pipeline_job.min_paint_hits)
                 {
                     RC::Output::send<RC::LogLevel::Warning>(
-                        STR("{} play screen_body quality_partial_dev samples={} min_samples={} target_samples={} replicated_partial=1 quality_success=0 no_apply=0 fallback_used=0 job_stage=refined_hit\n"),
+                        STR("{} play screen_body quality_partial_dev samples={} min_samples={} target_samples={} front_coverage_ok={} front_coverage_failed={} coverage_failure={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} replicated_partial=1 quality_success=0 no_apply=0 fallback_used=0 side_enabled=0 side_backend=front_first_deferred job_stage=refined_hit\n"),
                         ModTag,
                         m_pipeline_job.samples.size(),
                         m_pipeline_job.min_paint_hits,
-                        m_pipeline_job.target_paint_hits);
+                        m_pipeline_job.target_paint_hits,
+                        m_pipeline_job.front_coverage_ok ? 1 : 0,
+                        m_pipeline_job.front_coverage_failed ? 1 : 0,
+                        RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str()),
+                        m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                        m_pipeline_job.vertical_band_hits,
+                        m_pipeline_job.vertical_band_count);
                 }
 
                 g_deferred_refined_hit_cache.valid = true;
@@ -11048,15 +11172,36 @@ namespace
                                                          static_cast<int>(m_pipeline_job.apply_samples.size()));
                 const auto max_replicated_strokes_per_tick =
                     read_int_property_by_name(m_pipeline_job.component, STR("MaxReplicatedPaintStrokesPerTick")).value_or(24);
+                const auto replicated_quality_min =
+                    m_pipeline_job.front_coverage_ok
+                        ? m_pipeline_job.min_paint_hits
+                        : std::max(m_pipeline_job.min_paint_hits,
+                                   static_cast<int>(m_pipeline_job.apply_samples.size()) + 1);
                 m_pipeline_job.stroke_plan =
                     MecchaCamouflage::Core::plan_replicated_stroke_apply(MecchaCamouflage::Core::ReplicatedStrokePlanInput{
                         static_cast<int>(m_pipeline_job.apply_samples.size()),
-                        m_pipeline_job.min_paint_hits,
+                        replicated_quality_min,
                         max_replicated_strokes_per_tick,
                         DiagnosticsEnabled,
                         m_pipeline_job.apply_backend.ok});
                 RC::Output::send<RC::LogLevel::Warning>(
-                    STR("{} surface_sampling route=f10_v2_runtime_atlas accepted_samples={} rejected_samples={} material_resolved_samples={} scene_capture_samples={} exact_material_source=unavailable material_confidence={} material_source=hidden_character_capture_rgb_estimated color_source=hidden_character_capture atlas_source={} atlas_probe_ok={} coverage_ok={} coverage_failure={} valid_coverage={} direct_coverage={} inferred_coverage={} per_chart_coverage={} lower_body_undercovered={} side_undercovered={} back_undercovered={} apply_backend={} apply_backend_ok={} apply_rpc=ServerSendPaint_or_ServerPaint local_echo_rpc=PaintAtUVWithBrush replicated_apply={} replicated_partial={} quality_success={} max_replicated_strokes_per_tick={} apply_mode=AlphaBlend brush_radius={} brush_seed_radius_px={} effective_brush_world_radius={} brush_texture_min_radius={} brush_texture_max_radius={} brush_hardness={} brush_opacity={} brush_spacing={} brush_falloff={} brush_blend_mode={} brush_template_resolution={} brush_subdivision_level={} brush_subdivision_pixel_size={} brush_max_generated_triangles={} brush_gutter_expand_pixels={} brush_source={} no_apply={} texture_import_used=0 fallback_used=0 legacy_splat_success=0 frame_budget_overrun=0 job_stage=surface_trace_sampling phase_ms={} camera_state_restored={}\n"),
+                    STR("{} front_coverage_apply_gate front_coverage_ok={} front_coverage_failed={} coverage_failure={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} refined_grid_cursor={} refined_total_cells={} replicated_quality_min={} apply_samples={} replicated_partial={} quality_success={} no_apply={} side_enabled=0 side_backend=front_first_deferred job_stage=surface_trace_sampling\n"),
+                    ModTag,
+                    m_pipeline_job.front_coverage_ok ? 1 : 0,
+                    m_pipeline_job.front_coverage_failed ? 1 : 0,
+                    RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str()),
+                    m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
+                    m_pipeline_job.refine_cursor,
+                    m_pipeline_job.refine_total_cells,
+                    replicated_quality_min,
+                    m_pipeline_job.apply_samples.size(),
+                    m_pipeline_job.stroke_plan.partial ? 1 : 0,
+                    m_pipeline_job.stroke_plan.quality_success ? 1 : 0,
+                    m_pipeline_job.stroke_plan.ok ? 0 : 1);
+                RC::Output::send<RC::LogLevel::Warning>(
+                    STR("{} surface_sampling route=f10_v2_runtime_atlas accepted_samples={} rejected_samples={} material_resolved_samples={} scene_capture_samples={} exact_material_source=unavailable material_confidence={} material_source=hidden_character_capture_rgb_estimated color_source=hidden_character_capture atlas_source={} atlas_probe_ok={} coverage_ok={} coverage_failure={} valid_coverage={} direct_coverage={} inferred_coverage={} per_chart_coverage={} lower_body_undercovered={} side_undercovered={} back_undercovered={} front_coverage_ok={} front_coverage_failed={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} refined_grid_cursor={} refined_total_cells={} apply_backend={} apply_backend_ok={} apply_rpc=ServerSendPaint_or_ServerPaint local_echo_rpc=PaintAtUVWithBrush replicated_apply={} replicated_partial={} quality_success={} max_replicated_strokes_per_tick={} apply_mode=AlphaBlend brush_radius={} brush_seed_radius_px={} effective_brush_world_radius={} brush_texture_min_radius={} brush_texture_max_radius={} brush_hardness={} brush_opacity={} brush_spacing={} brush_falloff={} brush_blend_mode={} brush_template_resolution={} brush_subdivision_level={} brush_subdivision_pixel_size={} brush_max_generated_triangles={} brush_gutter_expand_pixels={} brush_source={} no_apply={} texture_import_used=0 fallback_used=0 legacy_splat_success=0 side_enabled=0 side_backend=front_first_deferred frame_budget_overrun=0 job_stage=surface_trace_sampling phase_ms={} camera_state_restored={}\n"),
                     ModTag,
                     m_pipeline_job.apply_samples.size(),
                     m_pipeline_job.surface_evidence.rejected_samples,
@@ -11074,6 +11219,13 @@ namespace
                     m_pipeline_job.atlas_coverage.lower_body_undercovered ? 1 : 0,
                     m_pipeline_job.atlas_coverage.side_undercovered ? 1 : 0,
                     m_pipeline_job.atlas_coverage.back_undercovered ? 1 : 0,
+                    m_pipeline_job.front_coverage_ok ? 1 : 0,
+                    m_pipeline_job.front_coverage_failed ? 1 : 0,
+                    m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
+                    m_pipeline_job.refine_cursor,
+                    m_pipeline_job.refine_total_cells,
                     apply_backend_label(m_pipeline_job.apply_backend.backend),
                     m_pipeline_job.apply_backend.ok ? 1 : 0,
                     m_pipeline_job.stroke_plan.ok ? 1 : 0,
@@ -11275,7 +11427,7 @@ namespace
                 m_pipeline_job.frame_budget_overrun = m_pipeline_job.frame_budget_overrun || budget.overrun;
                 m_pipeline_job.timing.import_ms += elapsed_ms_since(apply_tick_start);
                 RC::Output::send<RC::LogLevel::Warning>(
-                    STR("{} replicated_apply_tick cursor={}/{} attempted={} replicated_strokes_sent={} local_echo_strokes={} failed={} apply_rpc={} local_echo_rpc={} max_replicated_strokes_per_tick={} frame_budget_overrun={} hard_budget_overrun={} budget_ms={} job_stage=apply texture_import_used=0 import_backend=0 replicated_apply=1 replicated_partial={} quality_success={} color_source=hidden_character_capture brush_payload=1 apply_mode=AlphaBlend brush_radius={} effective_brush_world_radius={} brush_seed_radius_px={} brush_subdivision_level={} brush_subdivision_pixel_size={} no_trace_color_fallback=1 first_failure={}\n"),
+                    STR("{} replicated_apply_tick cursor={}/{} attempted={} replicated_strokes_sent={} local_echo_strokes={} failed={} apply_rpc={} local_echo_rpc={} max_replicated_strokes_per_tick={} frame_budget_overrun={} hard_budget_overrun={} budget_ms={} job_stage=apply texture_import_used=0 import_backend=0 replicated_apply=1 replicated_partial={} quality_success={} front_coverage_ok={} front_coverage_failed={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} color_source=hidden_character_capture brush_payload=1 apply_mode=AlphaBlend brush_radius={} effective_brush_world_radius={} brush_seed_radius_px={} brush_subdivision_level={} brush_subdivision_pixel_size={} no_trace_color_fallback=1 first_failure={}\n"),
                     ModTag,
                     m_pipeline_job.apply_cursor,
                     m_pipeline_job.apply_samples.size(),
@@ -11291,6 +11443,11 @@ namespace
                     budget.consumed_ms,
                     m_pipeline_job.stroke_plan.partial ? 1 : 0,
                     m_pipeline_job.stroke_plan.quality_success ? 1 : 0,
+                    m_pipeline_job.front_coverage_ok ? 1 : 0,
+                    m_pipeline_job.front_coverage_failed ? 1 : 0,
+                    m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
                     m_pipeline_job.brush.radius,
                     m_pipeline_job.brush.effective_world_radius,
                     m_pipeline_job.brush.seed_radius_px,
@@ -11314,12 +11471,16 @@ namespace
                 }
                 else
                 {
-                    m_state.failures = 0;
-                    m_state.success = 1;
-                    m_state.last_failure = m_pipeline_job.stroke_plan.partial ? STR("dev_replicated_partial_apply") : STR("<none>");
+                    m_state.failures = m_pipeline_job.stroke_plan.partial ? 1 : 0;
+                    m_state.success = m_pipeline_job.stroke_plan.partial ? 0 : 1;
+                    m_state.last_failure = m_pipeline_job.stroke_plan.partial
+                                               ? (m_pipeline_job.front_coverage_failed
+                                                      ? RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str())
+                                                      : STR("dev_replicated_partial_apply"))
+                                               : STR("<none>");
                 }
                 RC::Output::send<RC::LogLevel::Warning>(
-                    STR("{} play replicated_paint result reason={} success={} visible_backend={} queued_strokes={} replicated_apply=1 replicated_strokes_sent={} local_echo_strokes={} replicated_strokes_failed={} apply_rpc={} local_echo_rpc={} import_backend=0 texture_import_used=0 no_apply=0 albedo_only=1 material_channels_sent=0 replicated_partial={} quality_success={} atlas_source={} atlas_probe_ok={} exact_material_source=unavailable material_confidence=preserved_original material_source=hidden_character_capture_rgb_estimated color_source=hidden_character_capture brush_payload=1 apply_mode=AlphaBlend brush_radius={} effective_brush_world_radius={} brush_seed_radius_px={} brush_subdivision_level={} brush_subdivision_pixel_size={} frame_budget_overrun={} apply_frame_overruns={} phase_ms=({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) fallback_used=0 legacy_splat_success=0 job_stage=complete\n"),
+                    STR("{} play replicated_paint result reason={} success={} visible_backend={} queued_strokes={} replicated_apply=1 replicated_strokes_sent={} local_echo_strokes={} replicated_strokes_failed={} apply_rpc={} local_echo_rpc={} import_backend=0 texture_import_used=0 no_apply=0 albedo_only=1 material_channels_sent=0 replicated_partial={} quality_success={} front_coverage_ok={} front_coverage_failed={} coverage_failure={} refined_reaches_coarse_bottom={} vertical_band_hits={}/{} refined_grid_cursor={} refined_total_cells={} side_enabled=0 side_backend=front_first_deferred atlas_source={} atlas_probe_ok={} exact_material_source=unavailable material_confidence=preserved_original material_source=hidden_character_capture_rgb_estimated color_source=hidden_character_capture brush_payload=1 apply_mode=AlphaBlend brush_radius={} effective_brush_world_radius={} brush_seed_radius_px={} brush_subdivision_level={} brush_subdivision_pixel_size={} frame_budget_overrun={} apply_frame_overruns={} phase_ms=({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) fallback_used=0 legacy_splat_success=0 job_stage=complete\n"),
                     ModTag,
                     m_pipeline_job.reason.empty() ? STR("<none>") : m_pipeline_job.reason,
                     m_state.success,
@@ -11332,6 +11493,14 @@ namespace
                     m_pipeline_job.local_echo_rpc,
                     m_pipeline_job.stroke_plan.partial ? 1 : 0,
                     m_pipeline_job.stroke_plan.quality_success ? 1 : 0,
+                    m_pipeline_job.front_coverage_ok ? 1 : 0,
+                    m_pipeline_job.front_coverage_failed ? 1 : 0,
+                    RC::ensure_str(m_pipeline_job.front_coverage.failure.c_str()),
+                    m_pipeline_job.front_coverage.reaches_coarse_bottom ? 1 : 0,
+                    m_pipeline_job.vertical_band_hits,
+                    m_pipeline_job.vertical_band_count,
+                    m_pipeline_job.refine_cursor,
+                    m_pipeline_job.refine_total_cells,
                     RC::ensure_str(m_pipeline_job.atlas_probe.source.c_str()),
                     m_pipeline_job.atlas_probe.ok ? 1 : 0,
                     m_pipeline_job.brush.radius,

@@ -305,6 +305,43 @@ namespace MecchaCamouflage::Core
         bool duplicate_limited{false};
     };
 
+    struct FrontCoverageInput
+    {
+        double coarse_min_nx{0.0};
+        double coarse_min_ny{0.0};
+        double coarse_max_nx{0.0};
+        double coarse_max_ny{0.0};
+        double refined_min_nx{0.0};
+        double refined_min_ny{0.0};
+        double refined_max_nx{0.0};
+        double refined_max_ny{0.0};
+        int refine_grid_x{0};
+        int refine_grid_y{0};
+        int sample_count{0};
+        int min_samples{0};
+        int target_samples{0};
+        int refined_grid_cursor{0};
+        int refined_total_cells{0};
+        int vertical_band_hits{0};
+        int vertical_band_count{0};
+        bool hit_budget_exhausted{false};
+    };
+
+    struct FrontCoverageReport
+    {
+        bool ok{false};
+        bool failed{true};
+        bool reaches_coarse_bottom{false};
+        bool reaches_coarse_top{false};
+        bool reaches_coarse_left{false};
+        bool reaches_coarse_right{false};
+        double refined_cell_width{0.0};
+        double refined_cell_height{0.0};
+        int vertical_band_hits{0};
+        int vertical_band_count{0};
+        std::string failure{"not_evaluated"};
+    };
+
     struct VirtualView
     {
         double yaw_degrees{0.0};
@@ -470,6 +507,9 @@ namespace MecchaCamouflage::Core
     auto validate_capture_quality(const CaptureQualityInput& input) -> CaptureQualityDecision;
     auto choose_capture_dimensions(const CaptureSizingInput& input) -> CaptureSizingDecision;
     auto choose_adaptive_sampling_policy(const AdaptiveSamplingInput& input) -> AdaptiveSamplingPolicy;
+    auto stratified_grid_linear_index(int grid_width, int grid_height, int ordinal) -> int;
+    auto stratified_grid_order(int grid_width, int grid_height, int limit) -> std::vector<int>;
+    auto evaluate_front_coverage(const FrontCoverageInput& input) -> FrontCoverageReport;
     auto generate_golden_angle_views(int count, double pitch_limit_degrees) -> std::vector<VirtualView>;
     auto evaluate_uv_coverage(const UvCoverageInput& input) -> UvCoverageReport;
     auto evaluate_runtime_atlas_probe(const RuntimeAtlasProbeReport& input) -> RuntimeAtlasProbeReport;

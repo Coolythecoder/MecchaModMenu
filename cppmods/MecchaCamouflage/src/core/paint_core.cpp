@@ -388,6 +388,83 @@ namespace MecchaCamouflage::Core
         return policy;
     }
 
+    auto stratified_grid_linear_index(int grid_width, int grid_height, int ordinal) -> int
+    {
+        if (grid_width <= 0 || grid_height <= 0 || ordinal < 0)
+        {
+            return 0;
+        }
+        const auto total = grid_width * grid_height;
+        if (ordinal >= total)
+        {
+            return total;
+        }
+        const auto row = ordinal % grid_height;
+        const auto column = ordinal / grid_height;
+        return row * grid_width + column;
+    }
+
+    auto stratified_grid_order(int grid_width, int grid_height, int limit) -> std::vector<int>
+    {
+        const auto total = std::max(0, grid_width) * std::max(0, grid_height);
+        const auto count = limit > 0 ? std::min(limit, total) : total;
+        std::vector<int> order{};
+        order.reserve(static_cast<std::size_t>(count));
+        for (int ordinal = 0; ordinal < count; ++ordinal)
+        {
+            order.push_back(stratified_grid_linear_index(grid_width, grid_height, ordinal));
+        }
+        return order;
+    }
+
+    auto evaluate_front_coverage(const FrontCoverageInput& input) -> FrontCoverageReport
+    {
+        FrontCoverageReport report{};
+        report.vertical_band_hits = std::max(0, input.vertical_band_hits);
+        report.vertical_band_count = std::max(0, input.vertical_band_count);
+        report.refined_cell_width =
+            input.refine_grid_x > 0
+                ? std::max(0.0, input.coarse_max_nx - input.coarse_min_nx) / static_cast<double>(input.refine_grid_x)
+                : 0.0;
+        report.refined_cell_height =
+            input.refine_grid_y > 0
+                ? std::max(0.0, input.coarse_max_ny - input.coarse_min_ny) / static_cast<double>(input.refine_grid_y)
+                : 0.0;
+
+        const auto tolerance_x = std::max(report.refined_cell_width * 2.0, 0.000001);
+        const auto tolerance_y = std::max(report.refined_cell_height * 2.0, 0.000001);
+        report.reaches_coarse_top = input.refined_min_ny <= input.coarse_min_ny + tolerance_y;
+        report.reaches_coarse_bottom = input.refined_max_ny >= input.coarse_max_ny - tolerance_y;
+        report.reaches_coarse_left = input.refined_min_nx <= input.coarse_min_nx + tolerance_x;
+        report.reaches_coarse_right = input.refined_max_nx >= input.coarse_max_nx - tolerance_x;
+
+        if (input.sample_count < input.min_samples)
+        {
+            report.failure = "front_coverage_insufficient_samples";
+            return report;
+        }
+        if (!report.reaches_coarse_bottom)
+        {
+            report.failure = "front_coverage_bottom_not_reached";
+            return report;
+        }
+        if (!report.reaches_coarse_top)
+        {
+            report.failure = "front_coverage_top_not_reached";
+            return report;
+        }
+        if (!report.reaches_coarse_left || !report.reaches_coarse_right)
+        {
+            report.failure = "front_coverage_horizontal_span_incomplete";
+            return report;
+        }
+
+        report.ok = true;
+        report.failed = false;
+        report.failure = "ok";
+        return report;
+    }
+
     auto generate_golden_angle_views(int count, double pitch_limit_degrees) -> std::vector<VirtualView>
     {
         constexpr double GoldenAngleDegrees = 137.50776405003785;
