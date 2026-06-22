@@ -270,6 +270,15 @@ namespace MecchaCamouflage::Core
             decision.reason = "invalid_viewport";
             return decision;
         }
+        if (input.require_viewport_size)
+        {
+            decision.width = input.viewport_width;
+            decision.height = input.viewport_height;
+            decision.scale = 1.0;
+            decision.uses_viewport_size = true;
+            decision.reason = "viewport_size_required";
+            return decision;
+        }
 
         const auto failed_attempts = std::max(0, input.failed_attempts);
         const auto viewport_edge = std::max(input.viewport_width, input.viewport_height);
@@ -847,6 +856,98 @@ namespace MecchaCamouflage::Core
         return clamp_int(radius, MinRadius, MaxRadius);
     }
 
+    auto choose_precision_brush_radius(const PrecisionBrushInput& input) -> PrecisionBrushDecision
+    {
+        PrecisionBrushDecision out{};
+        const auto texture_edge = static_cast<double>(std::max(1, std::max(input.texture_width, input.texture_height)));
+        out.texture_min_radius = clamp(input.texture_min_radius, 0.0, 1.0);
+        out.texture_max_radius = clamp(input.texture_max_radius, 0.0, 1.0);
+        if (out.texture_max_radius < out.texture_min_radius)
+        {
+            std::swap(out.texture_min_radius, out.texture_max_radius);
+        }
+        out.requested_radius = static_cast<double>(std::max(1, input.seed_radius_px)) / texture_edge;
+        const auto max_radius = out.texture_max_radius > 0.0 ? out.texture_max_radius : 1.0;
+        if (input.precision_mode)
+        {
+            out.radius = clamp(out.requested_radius, 1.0 / texture_edge, max_radius);
+            out.clamped_by_game_min = false;
+            out.source = "density_precision";
+        }
+        else
+        {
+            out.radius = clamp(out.requested_radius, out.texture_min_radius, max_radius);
+            out.clamped_by_game_min = out.radius > out.requested_radius && out.radius == out.texture_min_radius;
+            out.source = out.clamped_by_game_min ? "game_min_clamped" : "density";
+        }
+        out.brush_footprint_texels = out.radius * texture_edge;
+        return out;
+    }
+
+    auto merge_nearby_paint_seeds(const std::vector<PaintSeed>& seeds,
+                                  double brush_radius_uv) -> std::vector<PaintSeed>
+    {
+        if (seeds.empty() || brush_radius_uv <= 0.0)
+        {
+            return seeds;
+        }
+
+        struct Bucket
+        {
+            PaintSeed seed{};
+            int count{0};
+        };
+
+        std::vector<Bucket> buckets{};
+        buckets.reserve(seeds.size());
+        const auto radius_sq = brush_radius_uv * brush_radius_uv;
+        for (const auto& seed : seeds)
+        {
+            auto* matched = static_cast<Bucket*>(nullptr);
+            for (auto& bucket : buckets)
+            {
+                const auto du = bucket.seed.u - seed.u;
+                const auto dv = bucket.seed.v - seed.v;
+                if (du * du + dv * dv <= radius_sq)
+                {
+                    matched = &bucket;
+                    break;
+                }
+            }
+            if (!matched)
+            {
+                buckets.push_back(Bucket{seed, 1});
+                continue;
+            }
+
+            const auto next_count = matched->count + 1;
+            const auto old_weight = static_cast<double>(matched->count) / static_cast<double>(next_count);
+            const auto new_weight = 1.0 / static_cast<double>(next_count);
+            matched->seed.u = matched->seed.u * old_weight + seed.u * new_weight;
+            matched->seed.v = matched->seed.v * old_weight + seed.v * new_weight;
+            matched->seed.color.r = matched->seed.color.r * old_weight + seed.color.r * new_weight;
+            matched->seed.color.g = matched->seed.color.g * old_weight + seed.color.g * new_weight;
+            matched->seed.color.b = matched->seed.color.b * old_weight + seed.color.b * new_weight;
+            matched->seed.color.roughness =
+                matched->seed.color.roughness * old_weight + seed.color.roughness * new_weight;
+            matched->seed.color.metallic =
+                matched->seed.color.metallic * old_weight + seed.color.metallic * new_weight;
+            matched->seed.floor_like = matched->seed.floor_like || seed.floor_like;
+            matched->seed.priority = std::max(matched->seed.priority, seed.priority);
+            matched->seed.radius = std::max(matched->seed.radius, seed.radius);
+            matched->seed.weight += seed.weight;
+            matched->count = next_count;
+        }
+
+        std::vector<PaintSeed> out{};
+        out.reserve(buckets.size());
+        for (const auto& bucket : buckets)
+        {
+            out.push_back(bucket.seed);
+        }
+        return out;
+    }
+
     auto is_floor_like_label(const std::string& label) -> bool
     {
         const auto text = lower_ascii(label);
@@ -935,6 +1036,13 @@ namespace MecchaCamouflage::Core
             }
         }
         return out;
+    }
+
+    auto should_send_material_channels(MaterialConfidence confidence) -> bool
+    {
+        return confidence == MaterialConfidence::ScalarParameter ||
+               confidence == MaterialConfidence::TextureParameter ||
+               confidence == MaterialConfidence::ConstantParameter;
     }
 
     auto assemble_direct_texture(const ChannelBuffer& albedo_before,

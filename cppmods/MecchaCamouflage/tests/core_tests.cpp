@@ -188,6 +188,18 @@ int main()
         assert(normal_viewport.height == 1080);
         assert(normal_viewport.uses_viewport_size);
         assert(normal_viewport.reason == "viewport_size");
+
+        const auto required_viewport = Core::choose_capture_dimensions(Core::CaptureSizingInput{
+            3440,
+            1440,
+            1024,
+            1024,
+            0,
+            true});
+        assert(required_viewport.width == 3440);
+        assert(required_viewport.height == 1440);
+        assert(required_viewport.uses_viewport_size);
+        assert(required_viewport.reason == "viewport_size_required");
     }
 
     {
@@ -381,6 +393,45 @@ int main()
         const auto dense = Core::estimate_seed_radius_for_density(1024, 1024, 8192);
         assert(sparse > dense);
         assert(dense >= 1);
+
+        const auto precision = Core::choose_precision_brush_radius(Core::PrecisionBrushInput{
+            1024,
+            1024,
+            3,
+            0.02,
+            0.20,
+            true});
+        assert(std::abs(precision.requested_radius - (3.0 / 1024.0)) < 0.000001);
+        assert(std::abs(precision.radius - (3.0 / 1024.0)) < 0.000001);
+        assert(!precision.clamped_by_game_min);
+        assert(precision.source == "density_precision");
+
+        const auto game_clamped = Core::choose_precision_brush_radius(Core::PrecisionBrushInput{
+            1024,
+            1024,
+            3,
+            0.02,
+            0.20,
+            false});
+        assert(game_clamped.radius == 0.02);
+        assert(game_clamped.clamped_by_game_min);
+        assert(game_clamped.source == "game_min_clamped");
+    }
+
+    {
+        std::vector<Core::PaintSeed> seeds{};
+        seeds.push_back(Core::PaintSeed{0.1000, 0.1000, Core::Color{1.0, 0.0, 0.0, 0.5, 0.0}});
+        seeds.push_back(Core::PaintSeed{0.1010, 0.1005, Core::Color{0.0, 1.0, 0.0, 0.7, 0.2}});
+        seeds.push_back(Core::PaintSeed{0.2500, 0.1000, Core::Color{0.0, 0.0, 1.0, 0.9, 0.4}});
+        const auto merged = Core::merge_nearby_paint_seeds(seeds, 0.003);
+        assert(merged.size() == 2);
+        assert(std::abs(merged[0].u - 0.1005) < 0.000001);
+        assert(std::abs(merged[0].v - 0.10025) < 0.000001);
+        assert(std::abs(merged[0].color.r - 0.5) < 0.000001);
+        assert(std::abs(merged[0].color.g - 0.5) < 0.000001);
+        assert(std::abs(merged[0].color.roughness - 0.6) < 0.000001);
+        assert(std::abs(merged[0].color.metallic - 0.1) < 0.000001);
+        assert(std::abs(merged[1].u - 0.25) < 0.000001);
     }
 
     {
@@ -643,6 +694,11 @@ int main()
         assert(resolved.roughness == 0.35);
         assert(resolved.metallic == 0.02);
         assert(resolved.confidence == Core::MaterialConfidence::TextureParameter);
+
+        assert(!Core::should_send_material_channels(Core::MaterialConfidence::Unknown));
+        assert(!Core::should_send_material_channels(Core::MaterialConfidence::PreservedOriginal));
+        assert(Core::should_send_material_channels(Core::MaterialConfidence::ScalarParameter));
+        assert(Core::should_send_material_channels(Core::MaterialConfidence::TextureParameter));
     }
 
     return 0;

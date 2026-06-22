@@ -264,6 +264,7 @@ namespace MecchaCamouflage::Core
         int texture_width{0};
         int texture_height{0};
         int failed_attempts{0};
+        bool require_viewport_size{false};
     };
 
     struct CaptureSizingDecision
@@ -476,6 +477,27 @@ namespace MecchaCamouflage::Core
         std::string failure{"not_run"};
     };
 
+    struct PrecisionBrushInput
+    {
+        int texture_width{0};
+        int texture_height{0};
+        int seed_radius_px{1};
+        double texture_min_radius{0.0};
+        double texture_max_radius{1.0};
+        bool precision_mode{true};
+    };
+
+    struct PrecisionBrushDecision
+    {
+        double radius{0.0};
+        double requested_radius{0.0};
+        double texture_min_radius{0.0};
+        double texture_max_radius{1.0};
+        double brush_footprint_texels{0.0};
+        bool clamped_by_game_min{false};
+        std::string source{"not_run"};
+    };
+
     struct PaintRunDiagnostics
     {
         PhaseTiming timing{};
@@ -519,11 +541,15 @@ namespace MecchaCamouflage::Core
     auto choose_apply_backend(const RuntimeCapabilities& capabilities, bool dev_diagnostic_allowed) -> ApplyBackendProbe;
     auto plan_replicated_stroke_apply(const ReplicatedStrokePlanInput& input) -> ReplicatedStrokePlan;
     auto estimate_seed_radius_for_density(int texture_width, int texture_height, int seed_count) -> int;
+    auto choose_precision_brush_radius(const PrecisionBrushInput& input) -> PrecisionBrushDecision;
+    auto merge_nearby_paint_seeds(const std::vector<PaintSeed>& seeds,
+                                  double brush_radius_uv) -> std::vector<PaintSeed>;
     auto is_floor_like_label(const std::string& label) -> bool;
     auto resolve_material_channels(const MaterialResolveInput& input) -> ResolvedMaterial;
     auto resolve_verified_material_evidence(const MaterialEvidence& evidence,
                                             double original_roughness,
                                             double original_metallic) -> ResolvedMaterial;
+    auto should_send_material_channels(MaterialConfidence confidence) -> bool;
 
     auto assemble_direct_texture(const ChannelBuffer& albedo_before,
                                  const ChannelBuffer& metallic_before,
