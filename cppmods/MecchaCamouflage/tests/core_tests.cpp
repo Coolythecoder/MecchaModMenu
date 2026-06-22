@@ -798,6 +798,60 @@ int main()
         assert(enough_side.side_quality_success);
         assert(!enough_side.side_quality_failed);
         assert(enough_side.inferred_ratio > 0.15);
+
+        const auto sparse_side_back = Core::evaluate_side_back_coverage(Core::SideBackCoverageInput{
+            true,
+            67,
+            32,
+            8192,
+            1620,
+            0,
+            0,
+            false});
+        assert(sparse_side_back.front_quality_success);
+        assert(!sparse_side_back.side_quality_success);
+        assert(!sparse_side_back.back_quality_success);
+        assert(!sparse_side_back.overall_quality_success);
+        assert(sparse_side_back.side_quality_failed);
+        assert(sparse_side_back.back_quality_failed);
+        assert(sparse_side_back.side_min_samples >= 1024);
+        assert(sparse_side_back.back_min_samples >= 768);
+
+        const auto dense_side_back = Core::evaluate_side_back_coverage(Core::SideBackCoverageInput{
+            true,
+            1800,
+            900,
+            8192,
+            24000,
+            12,
+            64,
+            false});
+        assert(dense_side_back.side_quality_success);
+        assert(dense_side_back.back_quality_success);
+        assert(dense_side_back.overall_quality_success);
+        assert(dense_side_back.side_target_samples > dense_side_back.back_target_samples);
+    }
+
+    {
+        const auto first_batch = Core::plan_replicated_batch_apply_tick(Core::ReplicatedBatchTickInput{
+            250,
+            0,
+            64,
+            true});
+        assert(first_batch.ok);
+        assert(first_batch.batch_size == 64);
+        assert(first_batch.next_cursor == 64);
+        assert(!first_batch.complete);
+
+        const auto final_batch = Core::plan_replicated_batch_apply_tick(Core::ReplicatedBatchTickInput{
+            250,
+            224,
+            64,
+            true});
+        assert(final_batch.ok);
+        assert(final_batch.batch_size == 26);
+        assert(final_batch.next_cursor == 250);
+        assert(final_batch.complete);
     }
 
     {

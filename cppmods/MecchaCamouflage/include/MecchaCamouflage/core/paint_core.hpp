@@ -477,6 +477,23 @@ namespace MecchaCamouflage::Core
         std::string failure{"not_run"};
     };
 
+    struct ReplicatedBatchTickInput
+    {
+        int total_strokes{0};
+        int cursor{0};
+        int max_strokes_per_tick{0};
+        bool batch_backend_ok{false};
+    };
+
+    struct ReplicatedBatchTickPlan
+    {
+        bool ok{false};
+        bool complete{false};
+        int batch_size{0};
+        int next_cursor{0};
+        std::string failure{"not_run"};
+    };
+
     struct SampledReadbackTickInput
     {
         int total_samples{0};
@@ -566,6 +583,34 @@ namespace MecchaCamouflage::Core
         std::string failure{"not_evaluated"};
     };
 
+    struct SideBackCoverageInput
+    {
+        bool front_quality_success{false};
+        int side_samples{0};
+        int back_samples{0};
+        int target_side_seeds{0};
+        int attempts{0};
+        int duplicate_front_texels{0};
+        int duplicate_self_texels{0};
+        bool budget_exhausted{false};
+    };
+
+    struct SideBackCoverageReport
+    {
+        bool front_quality_success{false};
+        bool side_quality_success{false};
+        bool back_quality_success{false};
+        bool overall_quality_success{false};
+        bool side_quality_failed{false};
+        bool back_quality_failed{false};
+        int side_target_samples{0};
+        int back_target_samples{0};
+        int side_min_samples{0};
+        int back_min_samples{0};
+        double duplicate_rate{0.0};
+        std::string failure{"not_evaluated"};
+    };
+
     struct PaintRunDiagnostics
     {
         PhaseTiming timing{};
@@ -608,12 +653,14 @@ namespace MecchaCamouflage::Core
     auto build_runtime_atlas_from_masks(const AtlasBuildInput& input) -> AtlasBuildResult;
     auto choose_apply_backend(const RuntimeCapabilities& capabilities, bool dev_diagnostic_allowed) -> ApplyBackendProbe;
     auto plan_replicated_stroke_apply(const ReplicatedStrokePlanInput& input) -> ReplicatedStrokePlan;
+    auto plan_replicated_batch_apply_tick(const ReplicatedBatchTickInput& input) -> ReplicatedBatchTickPlan;
     auto plan_sampled_readback_tick(const SampledReadbackTickInput& input) -> SampledReadbackTickPlan;
     auto estimate_seed_radius_for_density(int texture_width, int texture_height, int seed_count) -> int;
     auto choose_precision_brush_radius(const PrecisionBrushInput& input) -> PrecisionBrushDecision;
     auto infer_surface_stretch_seeds(const std::vector<SurfaceStretchSeed>& seeds,
                                      const SurfaceStretchPolicy& policy) -> SurfaceStretchReport;
     auto evaluate_side_coverage(const SideCoverageInput& input) -> SideCoverageReport;
+    auto evaluate_side_back_coverage(const SideBackCoverageInput& input) -> SideBackCoverageReport;
     auto merge_nearby_paint_seeds(const std::vector<PaintSeed>& seeds,
                                   double brush_radius_uv) -> std::vector<PaintSeed>;
     auto is_floor_like_label(const std::string& label) -> bool;

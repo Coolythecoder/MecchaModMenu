@@ -842,6 +842,35 @@ namespace MecchaCamouflage::Core
         return plan;
     }
 
+    auto plan_replicated_batch_apply_tick(const ReplicatedBatchTickInput& input) -> ReplicatedBatchTickPlan
+    {
+        ReplicatedBatchTickPlan plan{};
+        const auto total = std::max(0, input.total_strokes);
+        plan.next_cursor = clamp_int(input.cursor, 0, total);
+        if (!input.batch_backend_ok)
+        {
+            plan.failure = "replicated_batch_backend_unavailable";
+            return plan;
+        }
+        if (total <= 0 || plan.next_cursor >= total)
+        {
+            plan.ok = true;
+            plan.complete = true;
+            plan.failure = total <= 0 ? "replicated_batch_empty" : "ok";
+            return plan;
+        }
+
+        const auto max_batch = input.max_strokes_per_tick > 0
+                                   ? clamp_int(input.max_strokes_per_tick, 1, 256)
+                                   : 24;
+        plan.batch_size = std::min(max_batch, total - plan.next_cursor);
+        plan.next_cursor += plan.batch_size;
+        plan.complete = plan.next_cursor >= total;
+        plan.ok = plan.batch_size > 0;
+        plan.failure = plan.ok ? "ok" : "replicated_batch_empty";
+        return plan;
+    }
+
     auto plan_sampled_readback_tick(const SampledReadbackTickInput& input) -> SampledReadbackTickPlan
     {
         SampledReadbackTickPlan plan{};
@@ -1009,6 +1038,54 @@ namespace MecchaCamouflage::Core
         }
         report.side_quality_success = true;
         report.failure = "ok";
+        return report;
+    }
+
+    auto evaluate_side_back_coverage(const SideBackCoverageInput& input) -> SideBackCoverageReport
+    {
+        SideBackCoverageReport report{};
+        report.front_quality_success = input.front_quality_success;
+        const auto target = std::max(0, input.target_side_seeds);
+        report.side_target_samples = std::max(0, (target * 2) / 3);
+        report.back_target_samples = std::max(0, target / 3);
+        report.side_min_samples = std::max(1024, (target * 2) / 3 / 4);
+        report.back_min_samples = std::max(768, target / 3 / 4);
+
+        const auto attempts = std::max(0, input.attempts);
+        const auto duplicates = std::max(0, input.duplicate_front_texels) +
+                                std::max(0, input.duplicate_self_texels);
+        report.duplicate_rate = attempts > 0
+                                    ? clamp(static_cast<double>(duplicates) / static_cast<double>(attempts), 0.0, 1.0)
+                                    : 0.0;
+        const auto side_samples = std::max(0, input.side_samples);
+        const auto back_samples = std::max(0, input.back_samples);
+        report.side_quality_success = side_samples >= report.side_min_samples;
+        report.back_quality_success = back_samples >= report.back_min_samples;
+        report.side_quality_failed = !report.side_quality_success;
+        report.back_quality_failed = !report.back_quality_success;
+        report.overall_quality_success =
+            report.front_quality_success && report.side_quality_success && report.back_quality_success;
+
+        if (report.overall_quality_success)
+        {
+            report.failure = "ok";
+        }
+        else if (input.budget_exhausted)
+        {
+            report.failure = "side_back_coverage_failed_budget_exhausted";
+        }
+        else if (report.side_quality_failed && report.back_quality_failed)
+        {
+            report.failure = "side_back_coverage_failed_low_samples";
+        }
+        else if (report.side_quality_failed)
+        {
+            report.failure = "side_coverage_failed_low_samples";
+        }
+        else
+        {
+            report.failure = "back_coverage_failed_low_samples";
+        }
         return report;
     }
 
