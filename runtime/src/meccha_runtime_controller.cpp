@@ -353,11 +353,47 @@ namespace
                                       ",\"details\":" + details + "}";
             append_text_file(events_path_, entry + "\n");
             append_text_file(runtime_log_path_, ts + " " + upper(level) + " " + name + " stage=" + stage + " run_id=" + run_id + " " + message + " " + details + "\n");
-            std::cout << "[" << ts << "] " << upper(level) << " " << name << " stage=" << stage << " " << message << std::endl;
-            if ((level == "warning" || level == "error") && details != "{}")
-                std::cerr << "  details=" << details << std::endl;
+            const auto level_tag = level == "warning" ? "WARN" : upper(level);
+            if (name == "paint_progress")
+            {
+                if (progress_line_active_ && stage != active_progress_stage_)
+                {
+                    std::cout << "\r" << active_progress_line_ << " 100% done" << std::string(12, ' ') << std::endl;
+                }
+                active_progress_stage_ = stage;
+                active_progress_line_ = "[" + std::string(level_tag) + "] progress " + pretty(stage) + " " + message;
+                std::cout << "\r" << active_progress_line_ << "          " << std::flush;
+                progress_line_active_ = true;
+                return;
+            }
+            if (progress_line_active_)
+            {
+                std::cout << "\r" << active_progress_line_ << " 100% done" << std::string(12, ' ') << std::endl;
+                progress_line_active_ = false;
+                active_progress_stage_.clear();
+                active_progress_line_.clear();
+            }
+            if (name == "service_idle")
+            {
+                return;
+            }
+            if (name == "waiting_for_hotkey")
+            {
+                std::cout << "[READY] waiting for user to press F10..." << std::endl;
+                return;
+            }
+            if (name == "paint_done")
+            {
+                std::cout << "[DONE] " << message << std::endl;
+                return;
+            }
+            std::cout << "[" << level_tag << "] " << pretty(name) << " stage=" << pretty(stage) << " " << message << std::endl;
             if (level == "error")
-                std::cerr << "  log_dir=" << wide_to_utf8(log_dir_.wstring()) << std::endl;
+            {
+                std::cout << "  log_dir=" << wide_to_utf8(log_dir_.wstring()) << std::endl;
+                std::cout << "  status=" << wide_to_utf8(status_path_.wstring()) << std::endl;
+                std::cout << "  details=events.jsonl" << std::endl;
+            }
         }
 
         void record_error(const std::string& stage, const std::string& message, const std::string& details_json = "{}", const std::string& run_id = "")
@@ -401,6 +437,12 @@ namespace
             return text;
         }
 
+        static auto pretty(std::string text) -> std::string
+        {
+            std::replace(text.begin(), text.end(), '_', ' ');
+            return text;
+        }
+
         std::filesystem::path log_dir_;
         std::filesystem::path events_path_;
         std::filesystem::path runtime_log_path_;
@@ -410,6 +452,9 @@ namespace
         std::string hotkey_json_{};
         std::string last_run_json_{};
         std::string last_error_json_{"null"};
+        bool progress_line_active_{false};
+        std::string active_progress_stage_{};
+        std::string active_progress_line_{};
     };
 
     auto process_json(const ProcessInfo& process, const std::wstring& target_name) -> std::string
@@ -791,8 +836,9 @@ namespace
         diagnostics.event(response.success ? event_name : event_name + "_failed",
                           response.success ? "info" : (context_pending ? "warning" : "error"),
                           response.stage.empty() ? event_name : response.stage,
-                          response.message,
-                          std::string("{\"response\":") + (response.raw.empty() ? "{}" : response.raw) +
+                          "dev_context_check " + event_name + ": " + response.message,
+                          std::string("{\"probe\":") + json_string(event_name) +
+                          ",\"response\":" + (response.raw.empty() ? "{}" : response.raw) +
                           ",\"will_retry\":" + (response.success ? "false" : "true") + "}");
     }
 
@@ -834,7 +880,60 @@ namespace
                 if (!stage.empty() && signature != last_signature)
                 {
                     last_signature = signature;
-                    diagnostics.event("paint_progress", "info", stage, stage + " progress=" + std::to_string(percent) + "%", progress, run_id);
+                    std::string summary = std::to_string(percent) + "%";
+                    const auto front_hits = extract_json_number(progress, "front_hits", -1.0);
+                    const auto unique_texels = extract_json_number(progress, "unique_atlas_texels", -1.0);
+                    const auto side_back_hits = extract_json_number(progress, "side_back_hits", -1.0);
+                    const auto side_hits = extract_json_number(progress, "side_hits", -1.0);
+                    const auto back_hits = extract_json_number(progress, "back_hits", -1.0);
+                    const auto back_attempts = extract_json_number(progress, "back_attempts", -1.0);
+                    const auto back_views = extract_json_number(progress, "back_views", -1.0);
+                    const auto source_conflicts = extract_json_number(progress, "source_conflict_texels", -1.0);
+                    const auto direct_texels = extract_json_number(progress, "direct_texels", -1.0);
+                    const auto back_direct_texels = extract_json_number(progress, "back_direct_texels", -1.0);
+                    const auto hit_test_calls = extract_json_number(progress, "hit_test_calls", -1.0);
+                    if (front_hits >= 0.0)
+                    {
+                        summary += " front=" + std::to_string(static_cast<long long>(front_hits));
+                    }
+                    if (side_back_hits >= 0.0)
+                    {
+                        summary += " side/back=" + std::to_string(static_cast<long long>(side_back_hits));
+                    }
+                    if (side_hits >= 0.0 || back_hits >= 0.0)
+                    {
+                        summary += " side=" + std::to_string(static_cast<long long>(std::max(0.0, side_hits)));
+                        summary += " back=" + std::to_string(static_cast<long long>(std::max(0.0, back_hits)));
+                    }
+                    if (back_attempts >= 0.0)
+                    {
+                        summary += " back_attempts=" + std::to_string(static_cast<long long>(back_attempts));
+                    }
+                    if (back_views >= 0.0)
+                    {
+                        summary += " back_views=" + std::to_string(static_cast<long long>(back_views));
+                    }
+                    if (unique_texels >= 0.0)
+                    {
+                        summary += " unique=" + std::to_string(static_cast<long long>(unique_texels));
+                    }
+                    if (direct_texels >= 0.0)
+                    {
+                        summary += " direct=" + std::to_string(static_cast<long long>(direct_texels));
+                    }
+                    if (back_direct_texels >= 0.0)
+                    {
+                        summary += " back_direct=" + std::to_string(static_cast<long long>(back_direct_texels));
+                    }
+                    if (source_conflicts >= 0.0)
+                    {
+                        summary += " conflicts=" + std::to_string(static_cast<long long>(source_conflicts));
+                    }
+                    if (hit_test_calls >= 0.0)
+                    {
+                        summary += " calls=" + std::to_string(static_cast<long long>(hit_test_calls));
+                    }
+                    diagnostics.event("paint_progress", "info", stage, summary, progress, run_id);
                     diagnostics.set_last_run(std::string("{\"run_id\":") + json_string(run_id) +
                                              ",\"stage\":" + json_string(stage) +
                                              ",\"success\":false,\"progress\":" + progress + "}");
@@ -968,6 +1067,7 @@ namespace
         double last_sdk_probe = 0.0;
         double last_sdk_deep_probe = 0.0;
         double last_idle = seconds_now();
+        bool waiting_for_hotkey_logged = false;
         int frame = 0;
         const double deadline = config.service_max_duration_seconds > 0.0 ? seconds_now() + config.service_max_duration_seconds : 0.0;
         while (true)
@@ -988,6 +1088,7 @@ namespace
             {
                 attached = {};
                 injected_pid = sdk_probe_pid = sdk_deep_probe_pid = 0;
+                waiting_for_hotkey_logged = false;
                 diagnostics.set_process(process_json(process, config.game_process_name));
                 if (now - last_process_log >= config.status_interval_seconds)
                 {
@@ -1003,6 +1104,7 @@ namespace
             {
                 attached = process;
                 injected_pid = sdk_probe_pid = sdk_deep_probe_pid = 0;
+                waiting_for_hotkey_logged = false;
                 last_bridge_check = last_sdk_probe = last_sdk_deep_probe = 0.0;
                 diagnostics.set_process(process_json(process, config.game_process_name));
                 diagnostics.event("process_attached", "info", "process", "attached to " + wide_to_utf8(process.name), process_json(process, config.game_process_name));
@@ -1011,6 +1113,11 @@ namespace
             {
                 ensure_bridge(config, bridge_path, process, diagnostics, injected_pid);
                 last_bridge_check = now;
+                if (injected_pid == process.pid && !waiting_for_hotkey_logged)
+                {
+                    diagnostics.event("waiting_for_hotkey", "info", "ready", "waiting for user to press F10");
+                    waiting_for_hotkey_logged = true;
+                }
             }
             if (config.auto_sdk_probe && injected_pid == process.pid && sdk_probe_pid != process.pid && now - last_sdk_probe >= 10.0)
             {
@@ -1043,13 +1150,12 @@ namespace
                 else
                 {
                     run_paint(config, bridge_path, process, diagnostics);
+                    diagnostics.event("waiting_for_hotkey", "info", "ready", "waiting for user to press F10");
+                    waiting_for_hotkey_logged = true;
                 }
             }
             if (now - last_idle >= 60.0)
             {
-                diagnostics.event("service_idle", "info", "idle", "service idle",
-                                  std::string("{\"frame\":") + std::to_string(frame) +
-                                  ",\"bridge_ready\":" + (injected_pid == process.pid ? "true" : "false") + "}");
                 last_idle = now;
             }
             Sleep(static_cast<DWORD>(std::max(1.0, config.frame_delay_ms)));
