@@ -1,6 +1,0 @@
-# This is a generated file and its contents are an internal implementation detail.
-# The update step will be re-executed if anything in this file changes.
-# No other meaning or use of this file is supported.
-
-command=C:/BuildTools/VS2022/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe;-DPATCH_SCRIPT_DIR=C:/tmp/meccha-camouflage/external/RE-UE4SS/deps/third/fmt;-P;C:/tmp/meccha-camouflage/external/RE-UE4SS/deps/third/fmt/patch_fmt.cmake
-work_dir=C:/tmp/meccha-camouflage/build/_deps/fmt-src
