@@ -3120,7 +3120,7 @@ namespace
             failure = "game_window_thread_unavailable pid=" + std::to_string(process_id);
             return false;
         }
-        const auto hook = SetWindowsHookExW(WH_GETMESSAGE, message_hook_proc, g_module, thread_id);
+        const auto hook = SetWindowsHookExW(WH_GETMESSAGE, message_hook_proc, nullptr, thread_id);
         if (!hook)
         {
             failure = "message_hook_install_failed win32=" + std::to_string(GetLastError()) + " thread=" + std::to_string(thread_id);
@@ -8905,7 +8905,8 @@ namespace
         const bool legacy_diagnostic_import = false;
         const bool texture_sync_probe = request.find("\"native_apply_mode\":\"texture_sync_strict_probe\"") != std::string::npos ||
                                         request.find("\"route\":\"f10_texture_sync_strict_probe\"") != std::string::npos;
-        const bool static_hybrid_probe = request.find("\"native_apply_mode\":\"static_hybrid_front_side_probe\"") != std::string::npos ||
+        const bool static_hybrid_probe = request.find("\"native_apply_mode\":\"static_hybrid_front_side\"") != std::string::npos ||
+                                         request.find("\"native_apply_mode\":\"static_hybrid_front_side_probe\"") != std::string::npos ||
                                          request.find("\"route\":\"f10_static_hybrid_front_side_probe\"") != std::string::npos;
         const bool color_transfer_probe = false;
         const bool front_texture_import = texture_sync_probe || static_hybrid_probe;
@@ -8920,17 +8921,17 @@ namespace
         const bool disabled_mesh_route = false;
         const bool front_metallic_texture_route = disabled_metallic_stream;
         const bool front_paint_route = false;
-        const std::string route_name = static_hybrid_probe ? "static_hybrid_front_side_probe" :
-            (texture_sync_probe ? "texture_sync_strict_probe" : "unsupported_route");
+        const std::string route_name = static_hybrid_probe ? "static_hybrid_front_side" :
+                                       (texture_sync_probe ? "texture_sync_strict_probe" : "unsupported_route");
         if (!is_probe && !is_deep_probe && !texture_sync_probe && !static_hybrid_probe)
         {
             return response_json(false,
                                  "unsupported_route",
                                  0,
                                  1,
-                                 "unsupported native apply mode; only texture_sync_strict_probe and static_hybrid_front_side_probe are available",
+                                 "unsupported native apply mode; only texture_sync_strict_probe and static_hybrid_front_side are available",
                                  std::string("\"route\":\"") + json_escape(route_name) + "\"" +
-                                     ",\"supported_native_apply_modes\":[\"texture_sync_strict_probe\",\"static_hybrid_front_side_probe\"]");
+                                     ",\"supported_native_apply_modes\":[\"texture_sync_strict_probe\",\"static_hybrid_front_side\",\"static_hybrid_front_side_probe\"]");
         }
         static volatile LONG paint_busy = 0;
         static volatile LONG dump_busy = 0;
