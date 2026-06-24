@@ -7,7 +7,7 @@
 A standalone Windows tool for MECCHA CHAMELEON camouflage experiments.
 
 <p align="center">
-  <img src="assets/demno.png" alt="Meccha Camouflage banner" width="100%" />
+  <img src="assets/demo.png" alt="Meccha Camouflage demo" width="100%" />
 </p>
 
 ## Download
