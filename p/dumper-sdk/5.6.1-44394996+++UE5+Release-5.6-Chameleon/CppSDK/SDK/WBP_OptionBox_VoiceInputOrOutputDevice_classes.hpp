@@ -10,8 +10,8 @@
 
 #include "Basic.hpp"
 
-#include "WBP_NavOptionBox_classes.hpp"
 #include "Engine_structs.hpp"
+#include "WBP_NavOptionBox_classes.hpp"
 
 
 SDK_NAMESPACE_START

@@ -11,9 +11,9 @@
 #include "Basic.hpp"
 
 #include "CoreUObject_structs.hpp"
-#include "ControlRig_structs.hpp"
 #include "ComputeFramework_structs.hpp"
 #include "RigVM_structs.hpp"
+#include "ControlRig_structs.hpp"
 
 
 SDK_NAMESPACE_START

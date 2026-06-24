@@ -3193,6 +3193,9 @@ namespace
         std::uintptr_t expected_guobject_array{0};
         std::uintptr_t actual_guobject_array{0};
         std::uintptr_t expected_gworld{0};
+        std::uintptr_t resolved_gworld_address{0};
+        bool guobject_runtime_address_used{false};
+        std::string gworld_source{"sdk_offset"};
         std::uintptr_t process_event{0};
         std::uintptr_t world{0};
         std::uintptr_t game_instance{0};
@@ -3599,7 +3602,8 @@ namespace
             ? static_cast<long long>(ctx.expected_guobject_array - ctx.actual_guobject_array)
             : -static_cast<long long>(ctx.actual_guobject_array - ctx.expected_guobject_array);
         const bool guobject_offsets_match = ctx.expected_guobject_array != 0 && ctx.expected_guobject_array == ctx.actual_guobject_array;
-        const bool guobject_offsets_compatible = guobject_offsets_match || guobject_delta == 0x10 || guobject_delta == -0x10;
+        const bool guobject_offsets_compatible = guobject_offsets_match || guobject_delta == 0x10 || guobject_delta == -0x10 ||
+            ctx.guobject_runtime_address_used;
         return "\"sdk_version\":\"chameleonEsp_dumper7_1_7_0_min\"" +
                std::string(",\"sdk_route\":\"sdk_server_paint_batch_strokes\"") +
                ",\"module_base\":\"" + hex_address(ctx.module_base) + "\"" +
@@ -3608,9 +3612,12 @@ namespace
                ",\"guobject_offset_delta\":" + std::to_string(guobject_delta) +
                ",\"guobject_offsets_match\":" + std::string(json_bool(guobject_offsets_match)) +
                ",\"guobject_offsets_compatible\":" + std::string(json_bool(guobject_offsets_compatible)) +
+               ",\"guobject_runtime_address_used\":" + std::string(json_bool(ctx.guobject_runtime_address_used)) +
                ",\"expected_gworld\":\"" + hex_address(ctx.expected_gworld) + "\"" +
+               ",\"resolved_gworld_address\":\"" + hex_address(ctx.resolved_gworld_address) + "\"" +
+               ",\"gworld_source\":\"" + json_escape(ctx.gworld_source) + "\"" +
                ",\"process_event\":\"" + hex_address(ctx.process_event) + "\"" +
-               ",\"process_event_offset\":\"0x15d09f0\"" +
+               ",\"process_event_offset\":\"" + hex_address(meccha_sdk::Offsets::ProcessEvent) + "\"" +
                ",\"process_event_vtable_index\":" + std::to_string(ProcessEventVtableIndex) +
                ",\"world\":\"" + hex_address(ctx.world) + "\"" +
                ",\"game_instance\":\"" + hex_address(ctx.game_instance) + "\"" +
@@ -3687,12 +3694,7 @@ namespace
             : -static_cast<long long>(ctx.actual_guobject_array - ctx.expected_guobject_array);
         const bool guobject_offsets_compatible = ctx.expected_guobject_array == ctx.actual_guobject_array ||
             guobject_delta == 0x10 || guobject_delta == -0x10;
-        if (!guobject_offsets_compatible)
-        {
-            ctx.stage = "sdk_mismatch";
-            ctx.message = "Dumper7 SDK offsets do not match current game build";
-            return ctx;
-        }
+        ctx.guobject_runtime_address_used = !guobject_offsets_compatible && ctx.actual_guobject_array != 0;
         if (!address_in_main_module(ctx.process_event))
         {
             ctx.stage = "sdk_mismatch";
@@ -3700,7 +3702,45 @@ namespace
             return ctx;
         }
 
-        ctx.world = safe_read<std::uintptr_t>(ctx.expected_gworld);
+        auto read_world_from_gworld = [&](std::uintptr_t gworld_address) -> std::uintptr_t {
+            if (!address_in_main_module(gworld_address))
+            {
+                return 0;
+            }
+            const auto world = safe_read<std::uintptr_t>(gworld_address);
+            return live_uobject(world) ? world : 0;
+        };
+        auto world_has_local_context = [&](std::uintptr_t world) -> bool {
+            if (!live_uobject(world))
+            {
+                return false;
+            }
+            const auto game_instance = safe_read<std::uintptr_t>(world + meccha_sdk::FieldOffsets::UWorld_OwningGameInstance);
+            if (!live_uobject(game_instance))
+            {
+                return false;
+            }
+            const auto local_players = safe_read<meccha_sdk::TArray<std::uintptr_t>>(game_instance + meccha_sdk::FieldOffsets::UGameInstance_LocalPlayers);
+            return local_players.Data && local_players.Num > 0 && local_players.Num <= 8;
+        };
+
+        ctx.resolved_gworld_address = ctx.expected_gworld;
+        ctx.gworld_source = "sdk_offset";
+        ctx.world = read_world_from_gworld(ctx.expected_gworld);
+        if (!world_has_local_context(ctx.world) && ctx.expected_guobject_array && ctx.actual_guobject_array)
+        {
+            const auto runtime_shift = static_cast<std::intptr_t>(ctx.actual_guobject_array) -
+                static_cast<std::intptr_t>(ctx.expected_guobject_array);
+            const auto shifted_gworld = static_cast<std::uintptr_t>(
+                static_cast<std::intptr_t>(ctx.expected_gworld) + runtime_shift);
+            const auto shifted_world = read_world_from_gworld(shifted_gworld);
+            if (world_has_local_context(shifted_world))
+            {
+                ctx.resolved_gworld_address = shifted_gworld;
+                ctx.gworld_source = "gobjects_delta_shift";
+                ctx.world = shifted_world;
+            }
+        }
         if (!live_uobject(ctx.world))
         {
             ctx.stage = "world_unavailable";
@@ -3770,7 +3810,21 @@ namespace
             }
         }
         ctx.component = safe_read<std::uintptr_t>(ctx.pawn + meccha_sdk::FieldOffsets::BP_FirstPersonCharacter_RuntimePaintable);
-        const auto component_class = lower_copy(ref.class_name(ctx.component));
+        auto component_class = lower_copy(ref.class_name(ctx.component));
+        if (!live_uobject(ctx.component) || !contains_text(component_class, "runtimepaint"))
+        {
+            std::string component_failure{};
+            const auto selected = find_component(ref, component_failure);
+            if (live_uobject(selected.component))
+            {
+                ctx.component = selected.component;
+                if (live_uobject(selected.pawn))
+                {
+                    ctx.pawn = selected.pawn;
+                }
+                component_class = lower_copy(ref.class_name(ctx.component));
+            }
+        }
         if (!live_uobject(ctx.component) || !contains_text(component_class, "runtimepaint"))
         {
             ctx.stage = "paint_component_unavailable";
@@ -4758,6 +4812,10 @@ namespace
         auto total_surface_attempts = [&]() {
             return result.deproject_calls + result.hit_test_calls;
         };
+        auto sampling_goal_met = [&]() {
+            return static_cast<int>(result.samples.size()) >= target_samples &&
+                   result.unique_atlas_texels >= result.target_unique_atlas_texels;
+        };
         auto collect_elapsed_ms = [&]() {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - collect_start).count();
         };
@@ -4768,7 +4826,10 @@ namespace
             const auto sample_progress = target_samples > 0
                 ? static_cast<int>((static_cast<double>(result.samples.size()) / static_cast<double>(target_samples)) * 100.0)
                 : 0;
-            const auto progress = std::max(0, std::min(99, std::max(attempt_progress, sample_progress)));
+            const auto unique_progress = result.target_unique_atlas_texels > 0
+                ? static_cast<int>((static_cast<double>(result.unique_atlas_texels) / static_cast<double>(result.target_unique_atlas_texels)) * 100.0)
+                : 0;
+            const auto progress = std::max(0, std::min(99, std::max({attempt_progress, sample_progress, unique_progress})));
             if (!force && progress == last_collect_progress)
             {
                 return;
@@ -4812,7 +4873,7 @@ namespace
         };
 
         auto try_sample = [&](double nx, double ny, bool refined) -> bool {
-            if (stop_sampling || total_surface_attempts() >= hard_attempts || static_cast<int>(result.samples.size()) >= target_samples)
+            if (stop_sampling || total_surface_attempts() >= hard_attempts || sampling_goal_met())
             {
                 return false;
             }
@@ -4989,9 +5050,9 @@ namespace
             return true;
         };
 
-        for (int y = 0; y < result.coarse_grid_y && !stop_sampling && static_cast<int>(result.samples.size()) < target_samples; ++y)
+        for (int y = 0; y < result.coarse_grid_y && !stop_sampling && !sampling_goal_met(); ++y)
         {
-            for (int x = 0; x < result.coarse_grid_x && !stop_sampling && static_cast<int>(result.samples.size()) < target_samples; ++x)
+            for (int x = 0; x < result.coarse_grid_x && !stop_sampling && !sampling_goal_met(); ++x)
             {
                 const auto jx = (cell_jitter(x, y, 11) - 0.5) * 0.72;
                 const auto jy = (cell_jitter(x, y, 23) - 0.5) * 0.72;
@@ -5009,9 +5070,9 @@ namespace
         const auto query_min_ny = have_bbox ? clamp01(result.bbox_min_ny - span_y * 0.18) : 0.08;
         const auto query_max_ny = have_bbox ? clamp01(result.bbox_max_ny + span_y * 0.55) : 0.92;
 
-        for (int y = 0; y < result.refine_grid_y && !stop_sampling && static_cast<int>(result.samples.size()) < target_samples; ++y)
+        for (int y = 0; y < result.refine_grid_y && !stop_sampling && !sampling_goal_met(); ++y)
         {
-            for (int x = 0; x < result.refine_grid_x && !stop_sampling && static_cast<int>(result.samples.size()) < target_samples; ++x)
+            for (int x = 0; x < result.refine_grid_x && !stop_sampling && !sampling_goal_met(); ++x)
             {
                 const auto jx = (cell_jitter(x, y, 37) - 0.5) * 0.84;
                 const auto jy = (cell_jitter(x, y, 41) - 0.5) * 0.84;
@@ -5031,7 +5092,7 @@ namespace
             {1.0, 0.45}, {-1.0, 0.45}, {1.0, -0.45}, {-1.0, -0.45},
         };
         for (int pass = 0;
-             pass < 8 && !stop_sampling && total_surface_attempts() < hard_attempts && static_cast<int>(result.samples.size()) < target_samples;
+             pass < 8 && !stop_sampling && total_surface_attempts() < hard_attempts && !sampling_goal_met();
              ++pass)
         {
             const auto seeds = result.samples;
@@ -5045,7 +5106,7 @@ namespace
             const auto pass_dx = adaptive_base_dx * ring;
             const auto pass_dy = adaptive_base_dy * ring;
             for (std::size_t i = 0;
-                 i < seeds.size() && !stop_sampling && total_surface_attempts() < hard_attempts && static_cast<int>(result.samples.size()) < target_samples;
+                 i < seeds.size() && !stop_sampling && total_surface_attempts() < hard_attempts && !sampling_goal_met();
                  ++i)
             {
                 const auto& seed = seeds[i];
@@ -5053,7 +5114,7 @@ namespace
                      d < static_cast<int>(sizeof(directions) / sizeof(directions[0])) &&
                      !stop_sampling &&
                      total_surface_attempts() < hard_attempts &&
-                     static_cast<int>(result.samples.size()) < target_samples;
+                     !sampling_goal_met();
                      ++d)
                 {
                     const auto jitter_scale = 0.82 + cell_jitter(static_cast<int>(i), pass, d) * 0.36;
@@ -7113,7 +7174,7 @@ namespace
             sample.radius = std::max(0.0015, std::min(0.0035, 2.5 / static_cast<double>(std::max(out.width, out.height))));
             sample.floor_like = floor_like;
             sample.atlas_priority = 11;
-            sample.atlas_radius = 2;
+            sample.atlas_radius = 3;
             sample.atlas_weight = 72.0;
             out.samples.push_back(sample);
             const double values[]{sample.r, sample.g, sample.b};
@@ -7259,6 +7320,15 @@ namespace
         int back_hits{0};
         int duplicate_texels{0};
         int nearest_sources{0};
+        int front_reuse_samples{0};
+        bool front_reuse_used{false};
+        int attempt_budget{0};
+        double time_budget_ms{0.0};
+        double elapsed_ms{0.0};
+        bool timed_out{false};
+        bool attempt_budget_exhausted{false};
+        int splat_radius{0};
+        std::string backend{"not_run"};
         std::string failure{"not_run"};
     };
 
@@ -7272,6 +7342,7 @@ namespace
         int preserved_original{0};
         int source_samples{0};
         int worker_threads{1};
+        int gap_fill_radius{0};
     };
 
     struct SdkTextureAtlas
@@ -7335,6 +7406,35 @@ namespace
             out.failure = "side_back_query_unavailable";
             return out;
         }
+        out.backend = "screen_space_brush_query_virtual_views_bounded";
+        out.time_budget_ms = 30000.0;
+        out.attempt_budget = 60000;
+        const auto side_back_started = std::chrono::steady_clock::now();
+        auto side_back_elapsed_ms = [&]() {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - side_back_started).count();
+        };
+        auto side_back_should_stop = [&]() {
+            out.elapsed_ms = side_back_elapsed_ms();
+            if (out.elapsed_ms >= out.time_budget_ms)
+            {
+                out.timed_out = true;
+                if (out.failure == "side_back_unavailable" || out.failure == "ok")
+                {
+                    out.failure = out.samples.empty() ? "side_back_time_budget_exhausted_no_samples" : "ok_time_budget_exhausted_partial";
+                }
+                return true;
+            }
+            if (out.attempts >= out.attempt_budget)
+            {
+                out.attempt_budget_exhausted = true;
+                if (out.failure == "side_back_unavailable" || out.failure == "ok")
+                {
+                    out.failure = out.samples.empty() ? "side_back_attempt_budget_exhausted_no_samples" : "ok_attempt_budget_exhausted_partial";
+                }
+                return true;
+            }
+            return false;
+        };
 
         std::unordered_set<std::uint64_t> unique_texels{};
         unique_texels.reserve(direct_samples.size() + 32768);
@@ -7456,6 +7556,10 @@ namespace
             }
         }
         auto try_ray = [&](const meccha_sdk::FVector& origin, const meccha_sdk::FVector& ray_dir, bool back_view) {
+            if (side_back_should_stop())
+            {
+                return;
+            }
             ++out.attempts;
             const auto hit = sdk_query_brush_from_world_ray(ref, query, origin, ray_dir);
             if (!hit.params_ok || !hit.success)
@@ -7519,6 +7623,10 @@ namespace
         {
             for (const auto pitch : pitch_offsets)
             {
+                if (side_back_should_stop())
+                {
+                    break;
+                }
                 const auto outward = rotate_yaw_pitch(base_outward, yaw, pitch);
                 const auto origin = sdk_vec_add(center, sdk_vec_mul(outward, ray_distance));
                 const auto view_forward = sdk_vec_normalize(sdk_vec_sub(center, origin));
@@ -7536,6 +7644,10 @@ namespace
                 {
                     for (int x = 0; x < grid_x; ++x)
                     {
+                        if (side_back_should_stop())
+                        {
+                            break;
+                        }
                         const auto lx = ((static_cast<double>(x) + 0.5) / static_cast<double>(grid_x) - 0.5) * 2.0;
                         const auto ly = ((static_cast<double>(y) + 0.5) / static_cast<double>(grid_y) - 0.5) * 2.0;
                         const auto target = sdk_vec_add(sdk_vec_add(center, sdk_vec_mul(view_right, lx * half_width)), sdk_vec_mul(view_up, ly * half_height));
@@ -7555,6 +7667,10 @@ namespace
                     const auto target = sdk_vec_add(sdk_vec_add(direct_samples[seed_index].world_position, sdk_vec_mul(view_right, jitter_x)),
                                                     sdk_vec_mul(view_up, jitter_y));
                     try_ray(origin, sdk_vec_normalize(sdk_vec_sub(target, origin)), std::abs(yaw) > 165.0);
+                    if (side_back_should_stop())
+                    {
+                        break;
+                    }
                 }
                 ++virtual_view_index;
             }
@@ -7566,6 +7682,10 @@ namespace
         {
             for (const auto pitch : centerline_pitch_offsets)
             {
+                if (side_back_should_stop())
+                {
+                    break;
+                }
                 const auto outward = rotate_yaw_pitch(base_outward, yaw, pitch);
                 const auto origin = sdk_vec_add(center, sdk_vec_mul(outward, ray_distance));
                 const auto view_forward = sdk_vec_normalize(sdk_vec_sub(center, origin));
@@ -7583,6 +7703,10 @@ namespace
                 {
                     for (const auto& jitter : centerline_jitter)
                     {
+                        if (side_back_should_stop())
+                        {
+                            break;
+                        }
                         const auto target = sdk_vec_add(sdk_vec_add(target_seed->world_position, sdk_vec_mul(view_right, jitter[0])),
                                                         sdk_vec_mul(view_up, jitter[1]));
                         try_ray(origin, sdk_vec_normalize(sdk_vec_sub(target, origin)), std::abs(yaw) > 40.0);
@@ -7590,7 +7714,177 @@ namespace
                 }
             }
         }
-        out.failure = out.samples.empty() ? out.failure : "ok";
+        out.elapsed_ms = side_back_elapsed_ms();
+        if (!out.samples.empty())
+        {
+            const auto pixels = static_cast<double>(std::max(1, width) * std::max(1, height));
+            const auto density_radius = static_cast<int>(std::ceil(std::sqrt(pixels / static_cast<double>(out.samples.size())) * 0.42));
+            out.splat_radius = std::max(7, std::min(18, density_radius));
+            for (auto& sample : out.samples)
+            {
+                sample.atlas_radius = std::max(sample.atlas_radius, out.splat_radius);
+                sample.atlas_weight = std::max(sample.atlas_weight, sample.floor_like ? 74.0 : 64.0);
+            }
+        }
+        if (!out.timed_out && !out.attempt_budget_exhausted)
+        {
+            out.failure = out.samples.empty() ? out.failure : "ok";
+        }
+        return out;
+    }
+
+    auto sdk_build_front_uv_mirror_side_back_samples(const std::vector<FrontSample>& direct_samples,
+                                                     int width,
+                                                     int height) -> SdkAtlasSideBackResult
+    {
+        SdkAtlasSideBackResult out{};
+        out.failure = "front_uv_mirror_fast";
+        out.backend = "front_uv_mirror_fast";
+        if (direct_samples.empty())
+        {
+            out.failure = "front_uv_mirror_no_direct_samples";
+            return out;
+        }
+
+        std::unordered_set<std::uint64_t> unique_texels{};
+        unique_texels.reserve(direct_samples.size() * 2U + 1024U);
+        constexpr int uv_grid = 128;
+        std::vector<std::uint8_t> occupied(static_cast<std::size_t>(uv_grid * uv_grid), 0);
+        auto uv_cell_index = [&](double u, double v) -> int {
+            const auto x = std::max(0, std::min(uv_grid - 1, static_cast<int>(clamp01(u) * static_cast<double>(uv_grid))));
+            const auto y = std::max(0, std::min(uv_grid - 1, static_cast<int>(clamp01(v) * static_cast<double>(uv_grid))));
+            return y * uv_grid + x;
+        };
+        for (const auto& sample : direct_samples)
+        {
+            unique_texels.insert(sdk_texel_key(sample.u, sample.v, width, height));
+            occupied[static_cast<std::size_t>(uv_cell_index(sample.u, sample.v))] = 1;
+        }
+
+        struct UvIslandBounds
+        {
+            double min_u{1.0};
+            double max_u{0.0};
+            double min_v{1.0};
+            double max_v{0.0};
+            int cells{0};
+        };
+        std::vector<int> component_ids(static_cast<std::size_t>(uv_grid * uv_grid), -1);
+        std::vector<UvIslandBounds> islands{};
+        std::vector<int> stack{};
+        stack.reserve(uv_grid * uv_grid);
+        for (int cell = 0; cell < uv_grid * uv_grid; ++cell)
+        {
+            if (!occupied[static_cast<std::size_t>(cell)] || component_ids[static_cast<std::size_t>(cell)] >= 0)
+            {
+                continue;
+            }
+            const auto component_id = static_cast<int>(islands.size());
+            islands.push_back({});
+            stack.clear();
+            stack.push_back(cell);
+            component_ids[static_cast<std::size_t>(cell)] = component_id;
+            while (!stack.empty())
+            {
+                const auto current = stack.back();
+                stack.pop_back();
+                const auto cx = current % uv_grid;
+                const auto cy = current / uv_grid;
+                auto& bounds = islands.back();
+                bounds.min_u = std::min(bounds.min_u, static_cast<double>(cx) / static_cast<double>(uv_grid));
+                bounds.max_u = std::max(bounds.max_u, static_cast<double>(cx + 1) / static_cast<double>(uv_grid));
+                bounds.min_v = std::min(bounds.min_v, static_cast<double>(cy) / static_cast<double>(uv_grid));
+                bounds.max_v = std::max(bounds.max_v, static_cast<double>(cy + 1) / static_cast<double>(uv_grid));
+                ++bounds.cells;
+                for (int dy = -1; dy <= 1; ++dy)
+                {
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        if (dx == 0 && dy == 0)
+                        {
+                            continue;
+                        }
+                        const auto nx = cx + dx;
+                        const auto ny = cy + dy;
+                        if (nx < 0 || ny < 0 || nx >= uv_grid || ny >= uv_grid)
+                        {
+                            continue;
+                        }
+                        const auto next = ny * uv_grid + nx;
+                        if (!occupied[static_cast<std::size_t>(next)] || component_ids[static_cast<std::size_t>(next)] >= 0)
+                        {
+                            continue;
+                        }
+                        component_ids[static_cast<std::size_t>(next)] = component_id;
+                        stack.push_back(next);
+                    }
+                }
+            }
+        }
+
+        out.attempts = static_cast<int>(direct_samples.size());
+        auto add_mirror_sample = [&](const FrontSample& source,
+                                     double u,
+                                     double v,
+                                     int priority,
+                                     double weight,
+                                     const char* kind) {
+            FrontSample sample = source;
+            sample.u = clamp01(u);
+            sample.v = clamp01(v);
+            sample.atlas_priority = priority;
+            sample.atlas_radius = std::max(1, source.atlas_radius);
+            sample.atlas_weight = weight;
+            const auto key = sdk_texel_key(sample.u, sample.v, width, height);
+            if (!unique_texels.insert(key).second)
+            {
+                ++out.duplicate_texels;
+                return;
+            }
+            out.samples.push_back(sample);
+            ++out.success;
+            ++out.owner_hits;
+            ++out.uv_hits;
+            ++out.back_hits;
+            ++out.nearest_sources;
+            (void)kind;
+        };
+        for (const auto& source : direct_samples)
+        {
+            const auto component_id = component_ids[static_cast<std::size_t>(uv_cell_index(source.u, source.v))];
+            if (component_id >= 0 && component_id < static_cast<int>(islands.size()))
+            {
+                const auto& island = islands[static_cast<std::size_t>(component_id)];
+                if (island.cells >= 2 && island.max_u > island.min_u && island.max_v > island.min_v)
+                {
+                    add_mirror_sample(source,
+                                      island.min_u + island.max_u - source.u,
+                                      source.v,
+                                      source.floor_like ? 8 : 7,
+                                      source.floor_like ? 48.0 : 42.0,
+                                      "island_u");
+                }
+            }
+            add_mirror_sample(source,
+                              1.0 - source.u,
+                              source.v,
+                              source.floor_like ? 6 : 5,
+                              source.floor_like ? 34.0 : 30.0,
+                              "global_u");
+            add_mirror_sample(source,
+                              source.u,
+                              1.0 - source.v,
+                              source.floor_like ? 4 : 3,
+                              source.floor_like ? 26.0 : 22.0,
+                              "global_v");
+            add_mirror_sample(source,
+                              1.0 - source.u,
+                              1.0 - source.v,
+                              source.floor_like ? 4 : 3,
+                              source.floor_like ? 22.0 : 18.0,
+                              "global_uv");
+        }
+        out.failure = out.samples.empty() ? "front_uv_mirror_no_new_texels" : "ok_front_uv_mirror_fast";
         return out;
     }
 
@@ -7604,6 +7898,18 @@ namespace
                ",\"back_hits\":" + std::to_string(side.back_hits) +
                ",\"side_back_duplicate_texels\":" + std::to_string(side.duplicate_texels) +
                ",\"side_back_nearest_sources\":" + std::to_string(side.nearest_sources) +
+               ",\"side_back_front_reuse_used\":" + json_bool(side.front_reuse_used) +
+               ",\"side_back_front_reuse_samples\":" + std::to_string(side.front_reuse_samples) +
+               ",\"side_back_front_reuse_disabled_reason\":\"front UV mirror/reuse is not UV island aware and can move colors between body parts\"" +
+               ",\"side_back_attempt_budget\":" + std::to_string(side.attempt_budget) +
+               ",\"side_back_time_budget_ms\":" + std::to_string(side.time_budget_ms) +
+               ",\"side_back_elapsed_ms\":" + std::to_string(side.elapsed_ms) +
+               ",\"side_back_timed_out\":" + json_bool(side.timed_out) +
+               ",\"side_back_attempt_budget_exhausted\":" + json_bool(side.attempt_budget_exhausted) +
+               ",\"side_back_splat_radius\":" + std::to_string(side.splat_radius) +
+               ",\"side_back_backend\":\"" + json_escape(side.backend) + "\"" +
+               ",\"side_back_cached_triangle_candidate\":false" +
+               ",\"side_back_cached_triangle_blocker\":\"HitTestAtScreenPosition is current-view screen-space only and FScreenSpacePaintResult has no FaceIndex; virtual back coverage still requires ScreenSpaceBrushQuery or exact mesh render-data layout\"" +
                ",\"side_back_failure\":\"" + json_escape(side.failure) + "\"";
     }
 
@@ -7703,10 +8009,26 @@ namespace
 
         std::vector<Texel> extended_texels = texels;
         std::vector<std::uint8_t> painted_mask = direct_mask;
+        const auto estimate_seed_radius_for_density = [](int texture_width, int texture_height, int seed_count) -> int {
+            if (texture_width <= 0 || texture_height <= 0 || seed_count <= 0)
+            {
+                return 1;
+            }
+            const auto pixels_per_seed = (static_cast<double>(std::max(1, texture_width)) *
+                                          static_cast<double>(std::max(1, texture_height))) /
+                                         static_cast<double>(std::max(1, seed_count));
+            const auto radius = static_cast<int>(std::round(std::sqrt(pixels_per_seed) * 0.48));
+            return std::max(1, std::min(24, radius));
+        };
         constexpr bool kEnableAtlasGapFill = false;
         if constexpr (kEnableAtlasGapFill)
         {
-            constexpr int front_gap_fill_radius = 6;
+            const int front_gap_fill_radius = std::max(
+                8,
+                std::min(
+                    24,
+                    estimate_seed_radius_for_density(width, height, static_cast<int>(std::max<std::size_t>(1, samples.size()))) * 3));
+            out.stats.gap_fill_radius = front_gap_fill_radius;
             std::vector<int> extension_counts(static_cast<std::size_t>(std::max(1, static_cast<int>(sdk_worker_count_for_items(pixels)))), 0);
             sdk_parallel_ranges(pixels, [&](std::size_t begin, std::size_t end, unsigned worker) {
                 auto& local_filled = extension_counts[static_cast<std::size_t>(worker)];
@@ -7767,53 +8089,57 @@ namespace
             {
                 out.stats.filled_by_extension += count;
             }
-            int full_nearest_filled = 0;
-            std::vector<std::size_t> fill_queue{};
-            fill_queue.reserve(pixels);
-            for (std::size_t index = 0; index < pixels; ++index)
+            constexpr bool kEnableFullNearestGapFill = false;
+            if constexpr (kEnableFullNearestGapFill)
             {
-                if (painted_mask[index] && index < extended_texels.size() && extended_texels[index].weight > 0.000001)
+                int full_nearest_filled = 0;
+                std::vector<std::size_t> fill_queue{};
+                fill_queue.reserve(pixels);
+                for (std::size_t index = 0; index < pixels; ++index)
                 {
-                    fill_queue.push_back(index);
-                }
-            }
-            for (std::size_t head = 0; head < fill_queue.size(); ++head)
-            {
-                const auto source_index = fill_queue[head];
-                if (source_index >= extended_texels.size() || extended_texels[source_index].weight <= 0.000001)
-                {
-                    continue;
-                }
-                const auto y = static_cast<int>(source_index / static_cast<std::size_t>(width));
-                const auto x = static_cast<int>(source_index - static_cast<std::size_t>(y * width));
-                for (int dy = -1; dy <= 1; ++dy)
-                {
-                    for (int dx = -1; dx <= 1; ++dx)
+                    if (painted_mask[index] && index < extended_texels.size() && extended_texels[index].weight > 0.000001)
                     {
-                        if (dx == 0 && dy == 0)
-                        {
-                            continue;
-                        }
-                        const auto nx = x + dx;
-                        const auto ny = y + dy;
-                        if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                        {
-                            continue;
-                        }
-                        const auto target_index = static_cast<std::size_t>(ny * width + nx);
-                        if (target_index >= painted_mask.size() || painted_mask[target_index])
-                        {
-                            continue;
-                        }
-                        extended_texels[target_index] = extended_texels[source_index];
-                        painted_mask[target_index] = 1;
-                        fill_queue.push_back(target_index);
-                        ++full_nearest_filled;
+                        fill_queue.push_back(index);
                     }
                 }
+                for (std::size_t head = 0; head < fill_queue.size(); ++head)
+                {
+                    const auto source_index = fill_queue[head];
+                    if (source_index >= extended_texels.size() || extended_texels[source_index].weight <= 0.000001)
+                    {
+                        continue;
+                    }
+                    const auto y = static_cast<int>(source_index / static_cast<std::size_t>(width));
+                    const auto x = static_cast<int>(source_index - static_cast<std::size_t>(y * width));
+                    for (int dy = -1; dy <= 1; ++dy)
+                    {
+                        for (int dx = -1; dx <= 1; ++dx)
+                        {
+                            if (dx == 0 && dy == 0)
+                            {
+                                continue;
+                            }
+                            const auto nx = x + dx;
+                            const auto ny = y + dy;
+                            if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                            {
+                                continue;
+                            }
+                            const auto target_index = static_cast<std::size_t>(ny * width + nx);
+                            if (target_index >= painted_mask.size() || painted_mask[target_index])
+                            {
+                                continue;
+                            }
+                            extended_texels[target_index] = extended_texels[source_index];
+                            painted_mask[target_index] = 1;
+                            fill_queue.push_back(target_index);
+                            ++full_nearest_filled;
+                        }
+                    }
+                }
+                out.stats.filled_by_extension += full_nearest_filled;
+                out.stats.filled_by_full_nearest = full_nearest_filled;
             }
-            out.stats.filled_by_extension += full_nearest_filled;
-            out.stats.filled_by_full_nearest = full_nearest_filled;
         }
 
         out.albedo = before_albedo.bytes;
@@ -7863,8 +8189,8 @@ namespace
                 out.albedo[offset + 1] = sdk_byte_from_unit(clamp01(extended_texels[index].g * inv));
                 out.albedo[offset + 2] = sdk_byte_from_unit(clamp01(extended_texels[index].b * inv));
                 out.albedo[offset + 3] = before_albedo.bytes[offset + 3];
-                write_scalar(out.metallic, before_metallic.bytes_per_pixel, index, sdk_byte_from_unit(extended_texels[index].metallic * inv));
-                write_scalar(out.roughness, before_roughness.bytes_per_pixel, index, sdk_byte_from_unit(extended_texels[index].roughness * inv));
+                write_scalar(out.metallic, before_metallic.bytes_per_pixel, index, sdk_byte_from_unit(clamp01(extended_texels[index].metallic * inv)));
+                write_scalar(out.roughness, before_roughness.bytes_per_pixel, index, sdk_byte_from_unit(clamp01(extended_texels[index].roughness * inv)));
             }
         });
         for (const auto count : preserved_counts)
@@ -7890,12 +8216,16 @@ namespace
                ",\"filled_by_extension\":" + std::to_string(atlas.stats.filled_by_extension) +
                ",\"filled_by_full_nearest\":" + std::to_string(atlas.stats.filled_by_full_nearest) +
                ",\"preserved_original\":" + std::to_string(atlas.stats.preserved_original) +
+               ",\"atlas_gap_fill_radius\":" + std::to_string(atlas.stats.gap_fill_radius) +
                ",\"direct_texel_ratio\":" + std::to_string(static_cast<double>(atlas.stats.direct_texels) / pixels) +
                ",\"filled_by_extension_ratio\":" + std::to_string(static_cast<double>(atlas.stats.filled_by_extension) / pixels) +
                ",\"filled_by_full_nearest_ratio\":" + std::to_string(static_cast<double>(atlas.stats.filled_by_full_nearest) / pixels) +
                ",\"preserved_original_ratio\":" + std::to_string(static_cast<double>(atlas.stats.preserved_original) / pixels) +
                ",\"gap_fill_disabled\":true" +
-               ",\"gap_fill_mode\":\"direct_texels_only_preserve_original\"" +
+               ",\"gap_fill_mode\":\"disabled_until_uv_chart_aware_fill\"" +
+               ",\"gap_fill_disabled_reason\":\"local UV extension can cross mesh UV islands and move colors between body parts\"" +
+               ",\"material_channel_write_disabled\":false" +
+               ",\"material_channel_mode\":\"painted_texels_only\"" +
                ",\"atlas_source_samples\":" + std::to_string(atlas.stats.source_samples) +
                ",\"atlas_hash\":\"" + std::to_string(atlas.hash) + "\"" +
                ",\"atlas_metallic_hash\":\"" + std::to_string(atlas.metallic_hash) + "\"" +
@@ -8646,6 +8976,12 @@ namespace
             deep += std::string(",\"function_deproject_schema\":\"") + json_escape(function_param_schema(ref, deproject_function)) + "\"";
             deep += std::string(",\"function_hit_test_at_screen_position_available\":") + json_bool(hit_test_function != 0);
             deep += std::string(",\"function_hit_test_at_screen_position_schema\":\"") + json_escape(function_param_schema(ref, hit_test_function)) + "\"";
+            deep += std::string(",\"runtime_paint_cached_triangle_front_candidate\":") + json_bool(hit_test_function != 0 && mesh_component_available);
+            deep += ",\"runtime_paint_cached_triangle_back_candidate\":false";
+            deep += ",\"runtime_paint_cached_triangle_back_blocker\":\"HitTestAtScreenPosition uses current PlayerController screen projection and returns FScreenSpacePaintResult without FaceIndex\"";
+            deep += ",\"brush_query_face_index_available\":true";
+            deep += ",\"side_back_generation_game_thread_bound\":true";
+            deep += ",\"side_back_generation_stable_strategy\":\"bounded_screen_space_brush_query_until_exact_mesh_render_data_layout\"";
             deep += std::string(",\"screen_space_brush_query_available\":") + json_bool(query != 0);
             deep += std::string(",\"screen_space_brush_query\":\"") + hex_address(query) + "\"";
             deep += std::string(",\"screen_space_brush_query_class\":\"") + json_escape(ref.class_name(query)) + "\"";
@@ -9472,11 +9808,46 @@ namespace
 
         SdkAtlasSideBackResult side_back{};
         std::vector<FrontSample> atlas_samples = captured_front.samples;
+        const bool mirror_side_back_for_texture = false;
         const bool collect_side_back_for_texture = texture_sync_probe;
-        if (collect_side_back_for_texture)
+        if (mirror_side_back_for_texture)
+        {
+            side_back = sdk_build_front_uv_mirror_side_back_samples(captured_front.samples, before0.width, before0.height);
+            metadata += sdk_side_back_metadata(side_back) +
+                        ",\"side_back_query_skipped\":true";
+            bridge_events += ",\"atlas_side_back_done\"";
+            emit_progress("atlas_side_back_done", "side/back UV mirror extension completed", 6, 8, elapsed_now_ms(),
+                                  "\"side_back_hits\":" + std::to_string(side_back.samples.size()) +
+                                      ",\"side_back_backend\":\"front_uv_mirror_fast\"");
+            atlas_samples.insert(atlas_samples.end(), side_back.samples.begin(), side_back.samples.end());
+        }
+        else if (collect_side_back_for_texture)
         {
             side_back = sdk_collect_atlas_side_back_samples(ref, ctx, native_front, captured_front.samples, before0.width, before0.height);
-            metadata += sdk_side_back_metadata(side_back);
+            constexpr bool kEnableUnsafeFrontTextureReuseForBack = false;
+            if (kEnableUnsafeFrontTextureReuseForBack && texture_sync_probe && side_back.back_hits == 0)
+            {
+                auto front_reuse = sdk_build_front_uv_mirror_side_back_samples(captured_front.samples, before0.width, before0.height);
+                side_back.front_reuse_used = !front_reuse.samples.empty();
+                side_back.front_reuse_samples = static_cast<int>(front_reuse.samples.size());
+                for (auto& sample : front_reuse.samples)
+                {
+                    sample.atlas_priority = std::max(sample.atlas_priority, sample.floor_like ? 9 : 8);
+                    sample.atlas_radius = std::max(sample.atlas_radius, 4);
+                    sample.atlas_weight = std::max(sample.atlas_weight, sample.floor_like ? 58.0 : 50.0);
+                    side_back.samples.push_back(sample);
+                }
+                side_back.back_hits += side_back.front_reuse_samples;
+                if (side_back.front_reuse_used && (side_back.failure == "side_back_unavailable" ||
+                                                   side_back.failure == "side_back_query_no_hit" ||
+                                                   side_back.failure == "side_back_time_budget_exhausted_no_samples" ||
+                                                   side_back.failure == "side_back_attempt_budget_exhausted_no_samples"))
+                {
+                    side_back.failure = "ok_front_texture_reuse_for_back";
+                }
+            }
+            metadata += sdk_side_back_metadata(side_back) +
+                        ",\"side_back_query_skipped\":false";
             constexpr int min_side_back_hits = 64;
             if (!diagnostic_import && static_cast<int>(side_back.samples.size()) < min_side_back_hits)
             {
@@ -9494,7 +9865,8 @@ namespace
             }
             bridge_events += ",\"atlas_side_back_done\"";
             emit_progress("atlas_side_back_done", "side/back sample extension completed", 6, 8, elapsed_now_ms(),
-                                  "\"side_back_hits\":" + std::to_string(side_back.samples.size()));
+                                  "\"side_back_hits\":" + std::to_string(side_back.samples.size()) +
+                                      ",\"side_back_backend\":\"screen_space_brush_query_virtual_views\"");
             atlas_samples.insert(atlas_samples.end(), side_back.samples.begin(), side_back.samples.end());
         }
         else
@@ -9672,7 +10044,7 @@ namespace
             };
             const auto albedo_import_bytes = front_texture_import ? make_albedo_import_bytes(SdkAlbedoTransfer::SrgbToLinear) : atlas.albedo;
             const auto albedo_import_hash = hash_bytes(albedo_import_bytes);
-            const bool import_material_channels = false;
+            const bool import_material_channels = texture_sync_probe;
             metadata += std::string(",\"front_texture_albedo_import_byte_order\":\"") +
                         "rgba_identity" + "\"" +
                         ",\"front_texture_albedo_import_transfer\":\"" + std::string(front_texture_import ? "srgb_to_linear_for_runtime_material" : "identity") + "\"" +

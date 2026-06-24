@@ -10,11 +10,11 @@
 
 #include "Basic.hpp"
 
-#include "Engine_structs.hpp"
 #include "SteamWorkshopMaps_structs.hpp"
+#include "Engine_structs.hpp"
 #include "UINavigation_classes.hpp"
-#include "SlateCore_structs.hpp"
 #include "OnlineSubsystemBlueprints_structs.hpp"
+#include "SlateCore_structs.hpp"
 
 
 SDK_NAMESPACE_START

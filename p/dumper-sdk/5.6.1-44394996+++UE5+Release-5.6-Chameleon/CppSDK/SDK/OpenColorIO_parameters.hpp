@@ -10,8 +10,8 @@
 
 #include "Basic.hpp"
 
-#include "OpenColorIO_structs.hpp"
 #include "Engine_structs.hpp"
+#include "OpenColorIO_structs.hpp"
 
 
 SDK_NAMESPACE_START

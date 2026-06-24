@@ -11,9 +11,9 @@
 #include "Basic.hpp"
 
 #include "UDS_OcclusionSamplingLocation_structs.hpp"
-#include "UDS_Occlusion_Mode_structs.hpp"
 #include "Engine_structs.hpp"
 #include "Engine_classes.hpp"
+#include "UDS_Occlusion_Mode_structs.hpp"
 #include "UDS_Occlusion_Water_Behavior_structs.hpp"
 
 

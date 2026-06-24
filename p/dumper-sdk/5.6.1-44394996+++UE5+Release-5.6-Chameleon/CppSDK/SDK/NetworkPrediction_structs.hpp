@@ -63,6 +63,15 @@ public:
 };
 DUMPER7_ASSERTS_FSharedPackageMapItem;
 
+// ScriptStruct NetworkPrediction.ReplicationProxy
+// 0x0040 (0x0040 - 0x0000)
+struct alignas(0x10) FReplicationProxy final
+{
+public:
+	uint8                                         Pad_0[0x40];                                       // 0x0000(0x0040)(Fixing Struct Size After Last Property [ Dumper-7 ])
+};
+DUMPER7_ASSERTS_FReplicationProxy;
+
 // ScriptStruct NetworkPrediction.SharedPackageMap
 // 0x0010 (0x0010 - 0x0000)
 struct FSharedPackageMap final
@@ -72,14 +81,14 @@ public:
 };
 DUMPER7_ASSERTS_FSharedPackageMap;
 
-// ScriptStruct NetworkPrediction.ReplicationProxy
-// 0x0040 (0x0040 - 0x0000)
-struct alignas(0x10) FReplicationProxy final
+// ScriptStruct NetworkPrediction.ServerReplicationRPCParameter
+// 0x0018 (0x0018 - 0x0000)
+struct alignas(0x08) FServerReplicationRPCParameter final
 {
 public:
-	uint8                                         Pad_0[0x40];                                       // 0x0000(0x0040)(Fixing Struct Size After Last Property [ Dumper-7 ])
+	uint8                                         Pad_0[0x18];                                       // 0x0000(0x0018)(Fixing Struct Size After Last Property [ Dumper-7 ])
 };
-DUMPER7_ASSERTS_FReplicationProxy;
+DUMPER7_ASSERTS_FServerReplicationRPCParameter;
 
 // ScriptStruct NetworkPrediction.NetworkPredictionSettings
 // 0x0030 (0x0030 - 0x0000)
@@ -102,15 +111,6 @@ public:
 	int32                                         MaximumRemoteInputFaultLimit;                      // 0x002C(0x0004)(Edit, ZeroConstructor, Config, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 };
 DUMPER7_ASSERTS_FNetworkPredictionSettings;
-
-// ScriptStruct NetworkPrediction.ServerReplicationRPCParameter
-// 0x0018 (0x0018 - 0x0000)
-struct alignas(0x08) FServerReplicationRPCParameter final
-{
-public:
-	uint8                                         Pad_0[0x18];                                       // 0x0000(0x0018)(Fixing Struct Size After Last Property [ Dumper-7 ])
-};
-DUMPER7_ASSERTS_FServerReplicationRPCParameter;
 
 // ScriptStruct NetworkPrediction.NetworkPredictionDevHUDItem
 // 0x0028 (0x0028 - 0x0000)

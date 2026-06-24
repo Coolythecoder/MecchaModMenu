@@ -7,9 +7,9 @@ namespace meccha_sdk
 {
     namespace Offsets
     {
-        constexpr std::uintptr_t GObjects = 0x09F23DD0;
-        constexpr std::uintptr_t GWorld = 0x09C6D620;
-        constexpr std::uintptr_t ProcessEvent = 0x015D09F0;
+        constexpr std::uintptr_t GObjects = 0x09F2F350;
+        constexpr std::uintptr_t GWorld = 0x09C78620;
+        constexpr std::uintptr_t ProcessEvent = 0x015D09B0;
         constexpr int ProcessEventIdx = 0x0000004C;
     }
 
@@ -23,7 +23,7 @@ namespace meccha_sdk
         constexpr std::uintptr_t BP_PlayerController_RuntimePaintRelay = 0x0770;
         constexpr std::uintptr_t BP_FirstPersonCharacter_RuntimePaintable = 0x0B68;
         constexpr std::uintptr_t RuntimePaintable_CurrentBrushSettings = 0x0170;
-        constexpr std::uintptr_t RuntimePaintable_MaxReplicatedPaintStrokesPerTick = 0x01A8;
+        constexpr std::uintptr_t RuntimePaintable_MaxReplicatedPaintStrokesPerTick = 0x01BC;
         constexpr std::uintptr_t SceneCapture2D_CaptureComponent2D = 0x02B8;
         constexpr std::uintptr_t SceneCaptureComponent_CaptureSource = 0x0241;
         constexpr std::uintptr_t SceneCaptureComponent_CaptureFlags = 0x0242;

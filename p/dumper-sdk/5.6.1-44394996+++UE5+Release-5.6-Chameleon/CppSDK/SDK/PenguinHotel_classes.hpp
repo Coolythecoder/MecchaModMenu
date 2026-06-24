@@ -851,107 +851,63 @@ public:
 };
 DUMPER7_ASSERTS_UPenTabletBlueprintLibrary;
 
-// Class PenguinHotel.RuntimePaintableComponent
-// 0x02C8 (0x0380 - 0x00B8)
-class URuntimePaintableComponent final : public UActorComponent
+// Class PenguinHotel.RuntimePaintCopyComponent
+// 0x0238 (0x02F0 - 0x00B8)
+class URuntimePaintCopyComponent final : public UActorComponent
 {
 public:
-	struct FPaintTextureOptions                   TextureOptions;                                    // 0x00B8(0x0054)(Edit, BlueprintVisible, NoDestructor, NativeAccessSpecifierPublic)
-	uint8                                         Pad_10C[0x4];                                      // 0x010C(0x0004)(Fixing Size After Last Property [ Dumper-7 ])
-	class UMaterialInterface*                     CustomBrushMaterial;                               // 0x0110(0x0008)(Edit, BlueprintVisible, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	int32                                         TargetMaterialSlot;                                // 0x0118(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	int32                                         UVChannelIndex;                                    // 0x011C(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	float                                         MinScreenPaintDistance;                            // 0x0120(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bPoseIndependentSkeletalPainting;                  // 0x0124(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bRealtimeNetworkSync;                              // 0x0125(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_126[0x2];                                      // 0x0126(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
-	class FName                                   AlbedoParameterName;                               // 0x0128(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class FName                                   MetallicParameterName;                             // 0x0130(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class FName                                   RoughnessParameterName;                            // 0x0138(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class FName                                   HeightParameterName;                               // 0x0140(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class UTextureRenderTarget2D*                 AlbedoRenderTarget;                                // 0x0148(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class UTextureRenderTarget2D*                 MetallicRenderTarget;                              // 0x0150(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class UTextureRenderTarget2D*                 RoughnessRenderTarget;                             // 0x0158(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class UTextureRenderTarget2D*                 HeightRenderTarget;                                // 0x0160(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	class UMaterialInstanceDynamic*               DynamicMaterialInstance;                           // 0x0168(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	struct FRuntimeBrushSettings                  CurrentBrushSettings;                              // 0x0170(0x0028)(Edit, BlueprintVisible, NoDestructor, NativeAccessSpecifierPublic)
-	bool                                          bAutoRecordStrokes;                                // 0x0198(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bAutoFlushStrokes;                                 // 0x0199(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_19A[0x2];                                      // 0x019A(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
-	int32                                         AutoFlushThreshold;                                // 0x019C(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	int32                                         MaxBatchSize;                                      // 0x01A0(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	int32                                         MaxNetworkBatchesPerTick;                          // 0x01A4(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	int32                                         MaxReplicatedPaintStrokesPerTick;                  // 0x01A8(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bAsyncPrepareReplicatedPaint;                      // 0x01AC(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_1AD[0x3B];                                     // 0x01AD(0x003B)(Fixing Size After Last Property [ Dumper-7 ])
-	class UMaterialInstanceDynamic*               BrushDynamicMaterial;                              // 0x01E8(0x0008)(ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
-	TWeakObjectPtr<class UMeshComponent>          TargetMeshComponent;                               // 0x01F0(0x0008)(ExportObject, ZeroConstructor, InstancedReference, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
-	uint8                                         Pad_1F8[0x188];                                    // 0x01F8(0x0188)(Fixing Struct Size After Last Property [ Dumper-7 ])
+	class UTextureRenderTarget2D*                 AlbedoRenderTarget;                                // 0x00B8(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 MetallicRenderTarget;                              // 0x00C0(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 RoughnessRenderTarget;                             // 0x00C8(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 HeightRenderTarget;                                // 0x00D0(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UMaterialInstanceDynamic*               DynamicMaterialInstance;                           // 0x00D8(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	struct FRuntimePaintCopyPoseSnapshot          CopiedPoseSnapshot;                                // 0x00E0(0x0060)(BlueprintVisible, BlueprintReadOnly, NativeAccessSpecifierPublic)
+	class AActor*                                 ReplicatedSourceActor;                             // 0x0140(0x0008)(Net, ZeroConstructor, RepNotify, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate, TObjectPtr)
+	class FName                                   ReplicatedSourceComponentName;                     // 0x0148(0x0008)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	struct FGuid                                  ReplicatedCopyId;                                  // 0x0150(0x0010)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	class FName                                   ReplicatedDecoyMeshTag;                            // 0x0160(0x0008)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	bool                                          bReplicatedIncludeSkeletalPose;                    // 0x0168(0x0001)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	bool                                          bReplicatedApplyPoseToPoseableMesh;                // 0x0169(0x0001)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	bool                                          bReplicatedShareMaterialUntilReady;                // 0x016A(0x0001)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	bool                                          bHasReplicatedDeferredCopySetup;                   // 0x016B(0x0001)(Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	uint8                                         Pad_16C[0x4];                                      // 0x016C(0x0004)(Fixing Size After Last Property [ Dumper-7 ])
+	class URuntimePaintableComponent*             SourcePaintComponentRef;                           // 0x0170(0x0008)(ExportObject, Net, ZeroConstructor, InstancedReference, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate, TObjectPtr)
+	TWeakObjectPtr<class UMeshComponent>          TargetMesh;                                        // 0x0178(0x0008)(ExportObject, ZeroConstructor, InstancedReference, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	TWeakObjectPtr<class UMaterialInterface>      OriginalMaterial;                                  // 0x0180(0x0008)(ZeroConstructor, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	TWeakObjectPtr<class UMaterialInterface>      SharedSourceMaterial;                              // 0x0188(0x0008)(ZeroConstructor, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	TWeakObjectPtr<class URuntimePaintableComponent> PendingSourcePaintComponent;                    // 0x0190(0x0008)(ExportObject, ZeroConstructor, InstancedReference, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	TWeakObjectPtr<class UMeshComponent>          PendingSourceMesh;                                 // 0x0198(0x0008)(ExportObject, ZeroConstructor, InstancedReference, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	uint8                                         Pad_1A0[0x150];                                    // 0x01A0(0x0150)(Fixing Struct Size After Last Property [ Dumper-7 ])
 
 public:
-	void ApplyPerformancePreset(EPaintPerformancePreset Preset);
-	void BeginStroke();
-	void ClearAllChannels();
-	void ClearChannel(EPaintChannel Channel);
-	void ClearRecordedStrokes();
-	void EndStroke();
-	bool ExportChannelToBytes(EPaintChannel Channel, TArray<uint8>* OutData);
-	void FlushRecordedStrokesToServer();
-	struct FScreenSpacePaintResult HitTestAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, bool bUseCachedTriangles);
-	bool ImportChannelFromBytes(EPaintChannel Channel, const TArray<uint8>& Data);
-	bool InitializePaint(class UMeshComponent* MeshComponent);
-	void MulticastPaint(const struct FPaintStroke& Stroke);
-	void MulticastPaintBatch(const struct FPaintStrokeBatch& Batch);
-	void MulticastPaintBatchToOthers(const struct FPaintStrokeBatch& Batch);
-	void MulticastPaintToOthers(const struct FPaintStroke& Stroke);
-	void MulticastSyncChannelData(EPaintChannel Channel, const TArray<uint8>& Data);
-	void MulticastSyncCompressedChannelData(EPaintChannel Channel, const TArray<uint8>& CompressedData, int32 UncompressedSize);
-	struct FScreenSpacePaintResult PaintAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, const struct FPaintChannelData& ChannelData, EPaintChannel Channel, bool bUseCachedTriangles);
-	void PaintAtUV(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
-	void PaintAtUVWithBrush(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, const struct FRuntimeBrushSettings& BrushSettings, EPaintChannel Channel);
-	bool PaintAtWorldPosition(class UMeshComponent* MeshComponent, const struct FVector& WorldLocation, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
-	void PaintStrokeUV(const struct FVector2D& UvStart, const struct FVector2D& UvEnd, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
-	void RequestFullTextureSync();
-	void RequestPaintOnServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
-	void RequestStrokeBatchOnServer(const struct FPaintStrokeBatch& Batch);
-	void SendCustomStrokeBatchToServer(const struct FPaintStrokeBatch& Batch);
-	void SendPaintToServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
-	void SendStrokeBatchToServer();
-	void ServerPaint(const struct FPaintStroke& Stroke);
-	void ServerPaintBatch(const struct FPaintStrokeBatch& Batch);
-	void ServerRequestTextureSync();
-	void ServerSendPaint(const struct FPaintStroke& Stroke);
-	void ServerSendStrokeBatch(const struct FPaintStrokeBatch& Batch);
-	void SetBrushBlendMode(EPaintBlendMode BlendMode);
-	void SetBrushFalloff(EBrushFalloff Falloff);
-	void SetBrushHardness(float Hardness);
-	void SetBrushOpacity(float Opacity);
-	void SetBrushRadius(float Radius);
-	void SetBrushSettings(const struct FRuntimeBrushSettings& NewSettings);
-	void SetBrushTexture(class UTexture2D* Texture);
+	bool ApplyPaintSnapshot(const struct FRuntimePaintCopySnapshot& Snapshot, bool bApplyPoseToPoseableMesh);
+	bool ApplyPaintSnapshotToMesh(class UMeshComponent* TargetMeshComponent, const struct FRuntimePaintCopySnapshot& Snapshot, bool bApplyPoseToPoseableMesh);
+	bool BeginSharedMaterialCopy(class UMeshComponent* TargetMeshComponent, int32 MaterialSlot, class UMaterialInterface* SharedMaterial);
+	bool CapturePaintSnapshotFromSource(class URuntimePaintableComponent* SourcePaintComponent, class UMeshComponent* SourceMeshComponent, struct FRuntimePaintCopySnapshot* OutSnapshot, bool bIncludePose);
+	bool CopyFromPaintComponent(class URuntimePaintableComponent* SourcePaintComponent, class UMeshComponent* SourceMeshComponent, class UMeshComponent* TargetMeshComponent, bool bIncludePose, bool bApplyPoseToPoseableMesh);
+	void OnRep_DeferredCopySetup();
 
-	bool GetDominantPaintMaterialPatterns(TArray<struct FPaintMaterialPattern>* OutPatterns, int32 MaxPatterns, int32 SampleStep, float AlphaThreshold) const;
-	struct FPaintStrokeBatch GetRecordedStrokeBatch() const;
-	int32 GetRecordedStrokeCount() const;
-	class UTextureRenderTarget2D* GetRenderTarget(EPaintChannel Channel) const;
-	bool IsInitialized() const;
-	bool IsStroking() const;
+	bool CapturePoseSnapshot(class UMeshComponent* SourceMeshComponent, struct FRuntimePaintCopyPoseSnapshot* OutPoseSnapshot) const;
+	class URuntimePaintableComponent* GetSourcePaintComponent() const;
+	bool IsCopyFinalized() const;
+	bool IsSharingSourceMaterial() const;
+	bool RestoreCopiedPoseToPoseableMesh(class UPoseableMeshComponent* PoseableMeshComponent) const;
 
 public:
 	static class UClass* StaticClass()
 	{
-		STATIC_CLASS_IMPL("RuntimePaintableComponent")
+		STATIC_CLASS_IMPL("RuntimePaintCopyComponent")
 	}
 	static const class FName& StaticName()
 	{
-		STATIC_NAME_IMPL(L"RuntimePaintableComponent")
+		STATIC_NAME_IMPL(L"RuntimePaintCopyComponent")
 	}
-	static class URuntimePaintableComponent* GetDefaultObj()
+	static class URuntimePaintCopyComponent* GetDefaultObj()
 	{
-		return GetDefaultObjImpl<URuntimePaintableComponent>();
+		return GetDefaultObjImpl<URuntimePaintCopyComponent>();
 	}
 };
-DUMPER7_ASSERTS_URuntimePaintableComponent;
+DUMPER7_ASSERTS_URuntimePaintCopyComponent;
 
 // Class PenguinHotel.RuntimePaintRelayComponent
 // 0x0000 (0x00B8 - 0x00B8)
@@ -1006,6 +962,7 @@ public:
 
 public:
 	int32 GetQueuedStrokeCount() const;
+	int32 GetQueuedStrokeCountForComponent(class URuntimePaintableComponent* PaintComponent) const;
 	struct FRuntimePaintReplicationPressure GetReplicationPressure() const;
 
 public:
@@ -1190,6 +1147,125 @@ public:
 	}
 };
 DUMPER7_ASSERTS_UTextureUtilsLibrary;
+
+// Class PenguinHotel.RuntimePaintableComponent
+// 0x0300 (0x03B8 - 0x00B8)
+class URuntimePaintableComponent final : public UActorComponent
+{
+public:
+	struct FPaintTextureOptions                   TextureOptions;                                    // 0x00B8(0x0054)(Edit, BlueprintVisible, NoDestructor, NativeAccessSpecifierPublic)
+	uint8                                         Pad_10C[0x4];                                      // 0x010C(0x0004)(Fixing Size After Last Property [ Dumper-7 ])
+	class UMaterialInterface*                     CustomBrushMaterial;                               // 0x0110(0x0008)(Edit, BlueprintVisible, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	int32                                         TargetMaterialSlot;                                // 0x0118(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	int32                                         UVChannelIndex;                                    // 0x011C(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	float                                         MinScreenPaintDistance;                            // 0x0120(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bPoseIndependentSkeletalPainting;                  // 0x0124(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bRealtimeNetworkSync;                              // 0x0125(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_126[0x2];                                      // 0x0126(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
+	class FName                                   AlbedoParameterName;                               // 0x0128(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class FName                                   MetallicParameterName;                             // 0x0130(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class FName                                   RoughnessParameterName;                            // 0x0138(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class FName                                   HeightParameterName;                               // 0x0140(0x0008)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 AlbedoRenderTarget;                                // 0x0148(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 MetallicRenderTarget;                              // 0x0150(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 RoughnessRenderTarget;                             // 0x0158(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UTextureRenderTarget2D*                 HeightRenderTarget;                                // 0x0160(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	class UMaterialInstanceDynamic*               DynamicMaterialInstance;                           // 0x0168(0x0008)(BlueprintVisible, BlueprintReadOnly, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	struct FRuntimeBrushSettings                  CurrentBrushSettings;                              // 0x0170(0x0028)(Edit, BlueprintVisible, NoDestructor, NativeAccessSpecifierPublic)
+	TMulticastInlineDelegate<void(int32 OldCount, int32 NewCount)> OnDecoyActorCountChanged;         // 0x0198(0x0010)(ZeroConstructor, InstancedReference, BlueprintAssignable, NativeAccessSpecifierPublic)
+	int32                                         MaxDecoySpawnCount;                                // 0x01A8(0x0004)(Edit, BlueprintVisible, BlueprintReadOnly, Net, ZeroConstructor, IsPlainOldData, RepNotify, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAutoRecordStrokes;                                // 0x01AC(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAutoFlushStrokes;                                 // 0x01AD(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_1AE[0x2];                                      // 0x01AE(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
+	int32                                         AutoFlushThreshold;                                // 0x01B0(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	int32                                         MaxBatchSize;                                      // 0x01B4(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	int32                                         MaxNetworkBatchesPerTick;                          // 0x01B8(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	int32                                         MaxReplicatedPaintStrokesPerTick;                  // 0x01BC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAsyncPrepareReplicatedPaint;                      // 0x01C0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_1C1[0x3F];                                     // 0x01C1(0x003F)(Fixing Size After Last Property [ Dumper-7 ])
+	class UMaterialInstanceDynamic*               BrushDynamicMaterial;                              // 0x0200(0x0008)(ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	TWeakObjectPtr<class UMeshComponent>          TargetMeshComponent;                               // 0x0208(0x0008)(ExportObject, ZeroConstructor, InstancedReference, IsPlainOldData, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPrivate)
+	uint8                                         Pad_210[0xC0];                                     // 0x0210(0x00C0)(Fixing Size After Last Property [ Dumper-7 ])
+	TArray<class AActor*>                         SpawnedDecoyActors;                                // 0x02D0(0x0010)(Net, ZeroConstructor, RepNotify, UObjectWrapper, NativeAccessSpecifierPrivate, TObjectPtr)
+	uint8                                         Pad_2E0[0xD8];                                     // 0x02E0(0x00D8)(Fixing Struct Size After Last Property [ Dumper-7 ])
+
+public:
+	void ApplyPerformancePreset(EPaintPerformancePreset Preset);
+	void BeginStroke();
+	void ClearAllChannels();
+	void ClearChannel(EPaintChannel Channel);
+	void ClearRecordedStrokes();
+	void EndStroke();
+	bool ExportChannelToBytes(EPaintChannel Channel, TArray<uint8>* OutData);
+	void FlushRecordedStrokesToServer();
+	struct FScreenSpacePaintResult HitTestAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, bool bUseCachedTriangles);
+	bool ImportChannelFromBytes(EPaintChannel Channel, const TArray<uint8>& Data);
+	bool InitializePaint(class UMeshComponent* MeshComponent);
+	void MulticastApplyDecoyCopyFromLocalView(const struct FGuid& CopyId, class AActor* DecoyActor, class FName DecoyMeshTag, bool bIncludePose, bool bApplyPoseToPoseableMesh);
+	void MulticastPaint(const struct FPaintStroke& Stroke);
+	void MulticastPaintBatch(const struct FPaintStrokeBatch& Batch);
+	void MulticastPaintBatchToOthers(const struct FPaintStrokeBatch& Batch);
+	void MulticastPaintToOthers(const struct FPaintStroke& Stroke);
+	void MulticastSyncChannelData(EPaintChannel Channel, const TArray<uint8>& Data);
+	void MulticastSyncCompressedChannelData(EPaintChannel Channel, const TArray<uint8>& CompressedData, int32 UncompressedSize);
+	void OnMaxDecoySpawnCountChanged(int32 OldMaxDecoySpawnCount, int32 NewMaxDecoySpawnCount);
+	void OnRep_MaxDecoySpawnCount(int32 OldMaxDecoySpawnCount);
+	void OnRep_SpawnedDecoyActors();
+	void OnTrackedDecoyDestroyed(class AActor* DestroyedActor);
+	struct FScreenSpacePaintResult PaintAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, const struct FPaintChannelData& ChannelData, EPaintChannel Channel, bool bUseCachedTriangles);
+	void PaintAtUV(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
+	void PaintAtUVWithBrush(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, const struct FRuntimeBrushSettings& BrushSettings, EPaintChannel Channel);
+	bool PaintAtWorldPosition(class UMeshComponent* MeshComponent, const struct FVector& WorldLocation, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
+	void PaintStrokeUV(const struct FVector2D& UvStart, const struct FVector2D& UvEnd, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
+	void RequestFullTextureSync();
+	void RequestPaintOnServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
+	void RequestStrokeBatchOnServer(const struct FPaintStrokeBatch& Batch);
+	void SendCustomStrokeBatchToServer(const struct FPaintStrokeBatch& Batch);
+	void SendPaintToServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel);
+	void SendStrokeBatchToServer();
+	void ServerPaint(const struct FPaintStroke& Stroke);
+	void ServerPaintBatch(const struct FPaintStrokeBatch& Batch);
+	void ServerRequestTextureSync();
+	void ServerSendPaint(const struct FPaintStroke& Stroke);
+	void ServerSendStrokeBatch(const struct FPaintStrokeBatch& Batch);
+	void ServerSetMaxDecoySpawnCount(int32 NewMaxDecoySpawnCount);
+	void ServerSpawnDecoyCopyFromLocalView(const struct FGuid& CopyId, TSubclassOf<class AActor> DecoyActorClass, const struct FTransform& SpawnTransform, class FName DecoyMeshTag, bool bIncludePose, bool bApplyPoseToPoseableMesh);
+	void SetBrushBlendMode(EPaintBlendMode BlendMode);
+	void SetBrushFalloff(EBrushFalloff Falloff);
+	void SetBrushHardness(float Hardness);
+	void SetBrushOpacity(float Opacity);
+	void SetBrushRadius(float Radius);
+	void SetBrushSettings(const struct FRuntimeBrushSettings& NewSettings);
+	void SetBrushTexture(class UTexture2D* Texture);
+	void SetMaxDecoySpawnCount(int32 NewMaxDecoySpawnCount);
+	bool SpawnDecoyCopyFromLocalView(TSubclassOf<class AActor> DecoyActorClass, const struct FTransform& SpawnTransform, struct FGuid* OutCopyId, class FName DecoyMeshTag, bool bIncludePose, bool bApplyPoseToPoseableMesh);
+
+	bool GetDominantPaintMaterialPatterns(TArray<struct FPaintMaterialPattern>* OutPatterns, int32 MaxPatterns, int32 SampleStep, float AlphaThreshold) const;
+	class UMeshComponent* GetInitializedPaintMesh() const;
+	int32 GetMaxDecoySpawnCount() const;
+	struct FPaintStrokeBatch GetRecordedStrokeBatch() const;
+	int32 GetRecordedStrokeCount() const;
+	class UTextureRenderTarget2D* GetRenderTarget(EPaintChannel Channel) const;
+	int32 GetSpawnedDecoyActorCount() const;
+	void GetSpawnedDecoyActors(TArray<class AActor*>* OutDecoyActors) const;
+	bool IsInitialized() const;
+	bool IsStroking() const;
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("RuntimePaintableComponent")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"RuntimePaintableComponent")
+	}
+	static class URuntimePaintableComponent* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<URuntimePaintableComponent>();
+	}
+};
+DUMPER7_ASSERTS_URuntimePaintableComponent;
 
 // Class PenguinHotel.MapSortBlueprintLibrary
 // 0x0000 (0x0028 - 0x0028)

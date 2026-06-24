@@ -12,12 +12,12 @@
 
 #include "Engine_structs.hpp"
 #include "Engine_classes.hpp"
+#include "ENUM_ClassType_structs.hpp"
 #include "CoreUObject_structs.hpp"
-#include "ENUM_ItemBindType_structs.hpp"
 #include "ENUM_CameraMode_structs.hpp"
 #include "ST_CopyDatas_structs.hpp"
+#include "ENUM_ItemBindType_structs.hpp"
 #include "ENUM_HandType_structs.hpp"
-#include "ENUM_ClassType_structs.hpp"
 
 
 SDK_NAMESPACE_START
@@ -61,7 +61,7 @@ public:
 	void Fix();
 	void GetItemInfo(ENUM_HandType* HandType, ENUM_ClassType* ClassType, bool* NotPickUp, struct FRotator* HaveRotation, struct FVector* Add_Position, bool* IsBoneAttach, ENUM_ItemBindType* BindType, class FName* BoneName, struct FST_ItemCoreDatas* CoreDatas);
 	void GetKeyValues(TArray<class FString>* HaveKeys_0);
-	void GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter);
+	void GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter);
 	void InteractItem();
 	void IsChangeImage(bool* IsInteract, class FText* OverrideText);
 	void IsInPhoto(bool* Value);

@@ -3652,205 +3652,24 @@ bool UPenTabletBlueprintLibrary::IsPenTabletConnected()
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.ApplyPerformancePreset
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// EPaintPerformancePreset                 Preset                                                 (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::ApplyPerformancePreset(EPaintPerformancePreset Preset)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ApplyPerformancePreset");
-
-	Params::RuntimePaintableComponent_ApplyPerformancePreset Parms{};
-
-	Parms.Preset = Preset;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.BeginStroke
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::BeginStroke()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "BeginStroke");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ClearAllChannels
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::ClearAllChannels()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ClearAllChannels");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ClearChannel
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::ClearChannel(EPaintChannel Channel)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ClearChannel");
-
-	Params::RuntimePaintableComponent_ClearChannel Parms{};
-
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ClearRecordedStrokes
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::ClearRecordedStrokes()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ClearRecordedStrokes");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.EndStroke
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::EndStroke()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "EndStroke");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ExportChannelToBytes
+// Function PenguinHotel.RuntimePaintCopyComponent.ApplyPaintSnapshot
 // (Final, Native, Public, HasOutParams, BlueprintCallable)
 // Parameters:
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// TArray<uint8>*                          OutData                                                (Parm, OutParm, ZeroConstructor, NativeAccessSpecifierPublic)
+// const struct FRuntimePaintCopySnapshot& Snapshot                                               (ConstParm, Parm, OutParm, ReferenceParm, NativeAccessSpecifierPublic)
+// bool                                    bApplyPoseToPoseableMesh                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::ExportChannelToBytes(EPaintChannel Channel, TArray<uint8>* OutData)
+bool URuntimePaintCopyComponent::ApplyPaintSnapshot(const struct FRuntimePaintCopySnapshot& Snapshot, bool bApplyPoseToPoseableMesh)
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ExportChannelToBytes");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "ApplyPaintSnapshot");
 
-	Params::RuntimePaintableComponent_ExportChannelToBytes Parms{};
+	Params::RuntimePaintCopyComponent_ApplyPaintSnapshot Parms{};
 
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	if (OutData != nullptr)
-		*OutData = std::move(Parms.OutData);
-
-	return Parms.ReturnValue;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.FlushRecordedStrokesToServer
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::FlushRecordedStrokesToServer()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "FlushRecordedStrokesToServer");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.HitTestAtScreenPosition
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FVector2D&                 ScreenPosition                                         (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// class APlayerController*                PlayerController                                       (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// bool                                    bUseCachedTriangles                                    (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// struct FScreenSpacePaintResult          ReturnValue                                            (Parm, OutParm, ReturnParm, NoDestructor, NativeAccessSpecifierPublic)
-
-struct FScreenSpacePaintResult URuntimePaintableComponent::HitTestAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, bool bUseCachedTriangles)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "HitTestAtScreenPosition");
-
-	Params::RuntimePaintableComponent_HitTestAtScreenPosition Parms{};
-
-	Parms.MeshComponent = MeshComponent;
-	Parms.ScreenPosition = std::move(ScreenPosition);
-	Parms.PlayerController = PlayerController;
-	Parms.bUseCachedTriangles = bUseCachedTriangles;
+	Parms.Snapshot = std::move(Snapshot);
+	Parms.bApplyPoseToPoseableMesh = bApplyPoseToPoseableMesh;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -3863,24 +3682,26 @@ struct FScreenSpacePaintResult URuntimePaintableComponent::HitTestAtScreenPositi
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.ImportChannelFromBytes
+// Function PenguinHotel.RuntimePaintCopyComponent.ApplyPaintSnapshotToMesh
 // (Final, Native, Public, HasOutParams, BlueprintCallable)
 // Parameters:
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const TArray<uint8>&                    Data                                                   (ConstParm, Parm, OutParm, ZeroConstructor, ReferenceParm, NativeAccessSpecifierPublic)
+// class UMeshComponent*                   TargetMeshComponent                                    (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FRuntimePaintCopySnapshot& Snapshot                                               (ConstParm, Parm, OutParm, ReferenceParm, NativeAccessSpecifierPublic)
+// bool                                    bApplyPoseToPoseableMesh                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::ImportChannelFromBytes(EPaintChannel Channel, const TArray<uint8>& Data)
+bool URuntimePaintCopyComponent::ApplyPaintSnapshotToMesh(class UMeshComponent* TargetMeshComponent, const struct FRuntimePaintCopySnapshot& Snapshot, bool bApplyPoseToPoseableMesh)
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ImportChannelFromBytes");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "ApplyPaintSnapshotToMesh");
 
-	Params::RuntimePaintableComponent_ImportChannelFromBytes Parms{};
+	Params::RuntimePaintCopyComponent_ApplyPaintSnapshotToMesh Parms{};
 
-	Parms.Channel = Channel;
-	Parms.Data = std::move(Data);
+	Parms.TargetMeshComponent = TargetMeshComponent;
+	Parms.Snapshot = std::move(Snapshot);
+	Parms.bApplyPoseToPoseableMesh = bApplyPoseToPoseableMesh;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -3893,22 +3714,26 @@ bool URuntimePaintableComponent::ImportChannelFromBytes(EPaintChannel Channel, c
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.InitializePaint
+// Function PenguinHotel.RuntimePaintCopyComponent.BeginSharedMaterialCopy
 // (Final, Native, Public, BlueprintCallable)
 // Parameters:
-// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UMeshComponent*                   TargetMeshComponent                                    (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// int32                                   MaterialSlot                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UMaterialInterface*               SharedMaterial                                         (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::InitializePaint(class UMeshComponent* MeshComponent)
+bool URuntimePaintCopyComponent::BeginSharedMaterialCopy(class UMeshComponent* TargetMeshComponent, int32 MaterialSlot, class UMaterialInterface* SharedMaterial)
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "InitializePaint");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "BeginSharedMaterialCopy");
 
-	Params::RuntimePaintableComponent_InitializePaint Parms{};
+	Params::RuntimePaintCopyComponent_BeginSharedMaterialCopy Parms{};
 
-	Parms.MeshComponent = MeshComponent;
+	Parms.TargetMeshComponent = TargetMeshComponent;
+	Parms.MaterialSlot = MaterialSlot;
+	Parms.SharedMaterial = SharedMaterial;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -3921,282 +3746,66 @@ bool URuntimePaintableComponent::InitializePaint(class UMeshComponent* MeshCompo
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.MulticastPaint
-// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Function PenguinHotel.RuntimePaintCopyComponent.CapturePaintSnapshotFromSource
+// (Final, Native, Public, HasOutParams, BlueprintCallable)
 // Parameters:
-// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::MulticastPaint(const struct FPaintStroke& Stroke)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaint");
-
-	Params::RuntimePaintableComponent_MulticastPaint Parms{};
-
-	Parms.Stroke = std::move(Stroke);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.MulticastPaintBatch
-// (Net, NetReliable, Native, Event, NetMulticast, Protected)
-// Parameters:
-// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::MulticastPaintBatch(const struct FPaintStrokeBatch& Batch)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaintBatch");
-
-	Params::RuntimePaintableComponent_MulticastPaintBatch Parms{};
-
-	Parms.Batch = std::move(Batch);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.MulticastPaintBatchToOthers
-// (Net, NetReliable, Native, Event, NetMulticast, Protected)
-// Parameters:
-// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::MulticastPaintBatchToOthers(const struct FPaintStrokeBatch& Batch)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaintBatchToOthers");
-
-	Params::RuntimePaintableComponent_MulticastPaintBatchToOthers Parms{};
-
-	Parms.Batch = std::move(Batch);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.MulticastPaintToOthers
-// (Net, NetReliable, Native, Event, NetMulticast, Protected)
-// Parameters:
-// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::MulticastPaintToOthers(const struct FPaintStroke& Stroke)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaintToOthers");
-
-	Params::RuntimePaintableComponent_MulticastPaintToOthers Parms{};
-
-	Parms.Stroke = std::move(Stroke);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.MulticastSyncChannelData
-// (Net, NetReliable, Native, Event, NetMulticast, Protected)
-// Parameters:
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const TArray<uint8>&                    Data                                                   (ConstParm, Parm, ZeroConstructor, ReferenceParm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::MulticastSyncChannelData(EPaintChannel Channel, const TArray<uint8>& Data)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastSyncChannelData");
-
-	Params::RuntimePaintableComponent_MulticastSyncChannelData Parms{};
-
-	Parms.Channel = Channel;
-	Parms.Data = std::move(Data);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.MulticastSyncCompressedChannelData
-// (Net, NetReliable, Native, Event, NetMulticast, Protected)
-// Parameters:
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const TArray<uint8>&                    CompressedData                                         (ConstParm, Parm, ZeroConstructor, ReferenceParm, NativeAccessSpecifierPublic)
-// int32                                   UncompressedSize                                       (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::MulticastSyncCompressedChannelData(EPaintChannel Channel, const TArray<uint8>& CompressedData, int32 UncompressedSize)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastSyncCompressedChannelData");
-
-	Params::RuntimePaintableComponent_MulticastSyncCompressedChannelData Parms{};
-
-	Parms.Channel = Channel;
-	Parms.CompressedData = std::move(CompressedData);
-	Parms.UncompressedSize = UncompressedSize;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.PaintAtScreenPosition
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FVector2D&                 ScreenPosition                                         (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// class APlayerController*                PlayerController                                       (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// bool                                    bUseCachedTriangles                                    (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// struct FScreenSpacePaintResult          ReturnValue                                            (Parm, OutParm, ReturnParm, NoDestructor, NativeAccessSpecifierPublic)
-
-struct FScreenSpacePaintResult URuntimePaintableComponent::PaintAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, const struct FPaintChannelData& ChannelData, EPaintChannel Channel, bool bUseCachedTriangles)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtScreenPosition");
-
-	Params::RuntimePaintableComponent_PaintAtScreenPosition Parms{};
-
-	Parms.MeshComponent = MeshComponent;
-	Parms.ScreenPosition = std::move(ScreenPosition);
-	Parms.PlayerController = PlayerController;
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.Channel = Channel;
-	Parms.bUseCachedTriangles = bUseCachedTriangles;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.PaintAtUV
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::PaintAtUV(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtUV");
-
-	Params::RuntimePaintableComponent_PaintAtUV Parms{};
-
-	Parms.Uv = std::move(Uv);
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.PaintAtUVWithBrush
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// const struct FRuntimeBrushSettings&     BrushSettings                                          (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::PaintAtUVWithBrush(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, const struct FRuntimeBrushSettings& BrushSettings, EPaintChannel Channel)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtUVWithBrush");
-
-	Params::RuntimePaintableComponent_PaintAtUVWithBrush Parms{};
-
-	Parms.Uv = std::move(Uv);
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.BrushSettings = std::move(BrushSettings);
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.PaintAtWorldPosition
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FVector&                   WorldLocation                                          (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class URuntimePaintableComponent*       SourcePaintComponent                                   (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UMeshComponent*                   SourceMeshComponent                                    (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// struct FRuntimePaintCopySnapshot*       OutSnapshot                                            (Parm, OutParm, NativeAccessSpecifierPublic)
+// bool                                    bIncludePose                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::PaintAtWorldPosition(class UMeshComponent* MeshComponent, const struct FVector& WorldLocation, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+bool URuntimePaintCopyComponent::CapturePaintSnapshotFromSource(class URuntimePaintableComponent* SourcePaintComponent, class UMeshComponent* SourceMeshComponent, struct FRuntimePaintCopySnapshot* OutSnapshot, bool bIncludePose)
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtWorldPosition");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "CapturePaintSnapshotFromSource");
 
-	Params::RuntimePaintableComponent_PaintAtWorldPosition Parms{};
+	Params::RuntimePaintCopyComponent_CapturePaintSnapshotFromSource Parms{};
 
-	Parms.MeshComponent = MeshComponent;
-	Parms.WorldLocation = std::move(WorldLocation);
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.Channel = Channel;
+	Parms.SourcePaintComponent = SourcePaintComponent;
+	Parms.SourceMeshComponent = SourceMeshComponent;
+	Parms.bIncludePose = bIncludePose;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	if (OutSnapshot != nullptr)
+		*OutSnapshot = std::move(Parms.OutSnapshot);
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintCopyComponent.CopyFromPaintComponent
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// class URuntimePaintableComponent*       SourcePaintComponent                                   (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UMeshComponent*                   SourceMeshComponent                                    (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UMeshComponent*                   TargetMeshComponent                                    (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bIncludePose                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bApplyPoseToPoseableMesh                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintCopyComponent::CopyFromPaintComponent(class URuntimePaintableComponent* SourcePaintComponent, class UMeshComponent* SourceMeshComponent, class UMeshComponent* TargetMeshComponent, bool bIncludePose, bool bApplyPoseToPoseableMesh)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "CopyFromPaintComponent");
+
+	Params::RuntimePaintCopyComponent_CopyFromPaintComponent Parms{};
+
+	Parms.SourcePaintComponent = SourcePaintComponent;
+	Parms.SourceMeshComponent = SourceMeshComponent;
+	Parms.TargetMeshComponent = TargetMeshComponent;
+	Parms.bIncludePose = bIncludePose;
+	Parms.bApplyPoseToPoseableMesh = bApplyPoseToPoseableMesh;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -4209,46 +3818,15 @@ bool URuntimePaintableComponent::PaintAtWorldPosition(class UMeshComponent* Mesh
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.PaintStrokeUV
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// const struct FVector2D&                 UvStart                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FVector2D&                 UvEnd                                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// Function PenguinHotel.RuntimePaintCopyComponent.OnRep_DeferredCopySetup
+// (Final, Native, Private)
 
-void URuntimePaintableComponent::PaintStrokeUV(const struct FVector2D& UvStart, const struct FVector2D& UvEnd, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+void URuntimePaintCopyComponent::OnRep_DeferredCopySetup()
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "PaintStrokeUV");
-
-	Params::RuntimePaintableComponent_PaintStrokeUV Parms{};
-
-	Parms.UvStart = std::move(UvStart);
-	Parms.UvEnd = std::move(UvEnd);
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.RequestFullTextureSync
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::RequestFullTextureSync()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "RequestFullTextureSync");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "OnRep_DeferredCopySetup");
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -4259,448 +3837,23 @@ void URuntimePaintableComponent::RequestFullTextureSync()
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.RequestPaintOnServer
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::RequestPaintOnServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "RequestPaintOnServer");
-
-	Params::RuntimePaintableComponent_RequestPaintOnServer Parms{};
-
-	Parms.Uv = std::move(Uv);
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.RequestStrokeBatchOnServer
-// (Final, Native, Public, HasOutParams, BlueprintCallable)
-// Parameters:
-// const struct FPaintStrokeBatch&         Batch                                                  (ConstParm, Parm, OutParm, ReferenceParm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::RequestStrokeBatchOnServer(const struct FPaintStrokeBatch& Batch)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "RequestStrokeBatchOnServer");
-
-	Params::RuntimePaintableComponent_RequestStrokeBatchOnServer Parms{};
-
-	Parms.Batch = std::move(Batch);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SendCustomStrokeBatchToServer
-// (Final, Native, Public, HasOutParams, BlueprintCallable)
-// Parameters:
-// const struct FPaintStrokeBatch&         Batch                                                  (ConstParm, Parm, OutParm, ReferenceParm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SendCustomStrokeBatchToServer(const struct FPaintStrokeBatch& Batch)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SendCustomStrokeBatchToServer");
-
-	Params::RuntimePaintableComponent_SendCustomStrokeBatchToServer Parms{};
-
-	Parms.Batch = std::move(Batch);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SendPaintToServer
-// (Final, Native, Public, HasDefaults, BlueprintCallable)
-// Parameters:
-// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SendPaintToServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SendPaintToServer");
-
-	Params::RuntimePaintableComponent_SendPaintToServer Parms{};
-
-	Parms.Uv = std::move(Uv);
-	Parms.ChannelData = std::move(ChannelData);
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SendStrokeBatchToServer
-// (Final, Native, Public, BlueprintCallable)
-
-void URuntimePaintableComponent::SendStrokeBatchToServer()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SendStrokeBatchToServer");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ServerPaint
-// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
-// Parameters:
-// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::ServerPaint(const struct FPaintStroke& Stroke)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ServerPaint");
-
-	Params::RuntimePaintableComponent_ServerPaint Parms{};
-
-	Parms.Stroke = std::move(Stroke);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ServerPaintBatch
-// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
-// Parameters:
-// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::ServerPaintBatch(const struct FPaintStrokeBatch& Batch)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ServerPaintBatch");
-
-	Params::RuntimePaintableComponent_ServerPaintBatch Parms{};
-
-	Parms.Batch = std::move(Batch);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ServerRequestTextureSync
-// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
-
-void URuntimePaintableComponent::ServerRequestTextureSync()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ServerRequestTextureSync");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ServerSendPaint
-// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
-// Parameters:
-// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::ServerSendPaint(const struct FPaintStroke& Stroke)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ServerSendPaint");
-
-	Params::RuntimePaintableComponent_ServerSendPaint Parms{};
-
-	Parms.Stroke = std::move(Stroke);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.ServerSendStrokeBatch
-// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
-// Parameters:
-// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::ServerSendStrokeBatch(const struct FPaintStrokeBatch& Batch)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "ServerSendStrokeBatch");
-
-	Params::RuntimePaintableComponent_ServerSendStrokeBatch Parms{};
-
-	Parms.Batch = std::move(Batch);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushBlendMode
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// EPaintBlendMode                         BlendMode                                              (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushBlendMode(EPaintBlendMode BlendMode)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushBlendMode");
-
-	Params::RuntimePaintableComponent_SetBrushBlendMode Parms{};
-
-	Parms.BlendMode = BlendMode;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushFalloff
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// EBrushFalloff                           Falloff                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushFalloff(EBrushFalloff Falloff)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushFalloff");
-
-	Params::RuntimePaintableComponent_SetBrushFalloff Parms{};
-
-	Parms.Falloff = Falloff;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushHardness
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// float                                   Hardness                                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushHardness(float Hardness)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushHardness");
-
-	Params::RuntimePaintableComponent_SetBrushHardness Parms{};
-
-	Parms.Hardness = Hardness;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushOpacity
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// float                                   Opacity                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushOpacity(float Opacity)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushOpacity");
-
-	Params::RuntimePaintableComponent_SetBrushOpacity Parms{};
-
-	Parms.Opacity = Opacity;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushRadius
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// float                                   Radius                                                 (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushRadius(float Radius)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushRadius");
-
-	Params::RuntimePaintableComponent_SetBrushRadius Parms{};
-
-	Parms.Radius = Radius;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushSettings
-// (Final, Native, Public, HasOutParams, BlueprintCallable)
-// Parameters:
-// const struct FRuntimeBrushSettings&     NewSettings                                            (ConstParm, Parm, OutParm, ReferenceParm, NoDestructor, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushSettings(const struct FRuntimeBrushSettings& NewSettings)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushSettings");
-
-	Params::RuntimePaintableComponent_SetBrushSettings Parms{};
-
-	Parms.NewSettings = std::move(NewSettings);
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.SetBrushTexture
-// (Final, Native, Public, BlueprintCallable)
-// Parameters:
-// class UTexture2D*                       Texture                                                (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void URuntimePaintableComponent::SetBrushTexture(class UTexture2D* Texture)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushTexture");
-
-	Params::RuntimePaintableComponent_SetBrushTexture Parms{};
-
-	Parms.Texture = Texture;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.GetDominantPaintMaterialPatterns
+// Function PenguinHotel.RuntimePaintCopyComponent.CapturePoseSnapshot
 // (Final, Native, Public, HasOutParams, BlueprintCallable, BlueprintPure, Const)
 // Parameters:
-// TArray<struct FPaintMaterialPattern>*   OutPatterns                                            (Parm, OutParm, ZeroConstructor, NativeAccessSpecifierPublic)
-// int32                                   MaxPatterns                                            (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// int32                                   SampleStep                                             (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// float                                   AlphaThreshold                                         (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UMeshComponent*                   SourceMeshComponent                                    (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// struct FRuntimePaintCopyPoseSnapshot*   OutPoseSnapshot                                        (Parm, OutParm, NativeAccessSpecifierPublic)
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::GetDominantPaintMaterialPatterns(TArray<struct FPaintMaterialPattern>* OutPatterns, int32 MaxPatterns, int32 SampleStep, float AlphaThreshold) const
+bool URuntimePaintCopyComponent::CapturePoseSnapshot(class UMeshComponent* SourceMeshComponent, struct FRuntimePaintCopyPoseSnapshot* OutPoseSnapshot) const
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "GetDominantPaintMaterialPatterns");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "CapturePoseSnapshot");
 
-	Params::RuntimePaintableComponent_GetDominantPaintMaterialPatterns Parms{};
+	Params::RuntimePaintCopyComponent_CapturePoseSnapshot Parms{};
 
-	Parms.MaxPatterns = MaxPatterns;
-	Parms.SampleStep = SampleStep;
-	Parms.AlphaThreshold = AlphaThreshold;
+	Parms.SourceMeshComponent = SourceMeshComponent;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -4709,26 +3862,26 @@ bool URuntimePaintableComponent::GetDominantPaintMaterialPatterns(TArray<struct 
 
 	Func->FunctionFlags = Flgs;
 
-	if (OutPatterns != nullptr)
-		*OutPatterns = std::move(Parms.OutPatterns);
+	if (OutPoseSnapshot != nullptr)
+		*OutPoseSnapshot = std::move(Parms.OutPoseSnapshot);
 
 	return Parms.ReturnValue;
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.GetRecordedStrokeBatch
+// Function PenguinHotel.RuntimePaintCopyComponent.GetSourcePaintComponent
 // (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
 // Parameters:
-// struct FPaintStrokeBatch                ReturnValue                                            (Parm, OutParm, ReturnParm, NativeAccessSpecifierPublic)
+// class URuntimePaintableComponent*       ReturnValue                                            (ExportObject, Parm, OutParm, ZeroConstructor, ReturnParm, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-struct FPaintStrokeBatch URuntimePaintableComponent::GetRecordedStrokeBatch() const
+class URuntimePaintableComponent* URuntimePaintCopyComponent::GetSourcePaintComponent() const
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "GetRecordedStrokeBatch");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "GetSourcePaintComponent");
 
-	Params::RuntimePaintableComponent_GetRecordedStrokeBatch Parms{};
+	Params::RuntimePaintCopyComponent_GetSourcePaintComponent Parms{};
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -4741,72 +3894,19 @@ struct FPaintStrokeBatch URuntimePaintableComponent::GetRecordedStrokeBatch() co
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.GetRecordedStrokeCount
-// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
-// Parameters:
-// int32                                   ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-int32 URuntimePaintableComponent::GetRecordedStrokeCount() const
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "GetRecordedStrokeCount");
-
-	Params::RuntimePaintableComponent_GetRecordedStrokeCount Parms{};
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.GetRenderTarget
-// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
-// Parameters:
-// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// class UTextureRenderTarget2D*           ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-class UTextureRenderTarget2D* URuntimePaintableComponent::GetRenderTarget(EPaintChannel Channel) const
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "GetRenderTarget");
-
-	Params::RuntimePaintableComponent_GetRenderTarget Parms{};
-
-	Parms.Channel = Channel;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
-// Function PenguinHotel.RuntimePaintableComponent.IsInitialized
+// Function PenguinHotel.RuntimePaintCopyComponent.IsCopyFinalized
 // (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
 // Parameters:
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::IsInitialized() const
+bool URuntimePaintCopyComponent::IsCopyFinalized() const
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "IsInitialized");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "IsCopyFinalized");
 
-	Params::RuntimePaintableComponent_IsInitialized Parms{};
+	Params::RuntimePaintCopyComponent_IsCopyFinalized Parms{};
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -4819,19 +3919,47 @@ bool URuntimePaintableComponent::IsInitialized() const
 }
 
 
-// Function PenguinHotel.RuntimePaintableComponent.IsStroking
+// Function PenguinHotel.RuntimePaintCopyComponent.IsSharingSourceMaterial
 // (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
 // Parameters:
 // bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 
-bool URuntimePaintableComponent::IsStroking() const
+bool URuntimePaintCopyComponent::IsSharingSourceMaterial() const
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("RuntimePaintableComponent", "IsStroking");
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "IsSharingSourceMaterial");
 
-	Params::RuntimePaintableComponent_IsStroking Parms{};
+	Params::RuntimePaintCopyComponent_IsSharingSourceMaterial Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintCopyComponent.RestoreCopiedPoseToPoseableMesh
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// class UPoseableMeshComponent*           PoseableMeshComponent                                  (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintCopyComponent::RestoreCopiedPoseToPoseableMesh(class UPoseableMeshComponent* PoseableMeshComponent) const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintCopyComponent", "RestoreCopiedPoseToPoseableMesh");
+
+	Params::RuntimePaintCopyComponent_RestoreCopiedPoseToPoseableMesh Parms{};
+
+	Parms.PoseableMeshComponent = PoseableMeshComponent;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -5015,6 +4143,34 @@ int32 URuntimePaintReplicationManager::GetQueuedStrokeCount() const
 		Func = Class->GetFunction("RuntimePaintReplicationManager", "GetQueuedStrokeCount");
 
 	Params::RuntimePaintReplicationManager_GetQueuedStrokeCount Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintReplicationManager.GetQueuedStrokeCountForComponent
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// class URuntimePaintableComponent*       PaintComponent                                         (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// int32                                   ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+int32 URuntimePaintReplicationManager::GetQueuedStrokeCountForComponent(class URuntimePaintableComponent* PaintComponent) const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintReplicationManager", "GetQueuedStrokeCountForComponent");
+
+	Params::RuntimePaintReplicationManager_GetQueuedStrokeCountForComponent Parms{};
+
+	Parms.PaintComponent = PaintComponent;
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;
@@ -6506,6 +5662,1548 @@ class UTexture2D* UTextureUtilsLibrary::ConvertToTexture2D(class UTexture* Textu
 	Func->FunctionFlags |= 0x400;
 
 	GetDefaultObj()->ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ApplyPerformancePreset
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// EPaintPerformancePreset                 Preset                                                 (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ApplyPerformancePreset(EPaintPerformancePreset Preset)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ApplyPerformancePreset");
+
+	Params::RuntimePaintableComponent_ApplyPerformancePreset Parms{};
+
+	Parms.Preset = Preset;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.BeginStroke
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::BeginStroke()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "BeginStroke");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ClearAllChannels
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::ClearAllChannels()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ClearAllChannels");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ClearChannel
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ClearChannel(EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ClearChannel");
+
+	Params::RuntimePaintableComponent_ClearChannel Parms{};
+
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ClearRecordedStrokes
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::ClearRecordedStrokes()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ClearRecordedStrokes");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.EndStroke
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::EndStroke()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "EndStroke");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ExportChannelToBytes
+// (Final, Native, Public, HasOutParams, BlueprintCallable)
+// Parameters:
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// TArray<uint8>*                          OutData                                                (Parm, OutParm, ZeroConstructor, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::ExportChannelToBytes(EPaintChannel Channel, TArray<uint8>* OutData)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ExportChannelToBytes");
+
+	Params::RuntimePaintableComponent_ExportChannelToBytes Parms{};
+
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	if (OutData != nullptr)
+		*OutData = std::move(Parms.OutData);
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.FlushRecordedStrokesToServer
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::FlushRecordedStrokesToServer()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "FlushRecordedStrokesToServer");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.HitTestAtScreenPosition
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FVector2D&                 ScreenPosition                                         (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class APlayerController*                PlayerController                                       (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bUseCachedTriangles                                    (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// struct FScreenSpacePaintResult          ReturnValue                                            (Parm, OutParm, ReturnParm, NoDestructor, NativeAccessSpecifierPublic)
+
+struct FScreenSpacePaintResult URuntimePaintableComponent::HitTestAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, bool bUseCachedTriangles)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "HitTestAtScreenPosition");
+
+	Params::RuntimePaintableComponent_HitTestAtScreenPosition Parms{};
+
+	Parms.MeshComponent = MeshComponent;
+	Parms.ScreenPosition = std::move(ScreenPosition);
+	Parms.PlayerController = PlayerController;
+	Parms.bUseCachedTriangles = bUseCachedTriangles;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ImportChannelFromBytes
+// (Final, Native, Public, HasOutParams, BlueprintCallable)
+// Parameters:
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const TArray<uint8>&                    Data                                                   (ConstParm, Parm, OutParm, ZeroConstructor, ReferenceParm, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::ImportChannelFromBytes(EPaintChannel Channel, const TArray<uint8>& Data)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ImportChannelFromBytes");
+
+	Params::RuntimePaintableComponent_ImportChannelFromBytes Parms{};
+
+	Parms.Channel = Channel;
+	Parms.Data = std::move(Data);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.InitializePaint
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::InitializePaint(class UMeshComponent* MeshComponent)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "InitializePaint");
+
+	Params::RuntimePaintableComponent_InitializePaint Parms{};
+
+	Parms.MeshComponent = MeshComponent;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastApplyDecoyCopyFromLocalView
+// (Net, NetReliable, Native, Event, NetMulticast, Protected, HasDefaults)
+// Parameters:
+// const struct FGuid&                     CopyId                                                 (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class AActor*                           DecoyActor                                             (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class FName                             DecoyMeshTag                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bIncludePose                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bApplyPoseToPoseableMesh                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastApplyDecoyCopyFromLocalView(const struct FGuid& CopyId, class AActor* DecoyActor, class FName DecoyMeshTag, bool bIncludePose, bool bApplyPoseToPoseableMesh)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastApplyDecoyCopyFromLocalView");
+
+	Params::RuntimePaintableComponent_MulticastApplyDecoyCopyFromLocalView Parms{};
+
+	Parms.CopyId = std::move(CopyId);
+	Parms.DecoyActor = DecoyActor;
+	Parms.DecoyMeshTag = DecoyMeshTag;
+	Parms.bIncludePose = bIncludePose;
+	Parms.bApplyPoseToPoseableMesh = bApplyPoseToPoseableMesh;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastPaint
+// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Parameters:
+// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastPaint(const struct FPaintStroke& Stroke)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaint");
+
+	Params::RuntimePaintableComponent_MulticastPaint Parms{};
+
+	Parms.Stroke = std::move(Stroke);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastPaintBatch
+// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Parameters:
+// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastPaintBatch(const struct FPaintStrokeBatch& Batch)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaintBatch");
+
+	Params::RuntimePaintableComponent_MulticastPaintBatch Parms{};
+
+	Parms.Batch = std::move(Batch);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastPaintBatchToOthers
+// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Parameters:
+// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastPaintBatchToOthers(const struct FPaintStrokeBatch& Batch)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaintBatchToOthers");
+
+	Params::RuntimePaintableComponent_MulticastPaintBatchToOthers Parms{};
+
+	Parms.Batch = std::move(Batch);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastPaintToOthers
+// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Parameters:
+// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastPaintToOthers(const struct FPaintStroke& Stroke)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastPaintToOthers");
+
+	Params::RuntimePaintableComponent_MulticastPaintToOthers Parms{};
+
+	Parms.Stroke = std::move(Stroke);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastSyncChannelData
+// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Parameters:
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const TArray<uint8>&                    Data                                                   (ConstParm, Parm, ZeroConstructor, ReferenceParm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastSyncChannelData(EPaintChannel Channel, const TArray<uint8>& Data)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastSyncChannelData");
+
+	Params::RuntimePaintableComponent_MulticastSyncChannelData Parms{};
+
+	Parms.Channel = Channel;
+	Parms.Data = std::move(Data);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.MulticastSyncCompressedChannelData
+// (Net, NetReliable, Native, Event, NetMulticast, Protected)
+// Parameters:
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const TArray<uint8>&                    CompressedData                                         (ConstParm, Parm, ZeroConstructor, ReferenceParm, NativeAccessSpecifierPublic)
+// int32                                   UncompressedSize                                       (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::MulticastSyncCompressedChannelData(EPaintChannel Channel, const TArray<uint8>& CompressedData, int32 UncompressedSize)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "MulticastSyncCompressedChannelData");
+
+	Params::RuntimePaintableComponent_MulticastSyncCompressedChannelData Parms{};
+
+	Parms.Channel = Channel;
+	Parms.CompressedData = std::move(CompressedData);
+	Parms.UncompressedSize = UncompressedSize;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.OnMaxDecoySpawnCountChanged
+// (Event, Public, BlueprintEvent)
+// Parameters:
+// int32                                   OldMaxDecoySpawnCount                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// int32                                   NewMaxDecoySpawnCount                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::OnMaxDecoySpawnCountChanged(int32 OldMaxDecoySpawnCount, int32 NewMaxDecoySpawnCount)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "OnMaxDecoySpawnCountChanged");
+
+	Params::RuntimePaintableComponent_OnMaxDecoySpawnCountChanged Parms{};
+
+	Parms.OldMaxDecoySpawnCount = OldMaxDecoySpawnCount;
+	Parms.NewMaxDecoySpawnCount = NewMaxDecoySpawnCount;
+
+	UObject::ProcessEvent(Func, &Parms);
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.OnRep_MaxDecoySpawnCount
+// (Final, Native, Protected)
+// Parameters:
+// int32                                   OldMaxDecoySpawnCount                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::OnRep_MaxDecoySpawnCount(int32 OldMaxDecoySpawnCount)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "OnRep_MaxDecoySpawnCount");
+
+	Params::RuntimePaintableComponent_OnRep_MaxDecoySpawnCount Parms{};
+
+	Parms.OldMaxDecoySpawnCount = OldMaxDecoySpawnCount;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.OnRep_SpawnedDecoyActors
+// (Final, Native, Protected)
+
+void URuntimePaintableComponent::OnRep_SpawnedDecoyActors()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "OnRep_SpawnedDecoyActors");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.OnTrackedDecoyDestroyed
+// (Final, Native, Protected)
+// Parameters:
+// class AActor*                           DestroyedActor                                         (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::OnTrackedDecoyDestroyed(class AActor* DestroyedActor)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "OnTrackedDecoyDestroyed");
+
+	Params::RuntimePaintableComponent_OnTrackedDecoyDestroyed Parms{};
+
+	Parms.DestroyedActor = DestroyedActor;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.PaintAtScreenPosition
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FVector2D&                 ScreenPosition                                         (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class APlayerController*                PlayerController                                       (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bUseCachedTriangles                                    (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// struct FScreenSpacePaintResult          ReturnValue                                            (Parm, OutParm, ReturnParm, NoDestructor, NativeAccessSpecifierPublic)
+
+struct FScreenSpacePaintResult URuntimePaintableComponent::PaintAtScreenPosition(class UMeshComponent* MeshComponent, const struct FVector2D& ScreenPosition, class APlayerController* PlayerController, const struct FPaintChannelData& ChannelData, EPaintChannel Channel, bool bUseCachedTriangles)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtScreenPosition");
+
+	Params::RuntimePaintableComponent_PaintAtScreenPosition Parms{};
+
+	Parms.MeshComponent = MeshComponent;
+	Parms.ScreenPosition = std::move(ScreenPosition);
+	Parms.PlayerController = PlayerController;
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.Channel = Channel;
+	Parms.bUseCachedTriangles = bUseCachedTriangles;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.PaintAtUV
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::PaintAtUV(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtUV");
+
+	Params::RuntimePaintableComponent_PaintAtUV Parms{};
+
+	Parms.Uv = std::move(Uv);
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.PaintAtUVWithBrush
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// const struct FRuntimeBrushSettings&     BrushSettings                                          (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::PaintAtUVWithBrush(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, const struct FRuntimeBrushSettings& BrushSettings, EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtUVWithBrush");
+
+	Params::RuntimePaintableComponent_PaintAtUVWithBrush Parms{};
+
+	Parms.Uv = std::move(Uv);
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.BrushSettings = std::move(BrushSettings);
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.PaintAtWorldPosition
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// class UMeshComponent*                   MeshComponent                                          (Parm, ZeroConstructor, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FVector&                   WorldLocation                                          (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::PaintAtWorldPosition(class UMeshComponent* MeshComponent, const struct FVector& WorldLocation, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "PaintAtWorldPosition");
+
+	Params::RuntimePaintableComponent_PaintAtWorldPosition Parms{};
+
+	Parms.MeshComponent = MeshComponent;
+	Parms.WorldLocation = std::move(WorldLocation);
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.PaintStrokeUV
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// const struct FVector2D&                 UvStart                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FVector2D&                 UvEnd                                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::PaintStrokeUV(const struct FVector2D& UvStart, const struct FVector2D& UvEnd, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "PaintStrokeUV");
+
+	Params::RuntimePaintableComponent_PaintStrokeUV Parms{};
+
+	Parms.UvStart = std::move(UvStart);
+	Parms.UvEnd = std::move(UvEnd);
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.RequestFullTextureSync
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::RequestFullTextureSync()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "RequestFullTextureSync");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.RequestPaintOnServer
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::RequestPaintOnServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "RequestPaintOnServer");
+
+	Params::RuntimePaintableComponent_RequestPaintOnServer Parms{};
+
+	Parms.Uv = std::move(Uv);
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.RequestStrokeBatchOnServer
+// (Final, Native, Public, HasOutParams, BlueprintCallable)
+// Parameters:
+// const struct FPaintStrokeBatch&         Batch                                                  (ConstParm, Parm, OutParm, ReferenceParm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::RequestStrokeBatchOnServer(const struct FPaintStrokeBatch& Batch)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "RequestStrokeBatchOnServer");
+
+	Params::RuntimePaintableComponent_RequestStrokeBatchOnServer Parms{};
+
+	Parms.Batch = std::move(Batch);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SendCustomStrokeBatchToServer
+// (Final, Native, Public, HasOutParams, BlueprintCallable)
+// Parameters:
+// const struct FPaintStrokeBatch&         Batch                                                  (ConstParm, Parm, OutParm, ReferenceParm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SendCustomStrokeBatchToServer(const struct FPaintStrokeBatch& Batch)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SendCustomStrokeBatchToServer");
+
+	Params::RuntimePaintableComponent_SendCustomStrokeBatchToServer Parms{};
+
+	Parms.Batch = std::move(Batch);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SendPaintToServer
+// (Final, Native, Public, HasDefaults, BlueprintCallable)
+// Parameters:
+// const struct FVector2D&                 Uv                                                     (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FPaintChannelData&         ChannelData                                            (Parm, NoDestructor, NativeAccessSpecifierPublic)
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SendPaintToServer(const struct FVector2D& Uv, const struct FPaintChannelData& ChannelData, EPaintChannel Channel)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SendPaintToServer");
+
+	Params::RuntimePaintableComponent_SendPaintToServer Parms{};
+
+	Parms.Uv = std::move(Uv);
+	Parms.ChannelData = std::move(ChannelData);
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SendStrokeBatchToServer
+// (Final, Native, Public, BlueprintCallable)
+
+void URuntimePaintableComponent::SendStrokeBatchToServer()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SendStrokeBatchToServer");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerPaint
+// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
+// Parameters:
+// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ServerPaint(const struct FPaintStroke& Stroke)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerPaint");
+
+	Params::RuntimePaintableComponent_ServerPaint Parms{};
+
+	Parms.Stroke = std::move(Stroke);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerPaintBatch
+// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
+// Parameters:
+// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ServerPaintBatch(const struct FPaintStrokeBatch& Batch)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerPaintBatch");
+
+	Params::RuntimePaintableComponent_ServerPaintBatch Parms{};
+
+	Parms.Batch = std::move(Batch);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerRequestTextureSync
+// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
+
+void URuntimePaintableComponent::ServerRequestTextureSync()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerRequestTextureSync");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerSendPaint
+// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
+// Parameters:
+// const struct FPaintStroke&              Stroke                                                 (Parm, NoDestructor, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ServerSendPaint(const struct FPaintStroke& Stroke)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerSendPaint");
+
+	Params::RuntimePaintableComponent_ServerSendPaint Parms{};
+
+	Parms.Stroke = std::move(Stroke);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerSendStrokeBatch
+// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
+// Parameters:
+// const struct FPaintStrokeBatch&         Batch                                                  (Parm, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ServerSendStrokeBatch(const struct FPaintStrokeBatch& Batch)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerSendStrokeBatch");
+
+	Params::RuntimePaintableComponent_ServerSendStrokeBatch Parms{};
+
+	Parms.Batch = std::move(Batch);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerSetMaxDecoySpawnCount
+// (Net, NetReliable, Native, Event, Protected, NetServer, NetValidate)
+// Parameters:
+// int32                                   NewMaxDecoySpawnCount                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ServerSetMaxDecoySpawnCount(int32 NewMaxDecoySpawnCount)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerSetMaxDecoySpawnCount");
+
+	Params::RuntimePaintableComponent_ServerSetMaxDecoySpawnCount Parms{};
+
+	Parms.NewMaxDecoySpawnCount = NewMaxDecoySpawnCount;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.ServerSpawnDecoyCopyFromLocalView
+// (Net, NetReliable, Native, Event, Protected, NetServer, HasDefaults, NetValidate)
+// Parameters:
+// const struct FGuid&                     CopyId                                                 (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// TSubclassOf<class AActor>               DecoyActorClass                                        (Parm, ZeroConstructor, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FTransform&                SpawnTransform                                         (Parm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class FName                             DecoyMeshTag                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bIncludePose                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bApplyPoseToPoseableMesh                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::ServerSpawnDecoyCopyFromLocalView(const struct FGuid& CopyId, TSubclassOf<class AActor> DecoyActorClass, const struct FTransform& SpawnTransform, class FName DecoyMeshTag, bool bIncludePose, bool bApplyPoseToPoseableMesh)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "ServerSpawnDecoyCopyFromLocalView");
+
+	Params::RuntimePaintableComponent_ServerSpawnDecoyCopyFromLocalView Parms{};
+
+	Parms.CopyId = std::move(CopyId);
+	Parms.DecoyActorClass = DecoyActorClass;
+	Parms.SpawnTransform = std::move(SpawnTransform);
+	Parms.DecoyMeshTag = DecoyMeshTag;
+	Parms.bIncludePose = bIncludePose;
+	Parms.bApplyPoseToPoseableMesh = bApplyPoseToPoseableMesh;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushBlendMode
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// EPaintBlendMode                         BlendMode                                              (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushBlendMode(EPaintBlendMode BlendMode)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushBlendMode");
+
+	Params::RuntimePaintableComponent_SetBrushBlendMode Parms{};
+
+	Parms.BlendMode = BlendMode;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushFalloff
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// EBrushFalloff                           Falloff                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushFalloff(EBrushFalloff Falloff)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushFalloff");
+
+	Params::RuntimePaintableComponent_SetBrushFalloff Parms{};
+
+	Parms.Falloff = Falloff;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushHardness
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// float                                   Hardness                                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushHardness(float Hardness)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushHardness");
+
+	Params::RuntimePaintableComponent_SetBrushHardness Parms{};
+
+	Parms.Hardness = Hardness;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushOpacity
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// float                                   Opacity                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushOpacity(float Opacity)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushOpacity");
+
+	Params::RuntimePaintableComponent_SetBrushOpacity Parms{};
+
+	Parms.Opacity = Opacity;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushRadius
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// float                                   Radius                                                 (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushRadius(float Radius)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushRadius");
+
+	Params::RuntimePaintableComponent_SetBrushRadius Parms{};
+
+	Parms.Radius = Radius;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushSettings
+// (Final, Native, Public, HasOutParams, BlueprintCallable)
+// Parameters:
+// const struct FRuntimeBrushSettings&     NewSettings                                            (ConstParm, Parm, OutParm, ReferenceParm, NoDestructor, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushSettings(const struct FRuntimeBrushSettings& NewSettings)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushSettings");
+
+	Params::RuntimePaintableComponent_SetBrushSettings Parms{};
+
+	Parms.NewSettings = std::move(NewSettings);
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetBrushTexture
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// class UTexture2D*                       Texture                                                (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetBrushTexture(class UTexture2D* Texture)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetBrushTexture");
+
+	Params::RuntimePaintableComponent_SetBrushTexture Parms{};
+
+	Parms.Texture = Texture;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SetMaxDecoySpawnCount
+// (Final, Native, Public, BlueprintCallable)
+// Parameters:
+// int32                                   NewMaxDecoySpawnCount                                  (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::SetMaxDecoySpawnCount(int32 NewMaxDecoySpawnCount)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SetMaxDecoySpawnCount");
+
+	Params::RuntimePaintableComponent_SetMaxDecoySpawnCount Parms{};
+
+	Parms.NewMaxDecoySpawnCount = NewMaxDecoySpawnCount;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.SpawnDecoyCopyFromLocalView
+// (Final, Native, Public, HasOutParams, HasDefaults, BlueprintCallable)
+// Parameters:
+// TSubclassOf<class AActor>               DecoyActorClass                                        (Parm, ZeroConstructor, NoDestructor, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// const struct FTransform&                SpawnTransform                                         (ConstParm, Parm, OutParm, ReferenceParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// struct FGuid*                           OutCopyId                                              (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class FName                             DecoyMeshTag                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bIncludePose                                           (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    bApplyPoseToPoseableMesh                               (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::SpawnDecoyCopyFromLocalView(TSubclassOf<class AActor> DecoyActorClass, const struct FTransform& SpawnTransform, struct FGuid* OutCopyId, class FName DecoyMeshTag, bool bIncludePose, bool bApplyPoseToPoseableMesh)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "SpawnDecoyCopyFromLocalView");
+
+	Params::RuntimePaintableComponent_SpawnDecoyCopyFromLocalView Parms{};
+
+	Parms.DecoyActorClass = DecoyActorClass;
+	Parms.SpawnTransform = std::move(SpawnTransform);
+	Parms.DecoyMeshTag = DecoyMeshTag;
+	Parms.bIncludePose = bIncludePose;
+	Parms.bApplyPoseToPoseableMesh = bApplyPoseToPoseableMesh;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	if (OutCopyId != nullptr)
+		*OutCopyId = std::move(Parms.OutCopyId);
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetDominantPaintMaterialPatterns
+// (Final, Native, Public, HasOutParams, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// TArray<struct FPaintMaterialPattern>*   OutPatterns                                            (Parm, OutParm, ZeroConstructor, NativeAccessSpecifierPublic)
+// int32                                   MaxPatterns                                            (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// int32                                   SampleStep                                             (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// float                                   AlphaThreshold                                         (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::GetDominantPaintMaterialPatterns(TArray<struct FPaintMaterialPattern>* OutPatterns, int32 MaxPatterns, int32 SampleStep, float AlphaThreshold) const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetDominantPaintMaterialPatterns");
+
+	Params::RuntimePaintableComponent_GetDominantPaintMaterialPatterns Parms{};
+
+	Parms.MaxPatterns = MaxPatterns;
+	Parms.SampleStep = SampleStep;
+	Parms.AlphaThreshold = AlphaThreshold;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	if (OutPatterns != nullptr)
+		*OutPatterns = std::move(Parms.OutPatterns);
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetInitializedPaintMesh
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// class UMeshComponent*                   ReturnValue                                            (ExportObject, Parm, OutParm, ZeroConstructor, ReturnParm, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+class UMeshComponent* URuntimePaintableComponent::GetInitializedPaintMesh() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetInitializedPaintMesh");
+
+	Params::RuntimePaintableComponent_GetInitializedPaintMesh Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetMaxDecoySpawnCount
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// int32                                   ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+int32 URuntimePaintableComponent::GetMaxDecoySpawnCount() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetMaxDecoySpawnCount");
+
+	Params::RuntimePaintableComponent_GetMaxDecoySpawnCount Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetRecordedStrokeBatch
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// struct FPaintStrokeBatch                ReturnValue                                            (Parm, OutParm, ReturnParm, NativeAccessSpecifierPublic)
+
+struct FPaintStrokeBatch URuntimePaintableComponent::GetRecordedStrokeBatch() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetRecordedStrokeBatch");
+
+	Params::RuntimePaintableComponent_GetRecordedStrokeBatch Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetRecordedStrokeCount
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// int32                                   ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+int32 URuntimePaintableComponent::GetRecordedStrokeCount() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetRecordedStrokeCount");
+
+	Params::RuntimePaintableComponent_GetRecordedStrokeCount Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetRenderTarget
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// EPaintChannel                           Channel                                                (Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// class UTextureRenderTarget2D*           ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+class UTextureRenderTarget2D* URuntimePaintableComponent::GetRenderTarget(EPaintChannel Channel) const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetRenderTarget");
+
+	Params::RuntimePaintableComponent_GetRenderTarget Parms{};
+
+	Parms.Channel = Channel;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetSpawnedDecoyActorCount
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// int32                                   ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+int32 URuntimePaintableComponent::GetSpawnedDecoyActorCount() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetSpawnedDecoyActorCount");
+
+	Params::RuntimePaintableComponent_GetSpawnedDecoyActorCount Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.GetSpawnedDecoyActors
+// (Final, Native, Public, HasOutParams, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// TArray<class AActor*>*                  OutDecoyActors                                         (Parm, OutParm, ZeroConstructor, NativeAccessSpecifierPublic)
+
+void URuntimePaintableComponent::GetSpawnedDecoyActors(TArray<class AActor*>* OutDecoyActors) const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "GetSpawnedDecoyActors");
+
+	Params::RuntimePaintableComponent_GetSpawnedDecoyActors Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	if (OutDecoyActors != nullptr)
+		*OutDecoyActors = std::move(Parms.OutDecoyActors);
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.IsInitialized
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::IsInitialized() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "IsInitialized");
+
+	Params::RuntimePaintableComponent_IsInitialized Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function PenguinHotel.RuntimePaintableComponent.IsStroking
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool URuntimePaintableComponent::IsStroking() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("RuntimePaintableComponent", "IsStroking");
+
+	Params::RuntimePaintableComponent_IsStroking Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
 
 	Func->FunctionFlags = Flgs;
 

@@ -85,15 +85,6 @@ public:
 };
 DUMPER7_ASSERTS_FChaosMoverSimulationDefaultInputs;
 
-// ScriptStruct ChaosMover.NetworkChaosMoverInputData
-// 0x0010 (0x0038 - 0x0028)
-struct FNetworkChaosMoverInputData final : public FNetworkPhysicsData
-{
-public:
-	struct FMoverInputCmdContext                  InputCmdContext;                                   // 0x0028(0x0010)(NativeAccessSpecifierPublic)
-};
-DUMPER7_ASSERTS_FNetworkChaosMoverInputData;
-
 // ScriptStruct ChaosMover.NetworkChaosMoverStateData
 // 0x0078 (0x00A0 - 0x0028)
 struct FNetworkChaosMoverStateData final : public FNetworkPhysicsData
@@ -102,6 +93,15 @@ public:
 	struct FMoverSyncState                        SyncState;                                         // 0x0028(0x0078)(NativeAccessSpecifierPublic)
 };
 DUMPER7_ASSERTS_FNetworkChaosMoverStateData;
+
+// ScriptStruct ChaosMover.NetworkChaosMoverInputData
+// 0x0010 (0x0038 - 0x0028)
+struct FNetworkChaosMoverInputData final : public FNetworkPhysicsData
+{
+public:
+	struct FMoverInputCmdContext                  InputCmdContext;                                   // 0x0028(0x0010)(NativeAccessSpecifierPublic)
+};
+DUMPER7_ASSERTS_FNetworkChaosMoverInputData;
 
 // ScriptStruct ChaosMover.SwimmingSettings
 // 0x0044 (0x0044 - 0x0000)

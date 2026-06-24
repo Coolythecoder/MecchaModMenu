@@ -94,9 +94,9 @@ void IBPI_ItemInterface_C::GetItemInfo(ENUM_HandType* HandType, ENUM_ClassType* 
 // Function BPI_ItemInterface.BPI_ItemInterface_C.GetParentCharacter
 // (Public, HasOutParams, BlueprintCallable, BlueprintEvent)
 // Parameters:
-// class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter                                   (Parm, OutParm, ZeroConstructor, NoDestructor, HasGetValueTypeHash)
+// class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter                                   (Parm, OutParm, ZeroConstructor, NoDestructor, HasGetValueTypeHash)
 
-void IBPI_ItemInterface_C::GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter)
+void IBPI_ItemInterface_C::GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter)
 {
 	static class UFunction* Func = nullptr;
 
@@ -107,8 +107,8 @@ void IBPI_ItemInterface_C::GetParentCharacter(class ABP_FirstPersonCharacter_Mai
 
 	AsUObject()->ProcessEvent(Func, &Parms);
 
-	if (FirstPersonCharacter != nullptr)
-		*FirstPersonCharacter = Parms.FirstPersonCharacter;
+	if (FirstpersonCharacter != nullptr)
+		*FirstpersonCharacter = Parms.FirstpersonCharacter;
 }
 
 

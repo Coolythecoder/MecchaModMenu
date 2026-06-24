@@ -40,236 +40,6 @@ void UUDS_PlayerOcclusion_C::Apply_Directional_Occlusion_Modifiers(const struct 
 }
 
 
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Check For Portal Components
-// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Check_For_Portal_Components()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Check For Portal Components");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Custom Global Occlusion Sample
-// (Public, HasOutParams, HasDefaults, BlueprintCallable, BlueprintEvent)
-// Parameters:
-// const struct FVector&                   Location                                               (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-// double*                                 Global_Occlusion                                       (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-
-void UUDS_PlayerOcclusion_C::Custom_Global_Occlusion_Sample(const struct FVector& Location, double* Global_Occlusion)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Custom Global Occlusion Sample");
-
-	Params::UDS_PlayerOcclusion_C_Custom_Global_Occlusion_Sample Parms{};
-
-	Parms.Location = std::move(Location);
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	if (Global_Occlusion != nullptr)
-		*Global_Occlusion = Parms.Global_Occlusion;
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Delayed Startup
-// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Delayed_Startup()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Delayed Startup");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Editor Tick
-// (Public, BlueprintCallable, BlueprintEvent)
-// Parameters:
-// const struct FVector&                   Occlusion_Location                                     (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-
-void UUDS_PlayerOcclusion_C::Editor_Tick(const struct FVector& Occlusion_Location)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Editor Tick");
-
-	Params::UDS_PlayerOcclusion_C_Editor_Tick Parms{};
-
-	Parms.Occlusion_Location = std::move(Occlusion_Location);
-
-	UObject::ProcessEvent(Func, &Parms);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.ExecuteUbergraph_UDS_PlayerOcclusion
-// (Final, UbergraphFunction, HasDefaults)
-// Parameters:
-// int32                                   EntryPoint                                             (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-
-void UUDS_PlayerOcclusion_C::ExecuteUbergraph_UDS_PlayerOcclusion(int32 EntryPoint)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "ExecuteUbergraph_UDS_PlayerOcclusion");
-
-	Params::UDS_PlayerOcclusion_C_ExecuteUbergraph_UDS_PlayerOcclusion Parms{};
-
-	Parms.EntryPoint = EntryPoint;
-
-	UObject::ProcessEvent(Func, &Parms);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Get Sample Location
-// (Protected, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Get_Sample_Location()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Get Sample Location");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Incremental Occlusion Traces
-// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Incremental_Occlusion_Traces()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Incremental Occlusion Traces");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Initialize
-// (Public, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Initialize()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Initialize");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Periodic Context Checks
-// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Periodic_Context_Checks()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Periodic Context Checks");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Portal Direction Mask
-// (Protected, HasOutParams, BlueprintCallable, BlueprintEvent, BlueprintPure)
-// Parameters:
-// const struct FVector&                   Direction                                              (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-// struct FLinearColor*                    Mask                                                   (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-
-void UUDS_PlayerOcclusion_C::Portal_Direction_Mask(const struct FVector& Direction, struct FLinearColor* Mask)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Portal Direction Mask");
-
-	Params::UDS_PlayerOcclusion_C_Portal_Direction_Mask Parms{};
-
-	Parms.Direction = std::move(Direction);
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	if (Mask != nullptr)
-		*Mask = std::move(Parms.Mask);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.ReceiveEndPlay
-// (Event, Public, BlueprintEvent)
-// Parameters:
-// EEndPlayReason                          EndPlayReason                                          (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-
-void UUDS_PlayerOcclusion_C::ReceiveEndPlay(EEndPlayReason EndPlayReason)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "ReceiveEndPlay");
-
-	Params::UDS_PlayerOcclusion_C_ReceiveEndPlay Parms{};
-
-	Parms.EndPlayReason = EndPlayReason;
-
-	UObject::ProcessEvent(Func, &Parms);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.ReceiveParticleData
-// (Event, Public, HasOutParams, BlueprintCallable, BlueprintEvent)
-// Parameters:
-// const TArray<struct FBasicParticleData>&Data                                                   (ConstParm, BlueprintVisible, BlueprintReadOnly, Parm, OutParm, ReferenceParm)
-// class UNiagaraSystem*                   NiagaraSystem                                          (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash)
-// const struct FVector&                   SimulationPositionOffset                               (ConstParm, BlueprintVisible, BlueprintReadOnly, Parm, OutParm, ZeroConstructor, ReferenceParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
-
-void UUDS_PlayerOcclusion_C::ReceiveParticleData(const TArray<struct FBasicParticleData>& Data, class UNiagaraSystem* NiagaraSystem, const struct FVector& SimulationPositionOffset)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "ReceiveParticleData");
-
-	Params::UDS_PlayerOcclusion_C_ReceiveParticleData Parms{};
-
-	Parms.Data = std::move(Data);
-	Parms.NiagaraSystem = NiagaraSystem;
-	Parms.SimulationPositionOffset = std::move(SimulationPositionOffset);
-
-	UObject::ProcessEvent(Func, &Parms);
-}
-
-
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Runtime Tick
-// (Public, HasDefaults, BlueprintCallable, BlueprintEvent)
-
-void UUDS_PlayerOcclusion_C::Runtime_Tick()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Runtime Tick");
-
-	UObject::ProcessEvent(Func, nullptr);
-}
-
-
 // Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Start Up GPU Distance Field System
 // (Protected, BlueprintCallable, BlueprintEvent)
 
@@ -308,6 +78,44 @@ void UUDS_PlayerOcclusion_C::Test_Point_for_Occlusion_Volumes(const struct FVect
 }
 
 
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Custom Global Occlusion Sample
+// (Public, HasOutParams, HasDefaults, BlueprintCallable, BlueprintEvent)
+// Parameters:
+// const struct FVector&                   Location                                               (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+// double*                                 Global_Occlusion                                       (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+
+void UUDS_PlayerOcclusion_C::Custom_Global_Occlusion_Sample(const struct FVector& Location, double* Global_Occlusion)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Custom Global Occlusion Sample");
+
+	Params::UDS_PlayerOcclusion_C_Custom_Global_Occlusion_Sample Parms{};
+
+	Parms.Location = std::move(Location);
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	if (Global_Occlusion != nullptr)
+		*Global_Occlusion = Parms.Global_Occlusion;
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Runtime Tick
+// (Public, HasDefaults, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Runtime_Tick()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Runtime Tick");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
 // Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Trace Debugs
 // (Protected, HasOutParams, BlueprintCallable, BlueprintEvent, BlueprintPure)
 // Parameters:
@@ -328,15 +136,87 @@ EDrawDebugTrace UUDS_PlayerOcclusion_C::Trace_Debugs()
 }
 
 
-// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Update Current Occlusion
-// (Protected, BlueprintCallable, BlueprintEvent)
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Editor Tick
+// (Public, BlueprintCallable, BlueprintEvent)
+// Parameters:
+// const struct FVector&                   Occlusion_Location                                     (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
 
-void UUDS_PlayerOcclusion_C::Update_Current_Occlusion()
+void UUDS_PlayerOcclusion_C::Editor_Tick(const struct FVector& Occlusion_Location)
 {
 	static class UFunction* Func = nullptr;
 
 	if (Func == nullptr)
-		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Update Current Occlusion");
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Editor Tick");
+
+	Params::UDS_PlayerOcclusion_C_Editor_Tick Parms{};
+
+	Parms.Occlusion_Location = std::move(Occlusion_Location);
+
+	UObject::ProcessEvent(Func, &Parms);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Portal Direction Mask
+// (Protected, HasOutParams, BlueprintCallable, BlueprintEvent, BlueprintPure)
+// Parameters:
+// const struct FVector&                   Direction                                              (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+// struct FLinearColor*                    Mask                                                   (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+
+void UUDS_PlayerOcclusion_C::Portal_Direction_Mask(const struct FVector& Direction, struct FLinearColor* Mask)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Portal Direction Mask");
+
+	Params::UDS_PlayerOcclusion_C_Portal_Direction_Mask Parms{};
+
+	Parms.Direction = std::move(Direction);
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	if (Mask != nullptr)
+		*Mask = std::move(Parms.Mask);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Delayed Startup
+// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Delayed_Startup()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Delayed Startup");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Check For Portal Components
+// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Check_For_Portal_Components()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Check For Portal Components");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Get Sample Location
+// (Protected, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Get_Sample_Location()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Get Sample Location");
 
 	UObject::ProcessEvent(Func, nullptr);
 }
@@ -353,6 +233,126 @@ void UUDS_PlayerOcclusion_C::Update_Ignored_Actors()
 		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Update Ignored Actors");
 
 	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Periodic Context Checks
+// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Periodic_Context_Checks()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Periodic Context Checks");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Update Current Occlusion
+// (Protected, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Update_Current_Occlusion()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Update Current Occlusion");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Incremental Occlusion Traces
+// (Protected, HasDefaults, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Incremental_Occlusion_Traces()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Incremental Occlusion Traces");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.Initialize
+// (Public, BlueprintCallable, BlueprintEvent)
+
+void UUDS_PlayerOcclusion_C::Initialize()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "Initialize");
+
+	UObject::ProcessEvent(Func, nullptr);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.ReceiveParticleData
+// (Event, Public, HasOutParams, BlueprintCallable, BlueprintEvent)
+// Parameters:
+// const TArray<struct FBasicParticleData>&Data                                                   (ConstParm, BlueprintVisible, BlueprintReadOnly, Parm, OutParm, ReferenceParm)
+// class UNiagaraSystem*                   NiagaraSystem                                          (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash)
+// const struct FVector&                   SimulationPositionOffset                               (ConstParm, BlueprintVisible, BlueprintReadOnly, Parm, OutParm, ZeroConstructor, ReferenceParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+
+void UUDS_PlayerOcclusion_C::ReceiveParticleData(const TArray<struct FBasicParticleData>& Data, class UNiagaraSystem* NiagaraSystem, const struct FVector& SimulationPositionOffset)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "ReceiveParticleData");
+
+	Params::UDS_PlayerOcclusion_C_ReceiveParticleData Parms{};
+
+	Parms.Data = std::move(Data);
+	Parms.NiagaraSystem = NiagaraSystem;
+	Parms.SimulationPositionOffset = std::move(SimulationPositionOffset);
+
+	UObject::ProcessEvent(Func, &Parms);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.ReceiveEndPlay
+// (Event, Public, BlueprintEvent)
+// Parameters:
+// EEndPlayReason                          EndPlayReason                                          (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+
+void UUDS_PlayerOcclusion_C::ReceiveEndPlay(EEndPlayReason EndPlayReason)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "ReceiveEndPlay");
+
+	Params::UDS_PlayerOcclusion_C_ReceiveEndPlay Parms{};
+
+	Parms.EndPlayReason = EndPlayReason;
+
+	UObject::ProcessEvent(Func, &Parms);
+}
+
+
+// Function UDS_PlayerOcclusion.UDS_PlayerOcclusion_C.ExecuteUbergraph_UDS_PlayerOcclusion
+// (Final, UbergraphFunction, HasDefaults)
+// Parameters:
+// int32                                   EntryPoint                                             (BlueprintVisible, BlueprintReadOnly, Parm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash)
+
+void UUDS_PlayerOcclusion_C::ExecuteUbergraph_UDS_PlayerOcclusion(int32 EntryPoint)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("UDS_PlayerOcclusion_C", "ExecuteUbergraph_UDS_PlayerOcclusion");
+
+	Params::UDS_PlayerOcclusion_C_ExecuteUbergraph_UDS_PlayerOcclusion Parms{};
+
+	Parms.EntryPoint = EntryPoint;
+
+	UObject::ProcessEvent(Func, &Parms);
 }
 
 

@@ -14,10 +14,10 @@
 #include "Engine_classes.hpp"
 #include "ENUM_ClassType_structs.hpp"
 #include "ST_ItemCoreDatas_structs.hpp"
-#include "EN_StanType_structs.hpp"
-#include "EN_DamageType_structs.hpp"
-#include "ENUM_HandType_structs.hpp"
 #include "ENUM_ItemBindType_structs.hpp"
+#include "ENUM_HandType_structs.hpp"
+#include "EN_DamageType_structs.hpp"
+#include "EN_StanType_structs.hpp"
 
 
 SDK_NAMESPACE_START
@@ -39,7 +39,7 @@ public:
 public:
 	void IsChangeImage(bool* IsInteract, class FText* OverrideText);
 	void GetItemInfo(ENUM_HandType* HandType, ENUM_ClassType* ClassType, bool* NotPickUp, struct FRotator* HaveRotation, struct FVector* Add_Position, bool* IsBoneAttach, ENUM_ItemBindType* BindType, class FName* BoneName, struct FST_ItemCoreDatas* CoreDatas);
-	void GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter);
+	void GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter);
 	void Damage(double DamageValue, int32 TeamIndex, EN_DamageType DamageType, const struct FTransform& SourceAgentPoint, bool UnAvoidable, class FName DamageName, class AActor* SourceActor, struct FFinishFilter* Finish);
 	void GetParryState(bool* State);
 	void OnRep_ForceGrabTarget();

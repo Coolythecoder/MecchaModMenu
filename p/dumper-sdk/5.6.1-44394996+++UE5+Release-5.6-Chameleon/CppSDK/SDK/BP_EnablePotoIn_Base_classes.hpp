@@ -12,13 +12,13 @@
 
 #include "Engine_structs.hpp"
 #include "Engine_classes.hpp"
-#include "ENUM_ActorType_structs.hpp"
-#include "CoreUObject_structs.hpp"
-#include "ENUM_CameraMode_structs.hpp"
-#include "ENUM_ItemBindType_structs.hpp"
-#include "HitMaterial_structs.hpp"
-#include "ENUM_HandType_structs.hpp"
 #include "ENUM_ClassType_structs.hpp"
+#include "HitMaterial_structs.hpp"
+#include "CoreUObject_structs.hpp"
+#include "ENUM_ActorType_structs.hpp"
+#include "ENUM_ItemBindType_structs.hpp"
+#include "ENUM_HandType_structs.hpp"
+#include "ENUM_CameraMode_structs.hpp"
 
 
 SDK_NAMESPACE_START
@@ -62,7 +62,7 @@ public:
 	void GetCopyClass(class UStaticMeshComponent* CentorComponent, class UClass** Class_0, double* Scale, struct FVector* DefaultScale);
 	void GetCentorPosition(TArray<struct FVector>* CentorPosition);
 	void GetActorInfo(struct FTransform* DefaultTransform_0, bool* Not_In_Shot, struct FVector* CentorPosition, bool* IsPenguin, ENUM_ActorType* ActorType, bool* NonInPhoto);
-	void GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter);
+	void GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter);
 	void GetItemInfo(ENUM_HandType* HandType, ENUM_ClassType* ClassType, bool* NotPickUp_0, struct FRotator* HaveRotation, struct FVector* Add_Position, bool* IsBoneAttach, ENUM_ItemBindType* BindType, class FName* BoneName, struct FST_ItemCoreDatas* CoreDatas);
 	void SetScaleValues();
 	void InPhotoFunc();

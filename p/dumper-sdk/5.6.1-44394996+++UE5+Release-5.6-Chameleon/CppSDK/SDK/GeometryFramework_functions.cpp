@@ -16,171 +16,6 @@
 
 SDK_NAMESPACE_START
 
-// Function GeometryFramework.DynamicMeshProcessorBlueprint.ProcessDynamicMesh
-// (RequiredAPI, Event, Public, HasOutParams, BlueprintCallable, BlueprintEvent)
-// Parameters:
-// class UDynamicMesh*                     TargetMesh                                             (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// bool*                                   bFailed                                                (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-void UDynamicMeshProcessorBlueprint::ProcessDynamicMesh(class UDynamicMesh* TargetMesh, bool* bFailed)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshProcessorBlueprint", "ProcessDynamicMesh");
-
-	Params::DynamicMeshProcessorBlueprint_ProcessDynamicMesh Parms{};
-
-	Parms.TargetMesh = TargetMesh;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	if (bFailed != nullptr)
-		*bFailed = Parms.bFailed;
-}
-
-
-// Function GeometryFramework.DynamicMeshActor.AllocateComputeMesh
-// (Final, RequiredAPI, Native, Public, BlueprintCallable)
-// Parameters:
-// class UDynamicMesh*                     ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-class UDynamicMesh* ADynamicMeshActor::AllocateComputeMesh()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshActor", "AllocateComputeMesh");
-
-	Params::DynamicMeshActor_AllocateComputeMesh Parms{};
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
-// Function GeometryFramework.DynamicMeshActor.FreeAllComputeMeshes
-// (Final, RequiredAPI, Native, Public, BlueprintCallable)
-
-void ADynamicMeshActor::FreeAllComputeMeshes()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshActor", "FreeAllComputeMeshes");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function GeometryFramework.DynamicMeshActor.GetComputeMeshPool
-// (Final, RequiredAPI, Native, Public, BlueprintCallable)
-// Parameters:
-// class UDynamicMeshPool*                 ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-class UDynamicMeshPool* ADynamicMeshActor::GetComputeMeshPool()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshActor", "GetComputeMeshPool");
-
-	Params::DynamicMeshActor_GetComputeMeshPool Parms{};
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
-// Function GeometryFramework.DynamicMeshActor.ReleaseAllComputeMeshes
-// (Final, RequiredAPI, Native, Public, BlueprintCallable)
-
-void ADynamicMeshActor::ReleaseAllComputeMeshes()
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshActor", "ReleaseAllComputeMeshes");
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, nullptr);
-
-	Func->FunctionFlags = Flgs;
-}
-
-
-// Function GeometryFramework.DynamicMeshActor.ReleaseComputeMesh
-// (Final, RequiredAPI, Native, Public, BlueprintCallable)
-// Parameters:
-// class UDynamicMesh*                     Mesh                                                   (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-bool ADynamicMeshActor::ReleaseComputeMesh(class UDynamicMesh* Mesh)
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshActor", "ReleaseComputeMesh");
-
-	Params::DynamicMeshActor_ReleaseComputeMesh Parms{};
-
-	Parms.Mesh = Mesh;
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
-// Function GeometryFramework.DynamicMeshActor.GetDynamicMeshComponent
-// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
-// Parameters:
-// class UDynamicMeshComponent*            ReturnValue                                            (ExportObject, Parm, OutParm, ZeroConstructor, ReturnParm, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-
-class UDynamicMeshComponent* ADynamicMeshActor::GetDynamicMeshComponent() const
-{
-	static class UFunction* Func = nullptr;
-
-	if (Func == nullptr)
-		Func = Class->GetFunction("DynamicMeshActor", "GetDynamicMeshComponent");
-
-	Params::DynamicMeshActor_GetDynamicMeshComponent Parms{};
-
-	auto Flgs = Func->FunctionFlags;
-	Func->FunctionFlags |= 0x400;
-
-	UObject::ProcessEvent(Func, &Parms);
-
-	Func->FunctionFlags = Flgs;
-
-	return Parms.ReturnValue;
-}
-
-
 // Function GeometryFramework.BaseDynamicMeshComponent.ClearOverrideRenderMaterial
 // (RequiredAPI, Native, Public, BlueprintCallable)
 
@@ -1406,6 +1241,171 @@ EDynamicMeshComponentTangentsMode UDynamicMeshComponent::GetTangentsTypePure() c
 		Func = Class->GetFunction("DynamicMeshComponent", "GetTangentsTypePure");
 
 	Params::DynamicMeshComponent_GetTangentsTypePure Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function GeometryFramework.DynamicMeshProcessorBlueprint.ProcessDynamicMesh
+// (RequiredAPI, Event, Public, HasOutParams, BlueprintCallable, BlueprintEvent)
+// Parameters:
+// class UDynamicMesh*                     TargetMesh                                             (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool*                                   bFailed                                                (Parm, OutParm, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+void UDynamicMeshProcessorBlueprint::ProcessDynamicMesh(class UDynamicMesh* TargetMesh, bool* bFailed)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshProcessorBlueprint", "ProcessDynamicMesh");
+
+	Params::DynamicMeshProcessorBlueprint_ProcessDynamicMesh Parms{};
+
+	Parms.TargetMesh = TargetMesh;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	if (bFailed != nullptr)
+		*bFailed = Parms.bFailed;
+}
+
+
+// Function GeometryFramework.DynamicMeshActor.AllocateComputeMesh
+// (Final, RequiredAPI, Native, Public, BlueprintCallable)
+// Parameters:
+// class UDynamicMesh*                     ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+class UDynamicMesh* ADynamicMeshActor::AllocateComputeMesh()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshActor", "AllocateComputeMesh");
+
+	Params::DynamicMeshActor_AllocateComputeMesh Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function GeometryFramework.DynamicMeshActor.FreeAllComputeMeshes
+// (Final, RequiredAPI, Native, Public, BlueprintCallable)
+
+void ADynamicMeshActor::FreeAllComputeMeshes()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshActor", "FreeAllComputeMeshes");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function GeometryFramework.DynamicMeshActor.GetComputeMeshPool
+// (Final, RequiredAPI, Native, Public, BlueprintCallable)
+// Parameters:
+// class UDynamicMeshPool*                 ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+class UDynamicMeshPool* ADynamicMeshActor::GetComputeMeshPool()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshActor", "GetComputeMeshPool");
+
+	Params::DynamicMeshActor_GetComputeMeshPool Parms{};
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function GeometryFramework.DynamicMeshActor.ReleaseAllComputeMeshes
+// (Final, RequiredAPI, Native, Public, BlueprintCallable)
+
+void ADynamicMeshActor::ReleaseAllComputeMeshes()
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshActor", "ReleaseAllComputeMeshes");
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, nullptr);
+
+	Func->FunctionFlags = Flgs;
+}
+
+
+// Function GeometryFramework.DynamicMeshActor.ReleaseComputeMesh
+// (Final, RequiredAPI, Native, Public, BlueprintCallable)
+// Parameters:
+// class UDynamicMesh*                     Mesh                                                   (Parm, ZeroConstructor, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+// bool                                    ReturnValue                                            (Parm, OutParm, ZeroConstructor, ReturnParm, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+bool ADynamicMeshActor::ReleaseComputeMesh(class UDynamicMesh* Mesh)
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshActor", "ReleaseComputeMesh");
+
+	Params::DynamicMeshActor_ReleaseComputeMesh Parms{};
+
+	Parms.Mesh = Mesh;
+
+	auto Flgs = Func->FunctionFlags;
+	Func->FunctionFlags |= 0x400;
+
+	UObject::ProcessEvent(Func, &Parms);
+
+	Func->FunctionFlags = Flgs;
+
+	return Parms.ReturnValue;
+}
+
+
+// Function GeometryFramework.DynamicMeshActor.GetDynamicMeshComponent
+// (Final, Native, Public, BlueprintCallable, BlueprintPure, Const)
+// Parameters:
+// class UDynamicMeshComponent*            ReturnValue                                            (ExportObject, Parm, OutParm, ZeroConstructor, ReturnParm, InstancedReference, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+
+class UDynamicMeshComponent* ADynamicMeshActor::GetDynamicMeshComponent() const
+{
+	static class UFunction* Func = nullptr;
+
+	if (Func == nullptr)
+		Func = Class->GetFunction("DynamicMeshActor", "GetDynamicMeshComponent");
+
+	Params::DynamicMeshActor_GetDynamicMeshComponent Parms{};
 
 	auto Flgs = Func->FunctionFlags;
 	Func->FunctionFlags |= 0x400;

@@ -12,120 +12,13 @@
 
 #include "CoreUObject_structs.hpp"
 #include "CoreUObject_classes.hpp"
-#include "PhysicsCore_structs.hpp"
-#include "GeometryFramework_structs.hpp"
 #include "Engine_structs.hpp"
 #include "Engine_classes.hpp"
+#include "GeometryFramework_structs.hpp"
+#include "PhysicsCore_structs.hpp"
 
 
 SDK_NAMESPACE_START
-
-// Class GeometryFramework.DynamicMeshGenerator
-// 0x0000 (0x0028 - 0x0028)
-class UDynamicMeshGenerator final : public UObject
-{
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("DynamicMeshGenerator")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"DynamicMeshGenerator")
-	}
-	static class UDynamicMeshGenerator* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UDynamicMeshGenerator>();
-	}
-};
-DUMPER7_ASSERTS_UDynamicMeshGenerator;
-
-// Class GeometryFramework.DynamicMeshProcessorBlueprint
-// 0x0000 (0x0028 - 0x0028)
-class UDynamicMeshProcessorBlueprint final : public UObject
-{
-public:
-	void ProcessDynamicMesh(class UDynamicMesh* TargetMesh, bool* bFailed);
-
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("DynamicMeshProcessorBlueprint")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"DynamicMeshProcessorBlueprint")
-	}
-	static class UDynamicMeshProcessorBlueprint* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UDynamicMeshProcessorBlueprint>();
-	}
-};
-DUMPER7_ASSERTS_UDynamicMeshProcessorBlueprint;
-
-// Class GeometryFramework.DynamicMeshActor
-// 0x0018 (0x02C0 - 0x02A8)
-class ADynamicMeshActor final : public AActor
-{
-public:
-	class UDynamicMeshComponent*                  DynamicMeshComponent;                              // 0x02A8(0x0008)(Edit, BlueprintVisible, ExportObject, BlueprintReadOnly, ZeroConstructor, EditConst, InstancedReference, NoDestructor, Protected, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierProtected, TObjectPtr)
-	bool                                          bEnableComputeMeshPool;                            // 0x02B0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_2B1[0x7];                                      // 0x02B1(0x0007)(Fixing Size After Last Property [ Dumper-7 ])
-	class UDynamicMeshPool*                       DynamicMeshPool;                                   // 0x02B8(0x0008)(ZeroConstructor, Transient, NoDestructor, Protected, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierProtected, TObjectPtr)
-
-public:
-	class UDynamicMesh* AllocateComputeMesh();
-	void FreeAllComputeMeshes();
-	class UDynamicMeshPool* GetComputeMeshPool();
-	void ReleaseAllComputeMeshes();
-	bool ReleaseComputeMesh(class UDynamicMesh* Mesh);
-
-	class UDynamicMeshComponent* GetDynamicMeshComponent() const;
-
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("DynamicMeshActor")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"DynamicMeshActor")
-	}
-	static class ADynamicMeshActor* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<ADynamicMeshActor>();
-	}
-};
-DUMPER7_ASSERTS_ADynamicMeshActor;
-
-// Class GeometryFramework.MeshCommandChangeTarget
-// 0x0000 (0x0000 - 0x0000)
-class IMeshCommandChangeTarget final
-{
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MeshCommandChangeTarget")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MeshCommandChangeTarget")
-	}
-	static class IMeshCommandChangeTarget* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<IMeshCommandChangeTarget>();
-	}
-
-	class UObject* AsUObject()
-	{
-		return reinterpret_cast<UObject*>(this);
-	}
-	const class UObject* AsUObject() const
-	{
-		return reinterpret_cast<const UObject*>(this);
-	}
-};
-DUMPER7_ASSERTS_IMeshCommandChangeTarget;
 
 // Class GeometryFramework.BaseDynamicMeshComponent
 // 0x0080 (0x05F0 - 0x0570)
@@ -266,6 +159,58 @@ public:
 };
 DUMPER7_ASSERTS_UDynamicMeshComponent;
 
+// Class GeometryFramework.DynamicMeshProcessorBlueprint
+// 0x0000 (0x0028 - 0x0028)
+class UDynamicMeshProcessorBlueprint final : public UObject
+{
+public:
+	void ProcessDynamicMesh(class UDynamicMesh* TargetMesh, bool* bFailed);
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("DynamicMeshProcessorBlueprint")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"DynamicMeshProcessorBlueprint")
+	}
+	static class UDynamicMeshProcessorBlueprint* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UDynamicMeshProcessorBlueprint>();
+	}
+};
+DUMPER7_ASSERTS_UDynamicMeshProcessorBlueprint;
+
+// Class GeometryFramework.MeshCommandChangeTarget
+// 0x0000 (0x0000 - 0x0000)
+class IMeshCommandChangeTarget final
+{
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MeshCommandChangeTarget")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MeshCommandChangeTarget")
+	}
+	static class IMeshCommandChangeTarget* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<IMeshCommandChangeTarget>();
+	}
+
+	class UObject* AsUObject()
+	{
+		return reinterpret_cast<UObject*>(this);
+	}
+	const class UObject* AsUObject() const
+	{
+		return reinterpret_cast<const UObject*>(this);
+	}
+};
+DUMPER7_ASSERTS_IMeshCommandChangeTarget;
+
 // Class GeometryFramework.MeshReplacementCommandChangeTarget
 // 0x0000 (0x0000 - 0x0000)
 class IMeshReplacementCommandChangeTarget final
@@ -323,6 +268,61 @@ public:
 	}
 };
 DUMPER7_ASSERTS_IMeshVertexCommandChangeTarget;
+
+// Class GeometryFramework.DynamicMeshActor
+// 0x0018 (0x02C0 - 0x02A8)
+class ADynamicMeshActor final : public AActor
+{
+public:
+	class UDynamicMeshComponent*                  DynamicMeshComponent;                              // 0x02A8(0x0008)(Edit, BlueprintVisible, ExportObject, BlueprintReadOnly, ZeroConstructor, EditConst, InstancedReference, NoDestructor, Protected, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierProtected, TObjectPtr)
+	bool                                          bEnableComputeMeshPool;                            // 0x02B0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_2B1[0x7];                                      // 0x02B1(0x0007)(Fixing Size After Last Property [ Dumper-7 ])
+	class UDynamicMeshPool*                       DynamicMeshPool;                                   // 0x02B8(0x0008)(ZeroConstructor, Transient, NoDestructor, Protected, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierProtected, TObjectPtr)
+
+public:
+	class UDynamicMesh* AllocateComputeMesh();
+	void FreeAllComputeMeshes();
+	class UDynamicMeshPool* GetComputeMeshPool();
+	void ReleaseAllComputeMeshes();
+	bool ReleaseComputeMesh(class UDynamicMesh* Mesh);
+
+	class UDynamicMeshComponent* GetDynamicMeshComponent() const;
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("DynamicMeshActor")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"DynamicMeshActor")
+	}
+	static class ADynamicMeshActor* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<ADynamicMeshActor>();
+	}
+};
+DUMPER7_ASSERTS_ADynamicMeshActor;
+
+// Class GeometryFramework.DynamicMeshGenerator
+// 0x0000 (0x0028 - 0x0028)
+class UDynamicMeshGenerator final : public UObject
+{
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("DynamicMeshGenerator")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"DynamicMeshGenerator")
+	}
+	static class UDynamicMeshGenerator* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UDynamicMeshGenerator>();
+	}
+};
+DUMPER7_ASSERTS_UDynamicMeshGenerator;
 
 // Class GeometryFramework.DynamicMesh
 // 0x0088 (0x00B0 - 0x0028)

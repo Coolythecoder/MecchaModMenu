@@ -159,9 +159,9 @@ void ABP_EnablePotoIn_Base_C::GetActorInfo(struct FTransform* DefaultTransform_0
 // Function BP_EnablePotoIn_Base.BP_EnablePotoIn_Base_C.GetParentCharacter
 // (Public, HasOutParams, BlueprintCallable, BlueprintEvent)
 // Parameters:
-// class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter                                   (Parm, OutParm, ZeroConstructor, NoDestructor, HasGetValueTypeHash)
+// class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter                                   (Parm, OutParm, ZeroConstructor, NoDestructor, HasGetValueTypeHash)
 
-void ABP_EnablePotoIn_Base_C::GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstPersonCharacter)
+void ABP_EnablePotoIn_Base_C::GetParentCharacter(class ABP_FirstPersonCharacter_Main_C** FirstpersonCharacter)
 {
 	static class UFunction* Func = nullptr;
 
@@ -172,8 +172,8 @@ void ABP_EnablePotoIn_Base_C::GetParentCharacter(class ABP_FirstPersonCharacter_
 
 	UObject::ProcessEvent(Func, &Parms);
 
-	if (FirstPersonCharacter != nullptr)
-		*FirstPersonCharacter = Parms.FirstPersonCharacter;
+	if (FirstpersonCharacter != nullptr)
+		*FirstpersonCharacter = Parms.FirstpersonCharacter;
 }
 
 

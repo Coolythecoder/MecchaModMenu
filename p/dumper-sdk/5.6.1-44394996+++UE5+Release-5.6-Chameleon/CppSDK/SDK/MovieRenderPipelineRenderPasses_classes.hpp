@@ -12,14 +12,212 @@
 
 #include "MovieRenderPipelineCore_structs.hpp"
 #include "MovieRenderPipelineCore_classes.hpp"
-#include "Engine_structs.hpp"
-#include "MovieRenderPipelineRenderPasses_structs.hpp"
 #include "ActorLayerUtilities_structs.hpp"
 #include "OpenColorIO_structs.hpp"
+#include "Engine_structs.hpp"
+#include "MovieRenderPipelineRenderPasses_structs.hpp"
 #include "CoreUObject_structs.hpp"
 
 
 SDK_NAMESPACE_START
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphImagePassBaseNode
+// 0x0020 (0x00C8 - 0x00A8)
+class UMovieGraphImagePassBaseNode : public UMovieGraphRenderPassNode
+{
+public:
+	uint8                                         bOverride_ShowFlags : 1;                           // 0x00A8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, Protected, HasGetValueTypeHash, NativeAccessSpecifierProtected))
+	uint8                                         Pad_A9[0x7];                                       // 0x00A9(0x0007)(Fixing Size After Last Property [ Dumper-7 ])
+	class UMovieGraphShowFlags*                   ShowFlags;                                         // 0x00B0(0x0008)(Edit, BlueprintVisible, ZeroConstructor, EditConst, NoDestructor, Protected, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierProtected, TObjectPtr)
+	uint8                                         Pad_B8[0x10];                                      // 0x00B8(0x0010)(Fixing Struct Size After Last Property [ Dumper-7 ])
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphImagePassBaseNode")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphImagePassBaseNode")
+	}
+	static class UMovieGraphImagePassBaseNode* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphImagePassBaseNode>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphImagePassBaseNode;
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode
+// 0x0120 (0x01E0 - 0x00C0)
+class UMovieGraphImageSequenceOutputNode : public UMovieGraphFileOutputNode
+{
+public:
+	uint8                                         bOverride_OCIOConfiguration : 1;                   // 0x00C0(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_OCIOContext : 1;                         // 0x00C0(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         Pad_C1[0x7];                                       // 0x00C1(0x0007)(Fixing Size After Last Property [ Dumper-7 ])
+	struct FOpenColorIODisplayConfiguration       OCIOConfiguration;                                 // 0x00C8(0x00A8)(Edit, BlueprintVisible, NativeAccessSpecifierPublic)
+	TMap<class FString, class FString>            OCIOContext;                                       // 0x0170(0x0050)(Edit, BlueprintVisible, NativeAccessSpecifierPublic)
+	uint8                                         Pad_1C0[0x20];                                     // 0x01C0(0x0020)(Fixing Struct Size After Last Property [ Dumper-7 ])
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode")
+	}
+	static class UMovieGraphImageSequenceOutputNode* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode;
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_PNG
+// 0x0000 (0x01E0 - 0x01E0)
+class UMovieGraphImageSequenceOutputNode_PNG final : public UMovieGraphImageSequenceOutputNode
+{
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_PNG")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_PNG")
+	}
+	static class UMovieGraphImageSequenceOutputNode_PNG* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_PNG>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_PNG;
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphDeferredPanoramicNode
+// 0x0020 (0x00E8 - 0x00C8)
+class UMovieGraphDeferredPanoramicNode final : public UMovieGraphImagePassBaseNode
+{
+public:
+	uint8                                         bOverride_NumHorizontalSteps : 1;                  // 0x00C8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_NumVerticalSteps : 1;                    // 0x00C8(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bFollowCameraOrientation : 1;            // 0x00C8(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bAllocateHistoryPerPane : 1;             // 0x00C8(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bPageToSystemMemory : 1;                 // 0x00C8(0x0001)(BitIndex: 0x04, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_SpatialSampleCount : 1;                  // 0x00C8(0x0001)(BitIndex: 0x05, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_AntiAliasingMethod : 1;                  // 0x00C8(0x0001)(BitIndex: 0x06, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_Filter : 1;                              // 0x00C8(0x0001)(BitIndex: 0x07, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bDisableToneCurve : 1;                   // 0x00C9(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bAllowOCIO : 1;                          // 0x00C9(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_ViewModeIndex : 1;                       // 0x00C9(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bWriteAllSamples : 1;                    // 0x00C9(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         Pad_CA[0x2];                                       // 0x00CA(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
+	int32                                         NumHorizontalSteps;                                // 0x00CC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	int32                                         NumVerticalSteps;                                  // 0x00D0(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bFollowCameraOrientation;                          // 0x00D4(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAllocateHistoryPerPane;                           // 0x00D5(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bPageToSystemMemory;                               // 0x00D6(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_D7[0x1];                                       // 0x00D7(0x0001)(Fixing Size After Last Property [ Dumper-7 ])
+	int32                                         SpatialSampleCount;                                // 0x00D8(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	EAntiAliasingMethod                           AntiAliasingMethod;                                // 0x00DC(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	EMoviePipelinePanoramicFilterType             Filter;                                            // 0x00DD(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bWriteAllSamples;                                  // 0x00DE(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, AdvancedDisplay, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bDisableToneCurve;                                 // 0x00DF(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAllowOCIO;                                        // 0x00E0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	EViewModeIndex                                ViewModeIndex;                                     // 0x00E1(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_E2[0x6];                                       // 0x00E2(0x0006)(Fixing Struct Size After Last Property [ Dumper-7 ])
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphDeferredPanoramicNode")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphDeferredPanoramicNode")
+	}
+	static class UMovieGraphDeferredPanoramicNode* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphDeferredPanoramicNode>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphDeferredPanoramicNode;
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphDeferredRenderPassNode
+// 0x0030 (0x00F8 - 0x00C8)
+class UMovieGraphDeferredRenderPassNode final : public UMovieGraphImagePassBaseNode
+{
+public:
+	uint8                                         bOverride_SpatialSampleCount : 1;                  // 0x00C8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_AntiAliasingMethod : 1;                  // 0x00C8(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bDisableToneCurve : 1;                   // 0x00C8(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bAllowOCIO : 1;                          // 0x00C8(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_ViewModeIndex : 1;                       // 0x00C8(0x0001)(BitIndex: 0x04, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bWriteAllSamples : 1;                    // 0x00C8(0x0001)(BitIndex: 0x05, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_AdditionalPostProcessMaterials : 1;      // 0x00C8(0x0001)(BitIndex: 0x06, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bEnableHighResolutionTiling : 1;         // 0x00C8(0x0001)(BitIndex: 0x07, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_TileCount : 1;                           // 0x00C9(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_OverlapPercentage : 1;                   // 0x00C9(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bAllocateHistoryPerTile : 1;             // 0x00C9(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         bOverride_bPageToSystemMemory : 1;                 // 0x00C9(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	uint8                                         Pad_CA[0x2];                                       // 0x00CA(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
+	int32                                         SpatialSampleCount;                                // 0x00CC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	EAntiAliasingMethod                           AntiAliasingMethod;                                // 0x00D0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bWriteAllSamples;                                  // 0x00D1(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, AdvancedDisplay, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bDisableToneCurve;                                 // 0x00D2(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAllowOCIO;                                        // 0x00D3(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	EViewModeIndex                                ViewModeIndex;                                     // 0x00D4(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_D5[0x3];                                       // 0x00D5(0x0003)(Fixing Size After Last Property [ Dumper-7 ])
+	TArray<struct FMoviePipelinePostProcessPass>  AdditionalPostProcessMaterials;                    // 0x00D8(0x0010)(Edit, BlueprintVisible, ZeroConstructor, NativeAccessSpecifierPublic)
+	bool                                          bEnableHighResolutionTiling;                       // 0x00E8(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_E9[0x3];                                       // 0x00E9(0x0003)(Fixing Size After Last Property [ Dumper-7 ])
+	int32                                         TileCount;                                         // 0x00EC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	float                                         OverlapPercentage;                                 // 0x00F0(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bAllocateHistoryPerTile;                           // 0x00F4(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	bool                                          bPageToSystemMemory;                               // 0x00F5(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_F6[0x2];                                       // 0x00F6(0x0002)(Fixing Struct Size After Last Property [ Dumper-7 ])
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphDeferredRenderPassNode")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphDeferredRenderPassNode")
+	}
+	static class UMovieGraphDeferredRenderPassNode* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphDeferredRenderPassNode>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphDeferredRenderPassNode;
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_EXR
+// 0x0008 (0x01E8 - 0x01E0)
+class UMovieGraphImageSequenceOutputNode_EXR : public UMovieGraphImageSequenceOutputNode
+{
+public:
+	uint8                                         bOverride_Compression : 1;                         // 0x01E0(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	EEXRCompressionFormat                         Compression;                                       // 0x01E1(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_1E2[0x6];                                      // 0x01E2(0x0006)(Fixing Struct Size After Last Property [ Dumper-7 ])
+
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_EXR")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_EXR")
+	}
+	static class UMovieGraphImageSequenceOutputNode_EXR* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_EXR>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_EXR;
 
 // Class MovieRenderPipelineRenderPasses.MoviePipelineImagePassBase
 // 0x0130 (0x0178 - 0x0048)
@@ -79,100 +277,90 @@ public:
 };
 DUMPER7_ASSERTS_UMoviePipelineDeferredPassBase;
 
-// Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_ReflectionsOnly
+// Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_Unlit
 // 0x0000 (0x0278 - 0x0278)
-class UMoviePipelineDeferredPass_ReflectionsOnly final : public UMoviePipelineDeferredPassBase
+class UMoviePipelineDeferredPass_Unlit final : public UMoviePipelineDeferredPassBase
 {
 public:
 	static class UClass* StaticClass()
 	{
-		STATIC_CLASS_IMPL("MoviePipelineDeferredPass_ReflectionsOnly")
+		STATIC_CLASS_IMPL("MoviePipelineDeferredPass_Unlit")
 	}
 	static const class FName& StaticName()
 	{
-		STATIC_NAME_IMPL(L"MoviePipelineDeferredPass_ReflectionsOnly")
+		STATIC_NAME_IMPL(L"MoviePipelineDeferredPass_Unlit")
 	}
-	static class UMoviePipelineDeferredPass_ReflectionsOnly* GetDefaultObj()
+	static class UMoviePipelineDeferredPass_Unlit* GetDefaultObj()
 	{
-		return GetDefaultObjImpl<UMoviePipelineDeferredPass_ReflectionsOnly>();
+		return GetDefaultObjImpl<UMoviePipelineDeferredPass_Unlit>();
 	}
 };
-DUMPER7_ASSERTS_UMoviePipelineDeferredPass_ReflectionsOnly;
+DUMPER7_ASSERTS_UMoviePipelineDeferredPass_Unlit;
 
-// Class MovieRenderPipelineRenderPasses.MovieGraphImagePassBaseNode
-// 0x0020 (0x00C8 - 0x00A8)
-class UMovieGraphImagePassBaseNode : public UMovieGraphRenderPassNode
+// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_MultiLayerEXR
+// 0x0008 (0x01F0 - 0x01E8)
+class UMovieGraphImageSequenceOutputNode_MultiLayerEXR final : public UMovieGraphImageSequenceOutputNode_EXR
 {
 public:
-	uint8                                         bOverride_ShowFlags : 1;                           // 0x00A8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, Protected, HasGetValueTypeHash, NativeAccessSpecifierProtected))
-	uint8                                         Pad_A9[0x7];                                       // 0x00A9(0x0007)(Fixing Size After Last Property [ Dumper-7 ])
-	class UMovieGraphShowFlags*                   ShowFlags;                                         // 0x00B0(0x0008)(Edit, BlueprintVisible, ZeroConstructor, EditConst, NoDestructor, Protected, UObjectWrapper, HasGetValueTypeHash, NativeAccessSpecifierProtected, TObjectPtr)
-	uint8                                         Pad_B8[0x10];                                      // 0x00B8(0x0010)(Fixing Struct Size After Last Property [ Dumper-7 ])
+	uint8                                         bOverride_bMultiPart : 1;                          // 0x01E8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
+	bool                                          bMultipart;                                        // 0x01E9(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	uint8                                         Pad_1EA[0x6];                                      // 0x01EA(0x0006)(Fixing Struct Size After Last Property [ Dumper-7 ])
 
 public:
 	static class UClass* StaticClass()
 	{
-		STATIC_CLASS_IMPL("MovieGraphImagePassBaseNode")
+		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_MultiLayerEXR")
 	}
 	static const class FName& StaticName()
 	{
-		STATIC_NAME_IMPL(L"MovieGraphImagePassBaseNode")
+		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_MultiLayerEXR")
 	}
-	static class UMovieGraphImagePassBaseNode* GetDefaultObj()
+	static class UMovieGraphImageSequenceOutputNode_MultiLayerEXR* GetDefaultObj()
 	{
-		return GetDefaultObjImpl<UMovieGraphImagePassBaseNode>();
+		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_MultiLayerEXR>();
 	}
 };
-DUMPER7_ASSERTS_UMovieGraphImagePassBaseNode;
+DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_MultiLayerEXR;
 
-// Class MovieRenderPipelineRenderPasses.MovieGraphDeferredPanoramicNode
-// 0x0020 (0x00E8 - 0x00C8)
-class UMovieGraphDeferredPanoramicNode final : public UMovieGraphImagePassBaseNode
+// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_JPG
+// 0x0000 (0x01E0 - 0x01E0)
+class UMovieGraphImageSequenceOutputNode_JPG final : public UMovieGraphImageSequenceOutputNode
 {
-public:
-	uint8                                         bOverride_NumHorizontalSteps : 1;                  // 0x00C8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_NumVerticalSteps : 1;                    // 0x00C8(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bFollowCameraOrientation : 1;            // 0x00C8(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bAllocateHistoryPerPane : 1;             // 0x00C8(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bPageToSystemMemory : 1;                 // 0x00C8(0x0001)(BitIndex: 0x04, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_SpatialSampleCount : 1;                  // 0x00C8(0x0001)(BitIndex: 0x05, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_AntiAliasingMethod : 1;                  // 0x00C8(0x0001)(BitIndex: 0x06, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_Filter : 1;                              // 0x00C8(0x0001)(BitIndex: 0x07, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bDisableToneCurve : 1;                   // 0x00C9(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bAllowOCIO : 1;                          // 0x00C9(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_ViewModeIndex : 1;                       // 0x00C9(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bWriteAllSamples : 1;                    // 0x00C9(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         Pad_CA[0x2];                                       // 0x00CA(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
-	int32                                         NumHorizontalSteps;                                // 0x00CC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	int32                                         NumVerticalSteps;                                  // 0x00D0(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bFollowCameraOrientation;                          // 0x00D4(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bAllocateHistoryPerPane;                           // 0x00D5(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bPageToSystemMemory;                               // 0x00D6(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_D7[0x1];                                       // 0x00D7(0x0001)(Fixing Size After Last Property [ Dumper-7 ])
-	int32                                         SpatialSampleCount;                                // 0x00D8(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	EAntiAliasingMethod                           AntiAliasingMethod;                                // 0x00DC(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	EMoviePipelinePanoramicFilterType             Filter;                                            // 0x00DD(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bWriteAllSamples;                                  // 0x00DE(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, AdvancedDisplay, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bDisableToneCurve;                                 // 0x00DF(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bAllowOCIO;                                        // 0x00E0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	EViewModeIndex                                ViewModeIndex;                                     // 0x00E1(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_E2[0x6];                                       // 0x00E2(0x0006)(Fixing Struct Size After Last Property [ Dumper-7 ])
-
 public:
 	static class UClass* StaticClass()
 	{
-		STATIC_CLASS_IMPL("MovieGraphDeferredPanoramicNode")
+		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_JPG")
 	}
 	static const class FName& StaticName()
 	{
-		STATIC_NAME_IMPL(L"MovieGraphDeferredPanoramicNode")
+		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_JPG")
 	}
-	static class UMovieGraphDeferredPanoramicNode* GetDefaultObj()
+	static class UMovieGraphImageSequenceOutputNode_JPG* GetDefaultObj()
 	{
-		return GetDefaultObjImpl<UMovieGraphDeferredPanoramicNode>();
+		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_JPG>();
 	}
 };
-DUMPER7_ASSERTS_UMovieGraphDeferredPanoramicNode;
+DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_JPG;
+
+// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_BMP
+// 0x0000 (0x01E0 - 0x01E0)
+class UMovieGraphImageSequenceOutputNode_BMP final : public UMovieGraphImageSequenceOutputNode
+{
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_BMP")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_BMP")
+	}
+	static class UMovieGraphImageSequenceOutputNode_BMP* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_BMP>();
+	}
+};
+DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_BMP;
 
 // Class MovieRenderPipelineRenderPasses.MovieGraphPathTracerRenderPassNode
 // 0x0048 (0x0110 - 0x00C8)
@@ -245,134 +433,6 @@ public:
 };
 DUMPER7_ASSERTS_UMovieGraphPathTracerRenderPassNode;
 
-// Class MovieRenderPipelineRenderPasses.MovieGraphDeferredRenderPassNode
-// 0x0030 (0x00F8 - 0x00C8)
-class UMovieGraphDeferredRenderPassNode final : public UMovieGraphImagePassBaseNode
-{
-public:
-	uint8                                         bOverride_SpatialSampleCount : 1;                  // 0x00C8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_AntiAliasingMethod : 1;                  // 0x00C8(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bDisableToneCurve : 1;                   // 0x00C8(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bAllowOCIO : 1;                          // 0x00C8(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_ViewModeIndex : 1;                       // 0x00C8(0x0001)(BitIndex: 0x04, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bWriteAllSamples : 1;                    // 0x00C8(0x0001)(BitIndex: 0x05, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_AdditionalPostProcessMaterials : 1;      // 0x00C8(0x0001)(BitIndex: 0x06, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bEnableHighResolutionTiling : 1;         // 0x00C8(0x0001)(BitIndex: 0x07, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_TileCount : 1;                           // 0x00C9(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_OverlapPercentage : 1;                   // 0x00C9(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bAllocateHistoryPerTile : 1;             // 0x00C9(0x0001)(BitIndex: 0x02, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_bPageToSystemMemory : 1;                 // 0x00C9(0x0001)(BitIndex: 0x03, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         Pad_CA[0x2];                                       // 0x00CA(0x0002)(Fixing Size After Last Property [ Dumper-7 ])
-	int32                                         SpatialSampleCount;                                // 0x00CC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	EAntiAliasingMethod                           AntiAliasingMethod;                                // 0x00D0(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bWriteAllSamples;                                  // 0x00D1(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, AdvancedDisplay, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bDisableToneCurve;                                 // 0x00D2(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bAllowOCIO;                                        // 0x00D3(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	EViewModeIndex                                ViewModeIndex;                                     // 0x00D4(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_D5[0x3];                                       // 0x00D5(0x0003)(Fixing Size After Last Property [ Dumper-7 ])
-	TArray<struct FMoviePipelinePostProcessPass>  AdditionalPostProcessMaterials;                    // 0x00D8(0x0010)(Edit, BlueprintVisible, ZeroConstructor, NativeAccessSpecifierPublic)
-	bool                                          bEnableHighResolutionTiling;                       // 0x00E8(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_E9[0x3];                                       // 0x00E9(0x0003)(Fixing Size After Last Property [ Dumper-7 ])
-	int32                                         TileCount;                                         // 0x00EC(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	float                                         OverlapPercentage;                                 // 0x00F0(0x0004)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bAllocateHistoryPerTile;                           // 0x00F4(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	bool                                          bPageToSystemMemory;                               // 0x00F5(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_F6[0x2];                                       // 0x00F6(0x0002)(Fixing Struct Size After Last Property [ Dumper-7 ])
-
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphDeferredRenderPassNode")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphDeferredRenderPassNode")
-	}
-	static class UMovieGraphDeferredRenderPassNode* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphDeferredRenderPassNode>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphDeferredRenderPassNode;
-
-// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode
-// 0x0120 (0x01E0 - 0x00C0)
-class UMovieGraphImageSequenceOutputNode : public UMovieGraphFileOutputNode
-{
-public:
-	uint8                                         bOverride_OCIOConfiguration : 1;                   // 0x00C0(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         bOverride_OCIOContext : 1;                         // 0x00C0(0x0001)(BitIndex: 0x01, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	uint8                                         Pad_C1[0x7];                                       // 0x00C1(0x0007)(Fixing Size After Last Property [ Dumper-7 ])
-	struct FOpenColorIODisplayConfiguration       OCIOConfiguration;                                 // 0x00C8(0x00A8)(Edit, BlueprintVisible, NativeAccessSpecifierPublic)
-	TMap<class FString, class FString>            OCIOContext;                                       // 0x0170(0x0050)(Edit, BlueprintVisible, NativeAccessSpecifierPublic)
-	uint8                                         Pad_1C0[0x20];                                     // 0x01C0(0x0020)(Fixing Struct Size After Last Property [ Dumper-7 ])
-
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode")
-	}
-	static class UMovieGraphImageSequenceOutputNode* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode;
-
-// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_EXR
-// 0x0008 (0x01E8 - 0x01E0)
-class UMovieGraphImageSequenceOutputNode_EXR : public UMovieGraphImageSequenceOutputNode
-{
-public:
-	uint8                                         bOverride_Compression : 1;                         // 0x01E0(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	EEXRCompressionFormat                         Compression;                                       // 0x01E1(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_1E2[0x6];                                      // 0x01E2(0x0006)(Fixing Struct Size After Last Property [ Dumper-7 ])
-
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_EXR")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_EXR")
-	}
-	static class UMovieGraphImageSequenceOutputNode_EXR* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_EXR>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_EXR;
-
-// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_MultiLayerEXR
-// 0x0008 (0x01F0 - 0x01E8)
-class UMovieGraphImageSequenceOutputNode_MultiLayerEXR final : public UMovieGraphImageSequenceOutputNode_EXR
-{
-public:
-	uint8                                         bOverride_bMultiPart : 1;                          // 0x01E8(0x0001)(BitIndex: 0x00, PropSize: 0x0001 (Edit, BlueprintVisible, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic))
-	bool                                          bMultipart;                                        // 0x01E9(0x0001)(Edit, BlueprintVisible, ZeroConstructor, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-	uint8                                         Pad_1EA[0x6];                                      // 0x01EA(0x0006)(Fixing Struct Size After Last Property [ Dumper-7 ])
-
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_MultiLayerEXR")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_MultiLayerEXR")
-	}
-	static class UMovieGraphImageSequenceOutputNode_MultiLayerEXR* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_MultiLayerEXR>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_MultiLayerEXR;
-
 // Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_DetailLighting
 // 0x0000 (0x0278 - 0x0278)
 class UMoviePipelineDeferredPass_DetailLighting final : public UMoviePipelineDeferredPassBase
@@ -393,86 +453,6 @@ public:
 };
 DUMPER7_ASSERTS_UMoviePipelineDeferredPass_DetailLighting;
 
-// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_BMP
-// 0x0000 (0x01E0 - 0x01E0)
-class UMovieGraphImageSequenceOutputNode_BMP final : public UMovieGraphImageSequenceOutputNode
-{
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_BMP")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_BMP")
-	}
-	static class UMovieGraphImageSequenceOutputNode_BMP* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_BMP>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_BMP;
-
-// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_JPG
-// 0x0000 (0x01E0 - 0x01E0)
-class UMovieGraphImageSequenceOutputNode_JPG final : public UMovieGraphImageSequenceOutputNode
-{
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_JPG")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_JPG")
-	}
-	static class UMovieGraphImageSequenceOutputNode_JPG* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_JPG>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_JPG;
-
-// Class MovieRenderPipelineRenderPasses.MovieGraphImageSequenceOutputNode_PNG
-// 0x0000 (0x01E0 - 0x01E0)
-class UMovieGraphImageSequenceOutputNode_PNG final : public UMovieGraphImageSequenceOutputNode
-{
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MovieGraphImageSequenceOutputNode_PNG")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MovieGraphImageSequenceOutputNode_PNG")
-	}
-	static class UMovieGraphImageSequenceOutputNode_PNG* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMovieGraphImageSequenceOutputNode_PNG>();
-	}
-};
-DUMPER7_ASSERTS_UMovieGraphImageSequenceOutputNode_PNG;
-
-// Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_Unlit
-// 0x0000 (0x0278 - 0x0278)
-class UMoviePipelineDeferredPass_Unlit final : public UMoviePipelineDeferredPassBase
-{
-public:
-	static class UClass* StaticClass()
-	{
-		STATIC_CLASS_IMPL("MoviePipelineDeferredPass_Unlit")
-	}
-	static const class FName& StaticName()
-	{
-		STATIC_NAME_IMPL(L"MoviePipelineDeferredPass_Unlit")
-	}
-	static class UMoviePipelineDeferredPass_Unlit* GetDefaultObj()
-	{
-		return GetDefaultObjImpl<UMoviePipelineDeferredPass_Unlit>();
-	}
-};
-DUMPER7_ASSERTS_UMoviePipelineDeferredPass_Unlit;
-
 // Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_LightingOnly
 // 0x0000 (0x0278 - 0x0278)
 class UMoviePipelineDeferredPass_LightingOnly final : public UMoviePipelineDeferredPassBase
@@ -492,6 +472,26 @@ public:
 	}
 };
 DUMPER7_ASSERTS_UMoviePipelineDeferredPass_LightingOnly;
+
+// Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_ReflectionsOnly
+// 0x0000 (0x0278 - 0x0278)
+class UMoviePipelineDeferredPass_ReflectionsOnly final : public UMoviePipelineDeferredPassBase
+{
+public:
+	static class UClass* StaticClass()
+	{
+		STATIC_CLASS_IMPL("MoviePipelineDeferredPass_ReflectionsOnly")
+	}
+	static const class FName& StaticName()
+	{
+		STATIC_NAME_IMPL(L"MoviePipelineDeferredPass_ReflectionsOnly")
+	}
+	static class UMoviePipelineDeferredPass_ReflectionsOnly* GetDefaultObj()
+	{
+		return GetDefaultObjImpl<UMoviePipelineDeferredPass_ReflectionsOnly>();
+	}
+};
+DUMPER7_ASSERTS_UMoviePipelineDeferredPass_ReflectionsOnly;
 
 // Class MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_PathTracer
 // 0x0008 (0x0280 - 0x0278)

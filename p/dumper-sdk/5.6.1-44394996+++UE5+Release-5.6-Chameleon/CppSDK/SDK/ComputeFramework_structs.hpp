@@ -82,15 +82,6 @@ enum class EShaderParamModifier : uint8
 	EShaderParamModifier_MAX                 = 4,
 };
 
-// ScriptStruct ComputeFramework.ShaderValueTypeHandle
-// 0x0008 (0x0008 - 0x0000)
-struct alignas(0x08) FShaderValueTypeHandle final
-{
-public:
-	uint8                                         Pad_0[0x8];                                        // 0x0000(0x0008)(Fixing Struct Size After Last Property [ Dumper-7 ])
-};
-DUMPER7_ASSERTS_FShaderValueTypeHandle;
-
 // ScriptStruct ComputeFramework.ComputeGraphEdge
 // 0x0038 (0x0038 - 0x0000)
 struct FComputeGraphEdge final
@@ -117,25 +108,6 @@ public:
 };
 DUMPER7_ASSERTS_FComputeGraphInstance;
 
-// ScriptStruct ComputeFramework.ArrayShaderValue
-// 0x0010 (0x0010 - 0x0000)
-struct FArrayShaderValue final
-{
-public:
-	TArray<uint8>                                 ArrayOfValues;                                     // 0x0000(0x0010)(ZeroConstructor, NativeAccessSpecifierPublic)
-};
-DUMPER7_ASSERTS_FArrayShaderValue;
-
-// ScriptStruct ComputeFramework.ShaderValueContainer
-// 0x0020 (0x0020 - 0x0000)
-struct FShaderValueContainer final
-{
-public:
-	TArray<uint8>                                 ShaderValue;                                       // 0x0000(0x0010)(ZeroConstructor, NativeAccessSpecifierPublic)
-	TArray<struct FArrayShaderValue>              ArrayList;                                         // 0x0010(0x0010)(ZeroConstructor, NativeAccessSpecifierPublic)
-};
-DUMPER7_ASSERTS_FShaderValueContainer;
-
 // ScriptStruct ComputeFramework.ComputeKernelPermutationBool
 // 0x0018 (0x0018 - 0x0000)
 struct FComputeKernelPermutationBool final
@@ -147,6 +119,15 @@ public:
 };
 DUMPER7_ASSERTS_FComputeKernelPermutationBool;
 
+// ScriptStruct ComputeFramework.ComputeKernelPermutationSet
+// 0x0010 (0x0010 - 0x0000)
+struct FComputeKernelPermutationSet final
+{
+public:
+	TArray<struct FComputeKernelPermutationBool>  BooleanOptions;                                    // 0x0000(0x0010)(Edit, EditFixedSize, ZeroConstructor, DisableEditOnInstance, NativeAccessSpecifierPublic)
+};
+DUMPER7_ASSERTS_FComputeKernelPermutationSet;
+
 // ScriptStruct ComputeFramework.ComputeKernelDefinition
 // 0x0020 (0x0020 - 0x0000)
 struct FComputeKernelDefinition final
@@ -156,15 +137,6 @@ public:
 	class FString                                 Define;                                            // 0x0010(0x0010)(Edit, ZeroConstructor, DisableEditOnInstance, HasGetValueTypeHash, NativeAccessSpecifierPublic)
 };
 DUMPER7_ASSERTS_FComputeKernelDefinition;
-
-// ScriptStruct ComputeFramework.ComputeKernelPermutationSet
-// 0x0010 (0x0010 - 0x0000)
-struct FComputeKernelPermutationSet final
-{
-public:
-	TArray<struct FComputeKernelPermutationBool>  BooleanOptions;                                    // 0x0000(0x0010)(Edit, EditFixedSize, ZeroConstructor, DisableEditOnInstance, NativeAccessSpecifierPublic)
-};
-DUMPER7_ASSERTS_FComputeKernelPermutationSet;
 
 // ScriptStruct ComputeFramework.ComputeKernelDefinitionSet
 // 0x0010 (0x0010 - 0x0000)
@@ -185,6 +157,34 @@ public:
 	uint8                                         Pad_54[0x4];                                       // 0x0054(0x0004)(Fixing Struct Size After Last Property [ Dumper-7 ])
 };
 DUMPER7_ASSERTS_FComputeKernelPermutationVector;
+
+// ScriptStruct ComputeFramework.ShaderValueTypeHandle
+// 0x0008 (0x0008 - 0x0000)
+struct alignas(0x08) FShaderValueTypeHandle final
+{
+public:
+	uint8                                         Pad_0[0x8];                                        // 0x0000(0x0008)(Fixing Struct Size After Last Property [ Dumper-7 ])
+};
+DUMPER7_ASSERTS_FShaderValueTypeHandle;
+
+// ScriptStruct ComputeFramework.ArrayShaderValue
+// 0x0010 (0x0010 - 0x0000)
+struct FArrayShaderValue final
+{
+public:
+	TArray<uint8>                                 ArrayOfValues;                                     // 0x0000(0x0010)(ZeroConstructor, NativeAccessSpecifierPublic)
+};
+DUMPER7_ASSERTS_FArrayShaderValue;
+
+// ScriptStruct ComputeFramework.ShaderValueContainer
+// 0x0020 (0x0020 - 0x0000)
+struct FShaderValueContainer final
+{
+public:
+	TArray<uint8>                                 ShaderValue;                                       // 0x0000(0x0010)(ZeroConstructor, NativeAccessSpecifierPublic)
+	TArray<struct FArrayShaderValue>              ArrayList;                                         // 0x0010(0x0010)(ZeroConstructor, NativeAccessSpecifierPublic)
+};
+DUMPER7_ASSERTS_FShaderValueContainer;
 
 // ScriptStruct ComputeFramework.ShaderValueType
 // 0x0020 (0x0020 - 0x0000)

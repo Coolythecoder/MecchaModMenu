@@ -42,14 +42,14 @@ public:
 	void ClearAllItems();
 	void CloseBackPack();
 	void ExecuteUbergraph_BPC_LuggageBackpack_LINK(int32 EntryPoint);
-	void GetHeightPosition(class ABP_FirstPersonCharacter_Main_C* FirstPersonCharacter, float Distance, struct FVector* Location);
+	void GetHeightPosition(class ABP_FirstPersonCharacter_Main_C* FirstpersonCharacter, float Distance, struct FVector* Location);
 	void GetHeightPosition_FromTransform(const struct FTransform& CameraTransform, float Distance, const struct FVector& BodyLocation, struct FVector* Location);
 	void GetSumWeight(double* SumWeight);
 	void GetSyncWeights(TArray<double>* Weights);
 	void MapUpdate(TArray<double>& WeightValues);
 	void OnRep_BackPackDatas();
 	void OpenBackPack();
-	void RespawnItem(int32 ItemIndex, const struct FTransform& CameraTransform, class ABP_FirstPersonCharacter_Main_C* FirstPersonCharacter, bool CanSpawn, class AActor** SpawnedObject);
+	void RespawnItem(int32 ItemIndex, const struct FTransform& CameraTransform, class ABP_FirstPersonCharacter_Main_C* FirstpersonCharacter, bool CanSpawn, class AActor** SpawnedObject);
 	void SelectIndex(int32 Index_0);
 	void SyncCall();
 	void SyncCoreWeightDatas(const TArray<double>& WeightValue);

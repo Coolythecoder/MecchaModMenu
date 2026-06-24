@@ -40,24 +40,24 @@ public:
 
 public:
 	void Apply_Directional_Occlusion_Modifiers(const struct FLinearColor& In, struct FLinearColor* Out);
-	void Check_For_Portal_Components();
-	void Custom_Global_Occlusion_Sample(const struct FVector& Location, double* Global_Occlusion);
-	void Delayed_Startup();
-	void Editor_Tick(const struct FVector& Occlusion_Location);
-	void ExecuteUbergraph_UDS_PlayerOcclusion(int32 EntryPoint);
-	void Get_Sample_Location();
-	void Incremental_Occlusion_Traces();
-	void Initialize();
-	void Periodic_Context_Checks();
-	void Portal_Direction_Mask(const struct FVector& Direction, struct FLinearColor* Mask);
-	void ReceiveEndPlay(EEndPlayReason EndPlayReason);
-	void ReceiveParticleData(const TArray<struct FBasicParticleData>& Data, class UNiagaraSystem* NiagaraSystem, const struct FVector& SimulationPositionOffset);
-	void Runtime_Tick();
 	void Start_Up_GPU_Distance_Field_System();
 	void Test_Point_for_Occlusion_Volumes(const struct FVector& Location, double* Final_Multiplier);
+	void Custom_Global_Occlusion_Sample(const struct FVector& Location, double* Global_Occlusion);
+	void Runtime_Tick();
 	EDrawDebugTrace Trace_Debugs();
-	void Update_Current_Occlusion();
+	void Editor_Tick(const struct FVector& Occlusion_Location);
+	void Portal_Direction_Mask(const struct FVector& Direction, struct FLinearColor* Mask);
+	void Delayed_Startup();
+	void Check_For_Portal_Components();
+	void Get_Sample_Location();
 	void Update_Ignored_Actors();
+	void Periodic_Context_Checks();
+	void Update_Current_Occlusion();
+	void Incremental_Occlusion_Traces();
+	void Initialize();
+	void ReceiveParticleData(const TArray<struct FBasicParticleData>& Data, class UNiagaraSystem* NiagaraSystem, const struct FVector& SimulationPositionOffset);
+	void ReceiveEndPlay(EEndPlayReason EndPlayReason);
+	void ExecuteUbergraph_UDS_PlayerOcclusion(int32 EntryPoint);
 
 public:
 	static class UClass* StaticClass()

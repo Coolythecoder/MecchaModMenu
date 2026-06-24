@@ -58,15 +58,6 @@ public:
 };
 DUMPER7_ASSERTS_FMoverExampleAbilityInputs;
 
-// ScriptStruct MoverExamples.FollowPathState
-// 0x0020 (0x0028 - 0x0008)
-struct FFollowPathState final : public FMoverDataStructBase
-{
-public:
-	uint8                                         Pad_8[0x20];                                       // 0x0008(0x0020)(Fixing Struct Size After Last Property [ Dumper-7 ])
-};
-DUMPER7_ASSERTS_FFollowPathState;
-
 // ScriptStruct MoverExamples.ZipliningState
 // 0x0010 (0x0018 - 0x0008)
 struct FZipliningState final : public FMoverDataStructBase
@@ -75,6 +66,15 @@ public:
 	uint8                                         Pad_8[0x10];                                       // 0x0008(0x0010)(Fixing Struct Size After Last Property [ Dumper-7 ])
 };
 DUMPER7_ASSERTS_FZipliningState;
+
+// ScriptStruct MoverExamples.FollowPathState
+// 0x0020 (0x0028 - 0x0008)
+struct FFollowPathState final : public FMoverDataStructBase
+{
+public:
+	uint8                                         Pad_8[0x20];                                       // 0x0008(0x0020)(Fixing Struct Size After Last Property [ Dumper-7 ])
+};
+DUMPER7_ASSERTS_FFollowPathState;
 
 // ScriptStruct MoverExamples.SplineOffsetRangeInput
 // 0x0008 (0x0008 - 0x0000)

@@ -10,8 +10,8 @@
 
 #include "Basic.hpp"
 
-#include "MetaHumanSDKRuntime_structs.hpp"
 #include "Engine_classes.hpp"
+#include "MetaHumanSDKRuntime_structs.hpp"
 
 
 SDK_NAMESPACE_START

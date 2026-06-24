@@ -10,9 +10,9 @@
 
 #include "Basic.hpp"
 
-#include "MovieRenderPipelineCore_classes.hpp"
 #include "MovieRenderPipelineMP4Encoder_structs.hpp"
 #include "OpenColorIO_structs.hpp"
+#include "MovieRenderPipelineCore_classes.hpp"
 
 
 SDK_NAMESPACE_START
