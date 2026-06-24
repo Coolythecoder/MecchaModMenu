@@ -1,5 +1,5 @@
 GAME_ROOT ?= C:\Program Files (x86)\Steam\steamapps\common\MECCHA CHAMELEON
-NATIVE_APPLY_MODE ?= texture_sync_strict_probe
+NATIVE_APPLY_MODE ?= static_hybrid_front_side_probe
 DEV_PROBE_ARGS ?= --auto-sdk-probe --auto-sdk-deep-probe
 VERSION ?= 1.0.0
 DEV_FLOW_PS := scripts/dev_flow.ps1

@@ -48,7 +48,7 @@ namespace
         int service_max_frames{0};
         double service_max_duration_seconds{0.0};
         std::wstring service_stop_file{};
-        std::string native_apply_mode{"texture_sync_strict_probe"};
+        std::string native_apply_mode{"static_hybrid_front_side_probe"};
         bool auto_sdk_probe{false};
         bool auto_sdk_deep_probe{false};
         bool print_summary{false};
