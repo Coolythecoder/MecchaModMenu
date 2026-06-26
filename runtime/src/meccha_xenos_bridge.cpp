@@ -11,7 +11,6 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
-#include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -24,7 +23,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "../sdk/meccha_mesh_layout.hpp"
 #include "../sdk/meccha_sdk_min.hpp"
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -35,7 +33,6 @@ namespace
     constexpr int DefaultBridgePort = 47654;
     constexpr int IdleShutdownSeconds = 15;
     constexpr std::size_t MaxRequestBytes = 8 * 1024 * 1024;
-    constexpr int PaintChannelAlbedoMetallicRoughness = 5;
     constexpr int ProcessEventVtableIndex = meccha_sdk::Offsets::ProcessEventIdx;
     constexpr UINT PaintDispatchMessage = WM_APP + 0x4D43;
 
@@ -326,79 +323,6 @@ namespace
             return {};
         }
         return runtime;
-    }
-
-    auto write_runtime_artifact_binary(const wchar_t* filename, const std::string& bytes) -> bool
-    {
-        const auto dir = runtime_log_dir_path();
-        if (dir.empty())
-        {
-            return false;
-        }
-        std::wstring path = dir + L"\\";
-        path += filename;
-        HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            return false;
-        }
-        DWORD written = 0;
-        const auto ok = WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
-        CloseHandle(file);
-        return ok && written == bytes.size();
-    }
-
-    auto write_runtime_artifact_text(const wchar_t* filename, const std::string& text) -> bool
-    {
-        return write_runtime_artifact_binary(filename, text);
-    }
-
-    auto write_runtime_artifact_bmp_rgb(const wchar_t* filename, int width, int height, const std::vector<std::uint8_t>& rgb) -> bool
-    {
-        if (width <= 0 || height <= 0 ||
-            rgb.size() < static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3u)
-        {
-            return false;
-        }
-        const int row_stride = ((width * 3 + 3) / 4) * 4;
-        const std::uint32_t pixel_bytes = static_cast<std::uint32_t>(row_stride * height);
-        const std::uint32_t file_size = 54u + pixel_bytes;
-        std::string bytes(static_cast<std::size_t>(file_size), '\0');
-        auto put16 = [&](std::size_t offset, std::uint16_t value) {
-            bytes[offset + 0] = static_cast<char>(value & 0xffu);
-            bytes[offset + 1] = static_cast<char>((value >> 8) & 0xffu);
-        };
-        auto put32 = [&](std::size_t offset, std::uint32_t value) {
-            bytes[offset + 0] = static_cast<char>(value & 0xffu);
-            bytes[offset + 1] = static_cast<char>((value >> 8) & 0xffu);
-            bytes[offset + 2] = static_cast<char>((value >> 16) & 0xffu);
-            bytes[offset + 3] = static_cast<char>((value >> 24) & 0xffu);
-        };
-        bytes[0] = 'B';
-        bytes[1] = 'M';
-        put32(2, file_size);
-        put32(10, 54u);
-        put32(14, 40u);
-        put32(18, static_cast<std::uint32_t>(width));
-        put32(22, static_cast<std::uint32_t>(height));
-        put16(26, 1u);
-        put16(28, 24u);
-        put32(34, pixel_bytes);
-        for (int y = 0; y < height; ++y)
-        {
-            const int src_y = height - 1 - y;
-            const std::size_t dst_row = 54u + static_cast<std::size_t>(y) * static_cast<std::size_t>(row_stride);
-            const std::size_t src_row = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(width) * 3u;
-            for (int x = 0; x < width; ++x)
-            {
-                const std::size_t src = src_row + static_cast<std::size_t>(x) * 3u;
-                const std::size_t dst = dst_row + static_cast<std::size_t>(x) * 3u;
-                bytes[dst + 0] = static_cast<char>(rgb[src + 2]);
-                bytes[dst + 1] = static_cast<char>(rgb[src + 1]);
-                bytes[dst + 2] = static_cast<char>(rgb[src + 0]);
-            }
-        }
-        return write_runtime_artifact_binary(filename, bytes);
     }
 
     struct ModuleRange
@@ -800,34 +724,6 @@ namespace
         int apply_mode{0};
     };
 
-    struct PaintCallStats
-    {
-        int server_success{0};
-        int server_failure{0};
-        int local_success{0};
-        int local_failure{0};
-        std::string first_failure{};
-    };
-
-    struct ScriptArrayParam
-    {
-        void* data{nullptr};
-        int num{0};
-        int max{0};
-    };
-
-    struct ChannelBuffer
-    {
-        bool ok{false};
-        int channel{0};
-        int width{0};
-        int height{0};
-        int bytes_per_pixel{1};
-        std::uint64_t hash{1469598103934665603ULL};
-        std::string failure{};
-        std::vector<std::uint8_t> bytes{};
-    };
-
     struct FrontSample
     {
         double u{0.5};
@@ -837,18 +733,10 @@ namespace
         double b{1.0};
         double roughness{0.65};
         double metallic{0.0};
-        double radius{0.012};
-        bool floor_like{false};
-        int atlas_priority{0};
-        int atlas_radius{2};
-        double atlas_weight{0.0};
         double screen_nx{0.5};
         double screen_ny{0.5};
-        double capture_nx{-1.0};
-        double capture_ny{-1.0};
         bool has_world_position{false};
         meccha_sdk::FVector world_position{};
-        meccha_sdk::FVector normal{};
     };
 
     auto clamp01(double value) -> double;
@@ -858,478 +746,9 @@ namespace
     auto process_event(std::uintptr_t object, std::uintptr_t function, std::uint8_t* params, std::string& failure) -> bool;
     auto read_return_bool(Reflection& ref, std::uintptr_t function, std::uint8_t* params) -> bool;
 
-    auto fnv1a_update(std::uint64_t hash, const void* data, std::size_t size) -> std::uint64_t
-    {
-        const auto* bytes = static_cast<const std::uint8_t*>(data);
-        for (std::size_t i = 0; i < size; ++i)
-        {
-            hash ^= static_cast<std::uint64_t>(bytes[i]);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    }
-
-    auto hash_bytes(const std::vector<std::uint8_t>& bytes) -> std::uint64_t
-    {
-        return bytes.empty() ? 1469598103934665603ULL : fnv1a_update(1469598103934665603ULL, bytes.data(), bytes.size());
-    }
-
-    auto infer_channel_dimensions(std::size_t byte_count) -> std::pair<int, int>
-    {
-        if (byte_count == 0)
-        {
-            return {0, 0};
-        }
-        const auto pixels_rgba = byte_count % 4 == 0 ? byte_count / 4 : byte_count;
-        int width = static_cast<int>(std::sqrt(static_cast<double>(pixels_rgba)));
-        width = std::max(1, width);
-        while (width > 1 && pixels_rgba % static_cast<std::size_t>(width) != 0)
-        {
-            --width;
-        }
-        const int height = static_cast<int>(pixels_rgba / static_cast<std::size_t>(width));
-        return {width, std::max(1, height)};
-    }
-
-    auto find_array_param(Reflection& ref, std::uintptr_t function) -> std::uintptr_t
-    {
-        std::uintptr_t fallback = 0;
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            const auto name = lower_copy(ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName)));
-            if (name == "returnvalue" || contains_text(name, "channel"))
-            {
-                continue;
-            }
-            const auto offset = prop_offset(prop);
-            if (offset >= 0 && params_size > 0 && offset + static_cast<int>(sizeof(ScriptArrayParam)) <= params_size)
-            {
-                if (!fallback)
-                {
-                    fallback = prop;
-                }
-                if (contains_text(name, "byte") || contains_text(name, "data") || contains_text(name, "buffer") ||
-                    contains_text(name, "array") || contains_text(name, "out"))
-                {
-                    return prop;
-                }
-            }
-        }
-        return fallback;
-    }
-
-    auto write_channel_param(Reflection& ref, std::uintptr_t function, std::uint8_t* params, int channel) -> bool
-    {
-        bool wrote = false;
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            const auto name = lower_copy(ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName)));
-            if (contains_text(name, "channel"))
-            {
-                wrote = write_number(ref, prop, params, static_cast<double>(channel)) || wrote;
-            }
-        }
-        return wrote;
-    }
-
-    auto export_channel_bytes(Reflection& ref, std::uintptr_t component, int channel) -> ChannelBuffer
-    {
-        ChannelBuffer out{};
-        out.channel = channel;
-        const auto function = ref.find_function(component, "ExportChannelToBytes");
-        if (!function)
-        {
-            out.failure = "export_unavailable";
-            return out;
-        }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size <= 0 || params_size > 8192)
-        {
-            out.failure = "export_params_size_invalid";
-            return out;
-        }
-        const auto array_prop = find_array_param(ref, function);
-        if (!array_prop)
-        {
-            out.failure = "export_array_param_unavailable";
-            return out;
-        }
-        const auto array_offset = prop_offset(array_prop);
-        if (array_offset < 0)
-        {
-            out.failure = "export_array_offset_invalid";
-            return out;
-        }
-        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
-        write_channel_param(ref, function, params.data(), channel);
-        std::string failure{};
-        if (!process_event(component, function, params.data(), failure))
-        {
-            out.failure = "export_process_event_failed:" + failure;
-            return out;
-        }
-        const bool return_ok = read_return_bool(ref, function, params.data());
-        const auto array = safe_read<ScriptArrayParam>(reinterpret_cast<std::uintptr_t>(params.data() + array_offset));
-        if (!array.data || array.num <= 0 || array.num > 128 * 1024 * 1024)
-        {
-            out.failure = return_ok ? "export_array_invalid" : "export_return_false_array_invalid";
-            return out;
-        }
-        out.bytes.resize(static_cast<std::size_t>(array.num));
-        if (!safe_copy(out.bytes.data(), array.data, out.bytes.size()))
-        {
-            out.failure = "export_array_copy_failed";
-            out.bytes.clear();
-            return out;
-        }
-        out.hash = hash_bytes(out.bytes);
-        const auto [width, height] = infer_channel_dimensions(out.bytes.size());
-        out.width = width;
-        out.height = height;
-        out.bytes_per_pixel = (width > 0 && height > 0 && out.bytes.size() == static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4) ? 4 : 1;
-        out.ok = true;
-        if (!return_ok)
-        {
-            out.failure = "export_return_false_but_array_observed";
-        }
-        return out;
-    }
-
-    auto import_channel_bytes(Reflection& ref, std::uintptr_t component, int channel, const std::vector<std::uint8_t>& bytes, std::string& failure) -> bool
-    {
-        failure.clear();
-        const auto function = ref.find_function(component, "ImportChannelFromBytes");
-        if (!function)
-        {
-            failure = "import_unavailable";
-            return false;
-        }
-        if (bytes.empty() || bytes.size() > 128 * 1024 * 1024)
-        {
-            failure = "import_bytes_invalid";
-            return false;
-        }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size <= 0 || params_size > 8192)
-        {
-            failure = "import_params_size_invalid";
-            return false;
-        }
-        const auto array_prop = find_array_param(ref, function);
-        if (!array_prop)
-        {
-            failure = "import_array_param_unavailable";
-            return false;
-        }
-        const auto array_offset = prop_offset(array_prop);
-        if (array_offset < 0)
-        {
-            failure = "import_array_offset_invalid";
-            return false;
-        }
-        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
-        write_channel_param(ref, function, params.data(), channel);
-        auto* array = reinterpret_cast<ScriptArrayParam*>(params.data() + array_offset);
-        array->data = const_cast<std::uint8_t*>(bytes.data());
-        array->num = static_cast<int>(bytes.size());
-        array->max = static_cast<int>(bytes.size());
-        if (!process_event(component, function, params.data(), failure))
-        {
-            failure = "import_process_event_failed:" + failure;
-            return false;
-        }
-        if (!read_return_bool(ref, function, params.data()))
-        {
-            failure = "import_return_false_observation_required";
-        }
-        return true;
-    }
-
-    auto parse_front_samples(const std::string& request, int limit = 4096) -> std::vector<FrontSample>
-    {
-        std::vector<FrontSample> samples{};
-        std::size_t pos = request.find("\"front_samples\"");
-        if (pos == std::string::npos)
-        {
-            return samples;
-        }
-        while (static_cast<int>(samples.size()) < limit)
-        {
-            const auto up = request.find("\"u\":", pos);
-            if (up == std::string::npos)
-            {
-                break;
-            }
-            const auto vp = request.find("\"v\":", up);
-            const auto rp = request.find("\"r\":", vp == std::string::npos ? up : vp);
-            const auto gp = request.find("\"g\":", rp == std::string::npos ? up : rp);
-            const auto bp = request.find("\"b\":", gp == std::string::npos ? up : gp);
-            if (vp == std::string::npos || rp == std::string::npos || gp == std::string::npos || bp == std::string::npos)
-            {
-                break;
-            }
-            const auto sample_end = request.find('}', bp);
-            char* end = nullptr;
-            FrontSample sample{};
-            sample.u = clamp01(std::strtod(request.c_str() + up + 4, &end));
-            sample.v = clamp01(std::strtod(request.c_str() + vp + 4, &end));
-            sample.r = clamp01(std::strtod(request.c_str() + rp + 4, &end));
-            sample.g = clamp01(std::strtod(request.c_str() + gp + 4, &end));
-            sample.b = clamp01(std::strtod(request.c_str() + bp + 4, &end));
-            const auto roughp = request.find("\"roughness\":", bp);
-            if (roughp != std::string::npos && sample_end != std::string::npos && roughp < sample_end)
-            {
-                sample.roughness = clamp01(std::strtod(request.c_str() + roughp + 12, &end));
-            }
-            const auto radiusp = request.find("\"radius\":", bp);
-            if (radiusp != std::string::npos && sample_end != std::string::npos && radiusp < sample_end)
-            {
-                sample.radius = std::min(0.08, std::max(0.001, std::strtod(request.c_str() + radiusp + 9, &end)));
-            }
-            const auto wxp = request.find("\"world_x\":", bp);
-            const auto wyp = request.find("\"world_y\":", bp);
-            const auto wzp = request.find("\"world_z\":", bp);
-            if (sample_end != std::string::npos &&
-                wxp != std::string::npos && wyp != std::string::npos && wzp != std::string::npos &&
-                wxp < sample_end && wyp < sample_end && wzp < sample_end)
-            {
-                sample.world_position.X = std::strtod(request.c_str() + wxp + 10, &end);
-                sample.world_position.Y = std::strtod(request.c_str() + wyp + 10, &end);
-                sample.world_position.Z = std::strtod(request.c_str() + wzp + 10, &end);
-                sample.has_world_position = true;
-            }
-            samples.push_back(sample);
-            pos = bp + 4;
-        }
-        return samples;
-    }
-
-    auto fill_channel(std::vector<std::uint8_t>& bytes, std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) -> void
-    {
-        if (bytes.empty())
-        {
-            return;
-        }
-        if (bytes.size() % 4 == 0)
-        {
-            for (std::size_t i = 0; i + 3 < bytes.size(); i += 4)
-            {
-                bytes[i + 0] = r;
-                bytes[i + 1] = g;
-                bytes[i + 2] = b;
-                bytes[i + 3] = a;
-            }
-            return;
-        }
-        std::fill(bytes.begin(), bytes.end(), r);
-    }
-
-    auto paint_disc(std::vector<std::uint8_t>& bytes, int width, int height, const FrontSample& sample, bool albedo) -> void
-    {
-        if (bytes.empty() || width <= 0 || height <= 0)
-        {
-            return;
-        }
-        const bool rgba = bytes.size() == static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
-        const int cx = std::min(width - 1, std::max(0, static_cast<int>(sample.u * static_cast<double>(width))));
-        const int cy = std::min(height - 1, std::max(0, static_cast<int>((1.0 - sample.v) * static_cast<double>(height))));
-        const int radius = std::max(1, static_cast<int>(sample.radius * static_cast<double>(std::min(width, height))));
-        const int r2 = radius * radius;
-        const auto rb = static_cast<std::uint8_t>(std::round(clamp01(sample.r) * 255.0));
-        const auto gb = static_cast<std::uint8_t>(std::round(clamp01(sample.g) * 255.0));
-        const auto bb = static_cast<std::uint8_t>(std::round(clamp01(sample.b) * 255.0));
-        const auto scalar = static_cast<std::uint8_t>(std::round(clamp01(sample.roughness) * 255.0));
-        for (int y = std::max(0, cy - radius); y <= std::min(height - 1, cy + radius); ++y)
-        {
-            for (int x = std::max(0, cx - radius); x <= std::min(width - 1, cx + radius); ++x)
-            {
-                const int dx = x - cx;
-                const int dy = y - cy;
-                if ((dx * dx + dy * dy) > r2)
-                {
-                    continue;
-                }
-                const auto pixel = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
-                if (rgba)
-                {
-                    const auto offset = pixel * 4;
-                    bytes[offset + 0] = albedo ? rb : scalar;
-                    bytes[offset + 1] = albedo ? gb : scalar;
-                    bytes[offset + 2] = albedo ? bb : scalar;
-                    bytes[offset + 3] = 255;
-                }
-                else if (pixel < bytes.size())
-                {
-                    bytes[pixel] = albedo ? rb : scalar;
-                }
-            }
-        }
-    }
-
-    auto normalize_material_channel_layout(ChannelBuffer& channel, const ChannelBuffer& albedo) -> void
-    {
-        if (!channel.ok || !albedo.ok || albedo.width <= 0 || albedo.height <= 0)
-        {
-            return;
-        }
-        const auto pixels = static_cast<std::size_t>(albedo.width) * static_cast<std::size_t>(albedo.height);
-        if (pixels == 0)
-        {
-            return;
-        }
-        if (channel.bytes.size() == pixels)
-        {
-            channel.width = albedo.width;
-            channel.height = albedo.height;
-            channel.bytes_per_pixel = 1;
-        }
-        else if (channel.bytes.size() == pixels * 4)
-        {
-            channel.width = albedo.width;
-            channel.height = albedo.height;
-            channel.bytes_per_pixel = 4;
-        }
-    }
-
-    auto fill_material_channel(std::vector<std::uint8_t>& bytes, int bytes_per_pixel, std::uint8_t value) -> void
-    {
-        if (bytes.empty())
-        {
-            return;
-        }
-        if (bytes_per_pixel >= 4)
-        {
-            for (std::size_t i = 0; i + 3 < bytes.size(); i += 4)
-            {
-                bytes[i + 0] = value;
-                bytes[i + 1] = value;
-                bytes[i + 2] = value;
-                bytes[i + 3] = 255;
-            }
-            return;
-        }
-        std::fill(bytes.begin(), bytes.end(), value);
-    }
-
-    auto paint_material_disc(std::vector<std::uint8_t>& bytes,
-                             int width,
-                             int height,
-                             int bytes_per_pixel,
-                             const FrontSample& sample,
-                             std::uint8_t value) -> void
-    {
-        if (bytes.empty() || width <= 0 || height <= 0)
-        {
-            return;
-        }
-        bytes_per_pixel = bytes_per_pixel >= 4 ? 4 : 1;
-        const int cx = std::min(width - 1, std::max(0, static_cast<int>(sample.u * static_cast<double>(width))));
-        const int cy = std::min(height - 1, std::max(0, static_cast<int>((1.0 - sample.v) * static_cast<double>(height))));
-        const int radius = std::max(1, static_cast<int>(sample.radius * static_cast<double>(std::min(width, height))));
-        const int r2 = radius * radius;
-        for (int y = std::max(0, cy - radius); y <= std::min(height - 1, cy + radius); ++y)
-        {
-            for (int x = std::max(0, cx - radius); x <= std::min(width - 1, cx + radius); ++x)
-            {
-                const int dx = x - cx;
-                const int dy = y - cy;
-                if ((dx * dx + dy * dy) > r2)
-                {
-                    continue;
-                }
-                const auto pixel = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
-                const auto offset = pixel * static_cast<std::size_t>(bytes_per_pixel);
-                if (offset >= bytes.size())
-                {
-                    continue;
-                }
-                if (bytes_per_pixel >= 4 && offset + 3 < bytes.size())
-                {
-                    bytes[offset + 0] = value;
-                    bytes[offset + 1] = value;
-                    bytes[offset + 2] = value;
-                    bytes[offset + 3] = 255;
-                }
-                else
-                {
-                    bytes[offset] = value;
-                }
-            }
-        }
-    }
-
     auto clamp01(double value) -> double
     {
         return std::max(0.0, std::min(1.0, value));
-    }
-
-    auto sdk_luma(const Color& color) -> double
-    {
-        return color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
-    }
-
-    auto sdk_is_red_paint_artifact(const Color& color) -> bool
-    {
-        return color.r > 0.78 && color.g < 0.22 && color.b < 0.22;
-    }
-
-    auto sdk_infer_surface_material(Color color, bool floor_like) -> Color
-    {
-        if (floor_like)
-        {
-            color.roughness = std::max(0.86, std::min(0.99, std::max(color.roughness, 0.86)));
-            color.metallic = std::max(0.0, std::min(0.12, color.metallic));
-            return color;
-        }
-        color.roughness = std::max(0.35, std::min(0.99, color.roughness <= 0.0 ? 0.92 : color.roughness));
-        color.metallic = clamp01(color.metallic);
-        return color;
-    }
-
-    auto sdk_sanitize_background_color(const Color& captured, const Color& material_hint) -> Color
-    {
-        if (!sdk_is_red_paint_artifact(captured))
-        {
-            return captured;
-        }
-        Color fallback = material_hint;
-        if (sdk_is_red_paint_artifact(fallback))
-        {
-            fallback = Color{0.34, 0.37, 0.31, 0.94, 0.0};
-        }
-        fallback.r = std::max(0.05, std::min(0.72, fallback.r));
-        fallback.g = std::max(0.08, std::min(0.76, fallback.g));
-        fallback.b = std::max(0.06, std::min(0.70, fallback.b));
-        fallback.roughness = std::max(0.72, std::min(0.98, fallback.roughness));
-        fallback.metallic = 0.0;
-        return fallback;
-    }
-
-    auto sdk_compensate_projected_albedo_preserve_material(Color color, bool floor_like) -> Color
-    {
-        const auto roughness = clamp01(color.roughness);
-        const auto metallic = clamp01(color.metallic);
-        const auto lum = sdk_luma(color);
-        double lift = 1.02;
-        if (lum < 0.18)
-        {
-            lift = 1.10;
-        }
-        else if (lum < 0.34)
-        {
-            lift = 1.06;
-        }
-        else if (lum > 0.58)
-        {
-            lift = 1.00;
-        }
-        color.r = std::max(0.018, std::min(0.98, color.r * lift));
-        color.g = std::max(0.018, std::min(0.98, color.g * lift));
-        color.b = std::max(0.018, std::min(0.98, color.b * lift));
-        color.roughness = floor_like ? std::max(0.86, std::min(0.99, std::max(roughness, 0.86))) : roughness;
-        color.metallic = floor_like ? std::max(0.0, std::min(0.12, metallic)) : metallic;
-        return color;
     }
 
     auto sdk_worker_count_for_items(std::size_t item_count) -> unsigned
@@ -1479,6 +898,11 @@ namespace
         char buffer[32]{};
         std::snprintf(buffer, sizeof(buffer), "0x%llx", static_cast<unsigned long long>(value));
         return buffer;
+    }
+
+    auto hex_address(std::uintptr_t value) -> std::string
+    {
+        return early_hex_address(value);
     }
 
     auto early_json_bool(bool value) -> const char*
@@ -2017,178 +1441,6 @@ namespace
         return true;
     }
 
-    auto write_vector2(Reflection& ref, std::uintptr_t prop, std::uint8_t* container, double u, double v) -> bool
-    {
-        const auto offset = prop_offset(prop);
-        if (offset < 0)
-        {
-            return false;
-        }
-        auto* dest = container + offset;
-        const auto st = struct_type(ref, prop, {"X", "Y"});
-        bool wrote = false;
-        if (st)
-        {
-            if (const auto x = find_property_any(ref, st, {"X"}))
-            {
-                wrote = write_number(ref, x, dest, u) || wrote;
-            }
-            if (const auto y = find_property_any(ref, st, {"Y"}))
-            {
-                wrote = write_number(ref, y, dest, v) || wrote;
-            }
-            if (wrote)
-            {
-                return true;
-            }
-        }
-        const auto size = prop_element_size(prop);
-        if (size >= 16)
-        {
-            const double values[2]{u, v};
-            std::memcpy(dest, values, sizeof(values));
-            return true;
-        }
-        if (size >= 8)
-        {
-            const float values[2]{static_cast<float>(u), static_cast<float>(v)};
-            std::memcpy(dest, values, sizeof(values));
-            return true;
-        }
-        return false;
-    }
-
-    auto write_linear_color(Reflection& ref, std::uintptr_t prop, std::uint8_t* container, const Color& color) -> bool
-    {
-        const auto offset = prop_offset(prop);
-        if (offset < 0)
-        {
-            return false;
-        }
-        auto* dest = container + offset;
-        const auto st = struct_type(ref, prop, {"R", "G", "B", "A"});
-        bool wrote = false;
-        if (st)
-        {
-            if (const auto p = find_property_any(ref, st, {"R"})) wrote = write_number(ref, p, dest, color.r) || wrote;
-            if (const auto p = find_property_any(ref, st, {"G"})) wrote = write_number(ref, p, dest, color.g) || wrote;
-            if (const auto p = find_property_any(ref, st, {"B"})) wrote = write_number(ref, p, dest, color.b) || wrote;
-            if (const auto p = find_property_any(ref, st, {"A"})) wrote = write_number(ref, p, dest, 1.0) || wrote;
-            if (wrote) return true;
-        }
-        const float values[4]{static_cast<float>(color.r), static_cast<float>(color.g), static_cast<float>(color.b), 1.0f};
-        std::memcpy(dest, values, std::min<std::size_t>(16, static_cast<std::size_t>(std::max(0, prop_element_size(prop)))));
-        return true;
-    }
-
-    auto write_channel_data(Reflection& ref, std::uintptr_t prop, std::uint8_t* container, const Color& color, bool include_material) -> bool
-    {
-        const auto offset = prop_offset(prop);
-        if (offset < 0)
-        {
-            return false;
-        }
-        auto* base = container + offset;
-        const auto st = struct_type(ref, prop, {"AlbedoColor", "Metallic", "Roughness", "Height", "ApplyMode"});
-        if (!st)
-        {
-            return false;
-        }
-        bool wrote = false;
-        if (const auto p = find_property_any(ref, st, {"AlbedoColor"})) wrote = write_linear_color(ref, p, base, color) || wrote;
-        if (include_material)
-        {
-            if (const auto p = find_property_any(ref, st, {"Metallic"})) wrote = write_number(ref, p, base, clamp01(color.metallic)) || wrote;
-            if (const auto p = find_property_any(ref, st, {"Roughness"})) wrote = write_number(ref, p, base, clamp01(color.roughness)) || wrote;
-        }
-        if (const auto p = find_property_any(ref, st, {"Height"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"ApplyMode"})) wrote = write_number(ref, p, base, static_cast<double>(color.apply_mode)) || wrote;
-        return wrote;
-    }
-
-    auto write_brush_settings(Reflection& ref, std::uintptr_t prop, std::uint8_t* container, std::uintptr_t component, double radius) -> bool
-    {
-        const auto offset = prop_offset(prop);
-        if (offset < 0)
-        {
-            return false;
-        }
-        auto* base = container + offset;
-        bool wrote = false;
-        if (component)
-        {
-            const auto current = find_object_property(ref, component, "CurrentBrushSettings");
-            const auto current_offset = current ? prop_offset(current) : -1;
-            const auto dest_size = prop_element_size(prop);
-            const auto source_size = current ? prop_element_size(current) : 0;
-            const auto copy_size = source_size > 0 ? std::min(dest_size, source_size) : dest_size;
-            if (current_offset >= 0 && copy_size > 0 && copy_size <= 1024 &&
-                safe_copy(base, reinterpret_cast<void*>(component + current_offset), static_cast<std::size_t>(copy_size)))
-            {
-                wrote = true;
-            }
-        }
-        const auto st = struct_type(ref, prop, {"Radius", "Hardness", "Opacity", "Spacing", "Falloff", "BlendMode", "Rotation"});
-        if (!st)
-        {
-            return wrote;
-        }
-        if (const auto p = find_property_any(ref, st, {"Radius"})) wrote = write_number(ref, p, base, radius) || wrote;
-        if (const auto p = find_property_any(ref, st, {"Hardness"})) wrote = write_number(ref, p, base, 1.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"Opacity"})) wrote = write_number(ref, p, base, 1.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"Spacing"})) wrote = write_number(ref, p, base, 0.25) || wrote;
-        if (const auto p = find_property_any(ref, st, {"Falloff"})) wrote = write_number(ref, p, base, 2.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"BlendMode"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"Rotation"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        return wrote;
-    }
-
-    auto write_paint_stroke_data(Reflection& ref,
-                                 std::uintptr_t prop,
-                                 std::uint8_t* container,
-                                 std::uintptr_t component,
-                                 double u,
-                                 double v,
-                                 const Color& color,
-                                 double radius) -> bool
-    {
-        const auto offset = prop_offset(prop);
-        if (offset < 0)
-        {
-            return false;
-        }
-        auto* base = container + offset;
-        const auto st = struct_type(ref,
-                                    prop,
-                                    {"Uv",
-                                     "UV",
-                                     "PaintUv",
-                                     "PaintUV",
-                                     "BrushSettings",
-                                     "ChannelData",
-                                     "TargetChannel",
-                                     "EffectiveBrushWorldRadius"});
-        if (!st)
-        {
-            return false;
-        }
-        bool wrote = false;
-        if (const auto p = find_property_any(ref, st, {"Uv", "UV", "PaintUv", "PaintUV"})) wrote = write_vector2(ref, p, base, u, v) || wrote;
-        if (const auto p = find_property_any(ref, st, {"BrushSettings"})) wrote = write_brush_settings(ref, p, base, component, radius) || wrote;
-        if (const auto p = find_property_any(ref, st, {"ChannelData"})) wrote = write_channel_data(ref, p, base, color, true) || wrote;
-        if (const auto p = find_property_any(ref, st, {"TargetChannel", "Channel", "PaintChannel"})) wrote = write_number(ref, p, base, PaintChannelAlbedoMetallicRoughness) || wrote;
-        if (const auto p = find_property_any(ref, st, {"EffectiveBrushWorldRadius"})) wrote = write_number(ref, p, base, radius) || wrote;
-        if (const auto p = find_property_any(ref, st, {"EffectiveSubdivisionLevel"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"EffectiveSubdivisionPixelSize"})) wrote = write_number(ref, p, base, 1.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"EffectiveTemplateResolution"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"EffectiveMaxGeneratedBrushTriangles"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"EffectiveGutterExpandPixels"})) wrote = write_number(ref, p, base, 0.0) || wrote;
-        if (const auto p = find_property_any(ref, st, {"bHasWorldPosition"})) wrote = write_bool(p, base, false) || wrote;
-        if (const auto p = find_property_any(ref, st, {"bHasLocalPosition"})) wrote = write_bool(p, base, false) || wrote;
-        if (const auto p = find_property_any(ref, st, {"bHasSkeletalTriangleAnchor"})) wrote = write_bool(p, base, false) || wrote;
-        return wrote;
-    }
-
     auto process_event(std::uintptr_t object, std::uintptr_t function, std::uint8_t* params, std::string& failure) -> bool
     {
         auto target = g_original_process_event.load();
@@ -2325,308 +1577,17 @@ namespace
         return 0;
     }
 
-    auto call_uv_paint_function(Reflection& ref,
-                                std::uintptr_t component,
-                                const char* function_name,
-                                double u,
-                                double v,
-                                const Color& color,
-                                double radius,
-                                bool allow_brush_settings,
-                                std::string& failure) -> bool
-    {
-        const auto function = ref.find_function(component, function_name);
-        if (!function)
-        {
-            failure = std::string(function_name) + "_unavailable";
-            return false;
-        }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size <= 0 || params_size > 8192)
-        {
-            failure = "paint_params_size_invalid";
-            return false;
-        }
-        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
-        bool wrote_uv = false;
-        bool wrote_channel_data = false;
-        bool wrote_channel = false;
-        bool brush_required = false;
-        bool wrote_brush = false;
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            const auto raw_name = ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName));
-            const auto name = lower_copy(raw_name);
-            if (name == "returnvalue")
-            {
-                continue;
-            }
-            if (name == "uv" || contains_text(name, "paintuv"))
-            {
-                wrote_uv = write_vector2(ref, prop, params.data(), u, v) || wrote_uv;
-                continue;
-            }
-            if (contains_text(name, "channeldata"))
-            {
-                wrote_channel_data = write_channel_data(ref, prop, params.data(), color, true) || wrote_channel_data;
-                continue;
-            }
-            if (contains_text(name, "brushsettings"))
-            {
-                brush_required = true;
-                if (allow_brush_settings)
-                {
-                    wrote_brush = write_brush_settings(ref, prop, params.data(), component, radius) || wrote_brush;
-                }
-                continue;
-            }
-            if (name == "channel" || name == "targetchannel" || contains_text(name, "paintchannel"))
-            {
-                wrote_channel = write_number(ref, prop, params.data(), PaintChannelAlbedoMetallicRoughness) || wrote_channel;
-                continue;
-            }
-        }
-        if (!wrote_uv || !wrote_channel_data || !wrote_channel || (brush_required && !wrote_brush))
-        {
-            failure = "paint_param_write_failed uv=" + std::to_string(wrote_uv ? 1 : 0) + " channel_data=" +
-                      std::to_string(wrote_channel_data ? 1 : 0) + " channel=" + std::to_string(wrote_channel ? 1 : 0) +
-                      " brush=" + std::to_string((!brush_required || wrote_brush) ? 1 : 0);
-            return false;
-        }
-        if (!process_event(component, function, params.data(), failure))
-        {
-            return false;
-        }
-        if (!read_return_bool(ref, function, params.data()))
-        {
-            failure = "paint_return_false";
-            return false;
-        }
-        return true;
-    }
-
-    auto call_stroke_paint_function(Reflection& ref,
-                                    std::uintptr_t component,
-                                    const char* function_name,
-                                    double u,
-                                    double v,
-                                    const Color& color,
-                                    double radius,
-                                    std::string& failure) -> bool
-    {
-        const auto function = ref.find_function(component, function_name);
-        if (!function)
-        {
-            failure = std::string(function_name) + "_unavailable";
-            return false;
-        }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size <= 0 || params_size > 8192)
-        {
-            failure = std::string(function_name) + "_params_size_invalid";
-            return false;
-        }
-        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
-        bool wrote_stroke = false;
-        bool wrote_uv = false;
-        bool wrote_channel_data = false;
-        bool wrote_channel = false;
-        bool wrote_brush = false;
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            const auto raw_name = ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName));
-            const auto name = lower_copy(raw_name);
-            if (name == "returnvalue")
-            {
-                continue;
-            }
-            wrote_stroke = write_paint_stroke_data(ref, prop, params.data(), component, u, v, color, radius) || wrote_stroke;
-            if (name == "uv" || contains_text(name, "paintuv"))
-            {
-                wrote_uv = write_vector2(ref, prop, params.data(), u, v) || wrote_uv;
-                continue;
-            }
-            if (contains_text(name, "channeldata"))
-            {
-                wrote_channel_data = write_channel_data(ref, prop, params.data(), color, true) || wrote_channel_data;
-                continue;
-            }
-            if (contains_text(name, "brushsettings"))
-            {
-                wrote_brush = write_brush_settings(ref, prop, params.data(), component, radius) || wrote_brush;
-                continue;
-            }
-            if (name == "channel" || name == "targetchannel" || contains_text(name, "paintchannel"))
-            {
-                wrote_channel = write_number(ref, prop, params.data(), PaintChannelAlbedoMetallicRoughness) || wrote_channel;
-                continue;
-            }
-        }
-        if (!wrote_stroke && (!wrote_uv || !wrote_channel_data))
-        {
-            failure = std::string(function_name) + "_param_write_failed stroke=" + std::to_string(wrote_stroke ? 1 : 0) +
-                      " uv=" + std::to_string(wrote_uv ? 1 : 0) + " channel_data=" + std::to_string(wrote_channel_data ? 1 : 0) +
-                      " channel=" + std::to_string(wrote_channel ? 1 : 0) + " brush=" + std::to_string(wrote_brush ? 1 : 0);
-            return false;
-        }
-        if (!process_event(component, function, params.data(), failure))
-        {
-            failure = std::string(function_name) + "_" + failure;
-            return false;
-        }
-        if (!read_return_bool(ref, function, params.data()))
-        {
-            failure = std::string(function_name) + "_return_false";
-            return false;
-        }
-        return true;
-    }
-
-    auto call_replicated_paint_at_uv(Reflection& ref,
-                                     std::uintptr_t component,
-                                     double u,
-                                     double v,
-                                     const Color& color,
-                                     double radius,
-                                     std::string& failure,
-                                     PaintCallStats& stats) -> bool
-    {
-        bool called = false;
-        std::string first_failure{};
-        const char* server_rpcs[]{"ServerSendPaint", "ServerPaint", "SendPaintToServer", "RequestPaintOnServer"};
-        for (const auto* rpc : server_rpcs)
-        {
-            std::string rpc_failure{};
-            if (call_stroke_paint_function(ref, component, rpc, u, v, color, radius, rpc_failure))
-            {
-                called = true;
-                ++stats.server_success;
-                break;
-            }
-            ++stats.server_failure;
-            if (first_failure.empty())
-            {
-                first_failure = rpc_failure;
-            }
-        }
-
-        bool local_called = false;
-        const char* local_stroke_rpcs[]{"PaintStrokeUV"};
-        for (const auto* rpc : local_stroke_rpcs)
-        {
-            std::string rpc_failure{};
-            if (call_stroke_paint_function(ref, component, rpc, u, v, color, radius, rpc_failure))
-            {
-                local_called = true;
-                ++stats.local_success;
-                break;
-            }
-            ++stats.local_failure;
-            if (first_failure.empty())
-            {
-                first_failure = rpc_failure;
-            }
-        }
-
-        const char* local_uv_rpcs[]{"PaintAtUVWithBrush", "PaintAtUV"};
-        for (const auto* rpc : local_uv_rpcs)
-        {
-            std::string rpc_failure{};
-            if (call_uv_paint_function(ref, component, rpc, u, v, color, radius, true, rpc_failure))
-            {
-                local_called = true;
-                ++stats.local_success;
-                break;
-            }
-            ++stats.local_failure;
-            if (first_failure.empty())
-            {
-                first_failure = rpc_failure;
-            }
-        }
-
-        if (called || local_called)
-        {
-            return true;
-        }
-        failure = !first_failure.empty() ? first_failure : "replicated_paint_rpc_unavailable";
-        if (stats.first_failure.empty())
-        {
-            stats.first_failure = failure;
-        }
-        return false;
-    }
-
-    auto parse_average_color(const std::string& request) -> Color
-    {
-        Color out{};
-        out.r = 0.42;
-        out.g = 0.42;
-        out.b = 0.36;
-        out.roughness = 0.65;
-        out.metallic = 0.0;
-        out.apply_mode = 1;
-
-        double sr = 0.0, sg = 0.0, sb = 0.0;
-        int count = 0;
-        std::size_t pos = request.find("\"front_samples\"");
-        if (pos == std::string::npos)
-        {
-            pos = 0;
-        }
-        while (count < 256)
-        {
-            const auto rp = request.find("\"r\":", pos);
-            if (rp == std::string::npos)
-            {
-                break;
-            }
-            const auto gp = request.find("\"g\":", rp);
-            const auto bp = request.find("\"b\":", gp == std::string::npos ? rp : gp);
-            if (gp == std::string::npos || bp == std::string::npos)
-            {
-                break;
-            }
-            char* end = nullptr;
-            const double r = std::strtod(request.c_str() + rp + 4, &end);
-            const double g = std::strtod(request.c_str() + gp + 4, &end);
-            const double b = std::strtod(request.c_str() + bp + 4, &end);
-            if (std::isfinite(r) && std::isfinite(g) && std::isfinite(b))
-            {
-                sr += clamp01(r);
-                sg += clamp01(g);
-                sb += clamp01(b);
-                ++count;
-            }
-            pos = bp + 4;
-        }
-        if (count > 0)
-        {
-            out.r = sr / count;
-            out.g = sg / count;
-            out.b = sb / count;
-        }
-        return out;
-    }
-
     struct ComponentSelection
     {
         std::uintptr_t component{0};
-        std::uintptr_t pawn{0};
-        std::uintptr_t target{0};
-        std::uintptr_t target_mesh{0};
         std::uintptr_t owner{0};
-        std::string source{};
+        std::uintptr_t target{0};
         std::string target_source{};
+        std::uintptr_t target_mesh{0};
         std::string mesh_source{};
+        std::string source{};
+        std::uintptr_t pawn{0};
     };
-
-    auto hex_address(std::uintptr_t value) -> std::string
-    {
-        char buffer[32]{};
-        std::snprintf(buffer, sizeof(buffer), "0x%llx", static_cast<unsigned long long>(value));
-        return buffer;
-    }
 
     auto find_component(Reflection& ref, std::string& failure) -> ComponentSelection
     {
@@ -2933,17 +1894,16 @@ namespace
         int ref_match_count = 0;
         int mesh_match_count = 0;
         int any_owner_candidate_count = 0;
-        std::string first_export_probe_failure{};
-        std::uintptr_t first_export_probe_component = 0;
-        std::string first_export_probe_class{};
-
         auto check_component = [&](std::uintptr_t obj, const char* source, bool require_owner) -> bool {
             if (!live_object(obj))
             {
                 return false;
             }
             const auto cls = lower_copy(ref.class_name(obj));
-            if ((contains_text(cls, "runtimepaint") || contains_text(cls, "paint")) && ref.find_function(obj, "PaintAtUVWithBrush"))
+            const bool paint_component = contains_text(cls, "runtimepaint") || contains_text(cls, "paint");
+            const bool server_ready = ref.find_function(obj, "ServerPaintBatch") != 0;
+            const bool front_sampler_ready = ref.find_function(obj, "HitTestAtScreenPosition") != 0;
+            if (paint_component && server_ready && front_sampler_ready)
             {
                 ++candidate_count;
                 const auto owner = read_owner(obj);
@@ -2977,20 +1937,6 @@ namespace
                 if (require_owner && !owner_match && !outer_match && !ref_match && !mesh_match)
                 {
                     return false;
-                }
-                if (require_owner)
-                {
-                    const auto export_probe = export_channel_bytes(ref, obj, 0);
-                    if (!export_probe.ok)
-                    {
-                        if (first_export_probe_failure.empty())
-                        {
-                            first_export_probe_failure = export_probe.failure;
-                            first_export_probe_component = obj;
-                            first_export_probe_class = ref.class_name(obj);
-                        }
-                        return false;
-                    }
                 }
                 selected.component = obj;
                 selected.owner = owner;
@@ -3059,9 +2005,8 @@ namespace
             }
             const auto cls = lower_copy(ref.class_name(obj));
             if (!(contains_text(cls, "runtimepaint") || contains_text(cls, "paint")) ||
-                !ref.find_function(obj, "PaintAtUVWithBrush") ||
-                !ref.find_function(obj, "ExportChannelToBytes") ||
-                !ref.find_function(obj, "ImportChannelFromBytes"))
+                !ref.find_function(obj, "ServerPaintBatch") ||
+                !ref.find_function(obj, "HitTestAtScreenPosition"))
             {
                 return false;
             }
@@ -3140,10 +2085,7 @@ namespace
                       " owner_matches=" + std::to_string(owner_match_count) +
                       " outer_matches=" + std::to_string(outer_match_count) +
                       " ref_matches=" + std::to_string(ref_match_count) +
-                      " mesh_matches=" + std::to_string(mesh_match_count) +
-                      " export_probe_component=" + hex_address(first_export_probe_component) +
-                      " export_probe_class=" + first_export_probe_class +
-                      " export_probe_failure=" + first_export_probe_failure;
+                      " mesh_matches=" + std::to_string(mesh_match_count);
         }
         return selected;
     }
@@ -3223,20 +2165,6 @@ namespace
         return value ? "true" : "false";
     }
 
-    auto first_bytes_hex(const std::vector<std::uint8_t>& bytes, std::size_t limit = 16) -> std::string
-    {
-        static const char* hex = "0123456789abcdef";
-        std::string out{};
-        const auto count = std::min(limit, bytes.size());
-        out.reserve(count * 2);
-        for (std::size_t i = 0; i < count; ++i)
-        {
-            out.push_back(hex[(bytes[i] >> 4) & 0xF]);
-            out.push_back(hex[bytes[i] & 0xF]);
-        }
-        return out;
-    }
-
     struct SdkContext
     {
         bool ok{false};
@@ -3260,23 +2188,7 @@ namespace
         std::uintptr_t k2_get_actor_location_function{0};
         meccha_sdk::FVector body_world_position{};
         std::uintptr_t component{0};
-        std::uintptr_t relay_component{0};
-        std::uintptr_t relay_stroke_batch_to_server_function{0};
-        std::uintptr_t relay_paint_to_server_function{0};
-        std::uintptr_t relay_texture_sync_to_server_function{0};
-        std::uintptr_t server_relay_texture_sync_function{0};
-        std::uintptr_t export_function{0};
-        std::uintptr_t import_function{0};
-        std::uintptr_t get_render_target_function{0};
-        std::uintptr_t request_full_texture_sync_function{0};
-        std::uintptr_t server_request_texture_sync_function{0};
-        std::uintptr_t multicast_sync_channel_data_function{0};
-        std::uintptr_t multicast_sync_compressed_channel_data_function{0};
         std::uintptr_t server_paint_batch_function{0};
-        std::uintptr_t server_send_stroke_batch_function{0};
-        std::uintptr_t server_send_paint_function{0};
-        std::uintptr_t server_paint_function{0};
-        std::uintptr_t paint_at_uv_with_brush_function{0};
     };
 
     struct SdkViewportInfo
@@ -3291,20 +2203,6 @@ namespace
         std::string failure{};
         meccha_sdk::FVector location{};
         meccha_sdk::FVector direction{};
-    };
-
-    struct SdkBrushQueryHit
-    {
-        bool params_ok{false};
-        bool success{false};
-        bool has_uv{false};
-        double u{0.0};
-        double v{0.0};
-        meccha_sdk::FVector world_position{};
-        meccha_sdk::FVector normal{};
-        std::uintptr_t actor{0};
-        std::uintptr_t component{0};
-        std::string failure{};
     };
 
     auto sdk_vec_add(const meccha_sdk::FVector& a, const meccha_sdk::FVector& b) -> meccha_sdk::FVector
@@ -3717,43 +2615,10 @@ namespace
                ",\"runtime_paintable_offset\":\"0xb68\"" +
                ",\"component\":\"" + hex_address(ctx.component) + "\"" +
                ",\"component_class\":\"" + json_escape(ref.class_name(ctx.component)) + "\"" +
-               ",\"runtime_paint_relay_offset\":\"0x770\"" +
-               ",\"relay_component\":\"" + hex_address(ctx.relay_component) + "\"" +
-               ",\"relay_component_class\":\"" + json_escape(ref.class_name(ctx.relay_component)) + "\"" +
-               ",\"function_relay_stroke_batch_to_server_available\":" + std::string(json_bool(ctx.relay_stroke_batch_to_server_function != 0)) +
-               ",\"function_relay_paint_to_server_available\":" + std::string(json_bool(ctx.relay_paint_to_server_function != 0)) +
-               ",\"function_relay_texture_sync_to_server_available\":" + std::string(json_bool(ctx.relay_texture_sync_to_server_function != 0)) +
-               ",\"function_server_relay_texture_sync_available\":" + std::string(json_bool(ctx.server_relay_texture_sync_function != 0)) +
-               ",\"function_export_available\":" + std::string(json_bool(ctx.export_function != 0)) +
-               ",\"function_import_available\":" + std::string(json_bool(ctx.import_function != 0)) +
-               ",\"function_get_render_target_available\":" + std::string(json_bool(ctx.get_render_target_function != 0)) +
-               ",\"function_request_full_texture_sync_available\":" + std::string(json_bool(ctx.request_full_texture_sync_function != 0)) +
-               ",\"function_server_request_texture_sync_available\":" + std::string(json_bool(ctx.server_request_texture_sync_function != 0)) +
-               ",\"function_multicast_sync_channel_data_available\":" + std::string(json_bool(ctx.multicast_sync_channel_data_function != 0)) +
-               ",\"function_multicast_sync_compressed_channel_data_available\":" + std::string(json_bool(ctx.multicast_sync_compressed_channel_data_function != 0)) +
                ",\"function_server_paint_batch_available\":" + std::string(json_bool(ctx.server_paint_batch_function != 0)) +
-               ",\"function_server_send_stroke_batch_available\":" + std::string(json_bool(ctx.server_send_stroke_batch_function != 0)) +
-               ",\"function_server_send_paint_available\":" + std::string(json_bool(ctx.server_send_paint_function != 0)) +
-               ",\"function_server_paint_available\":" + std::string(json_bool(ctx.server_paint_function != 0)) +
-               ",\"function_paint_at_uv_with_brush_available\":" + std::string(json_bool(ctx.paint_at_uv_with_brush_function != 0)) +
-               ",\"function_relay_stroke_batch_to_server\":\"" + hex_address(ctx.relay_stroke_batch_to_server_function) + "\"" +
-               ",\"function_relay_paint_to_server\":\"" + hex_address(ctx.relay_paint_to_server_function) + "\"" +
-               ",\"function_relay_texture_sync_to_server\":\"" + hex_address(ctx.relay_texture_sync_to_server_function) + "\"" +
-               ",\"function_server_relay_texture_sync\":\"" + hex_address(ctx.server_relay_texture_sync_function) + "\"" +
-               ",\"function_export\":\"" + hex_address(ctx.export_function) + "\"" +
-               ",\"function_import\":\"" + hex_address(ctx.import_function) + "\"" +
-               ",\"function_get_render_target\":\"" + hex_address(ctx.get_render_target_function) + "\"" +
-               ",\"function_request_full_texture_sync\":\"" + hex_address(ctx.request_full_texture_sync_function) + "\"" +
-               ",\"function_server_request_texture_sync\":\"" + hex_address(ctx.server_request_texture_sync_function) + "\"" +
-               ",\"function_multicast_sync_channel_data\":\"" + hex_address(ctx.multicast_sync_channel_data_function) + "\"" +
-               ",\"function_multicast_sync_compressed_channel_data\":\"" + hex_address(ctx.multicast_sync_compressed_channel_data_function) + "\"" +
                ",\"function_server_paint_batch\":\"" + hex_address(ctx.server_paint_batch_function) + "\"" +
-               ",\"function_server_send_stroke_batch\":\"" + hex_address(ctx.server_send_stroke_batch_function) + "\"" +
-               ",\"function_server_send_paint\":\"" + hex_address(ctx.server_send_paint_function) + "\"" +
-               ",\"function_server_paint\":\"" + hex_address(ctx.server_paint_function) + "\"" +
-               ",\"function_paint_at_uv_with_brush\":\"" + hex_address(ctx.paint_at_uv_with_brush_function) + "\"" +
-               ",\"param_schema\":\"FPaintStroke{Uv@0,WorldPosition@16,bHasWorldPosition@40,BrushSettings@104,ChannelData@144,TargetChannel@176};ServerPaintBatch{Batch@0};PaintAtUVWithBrush{Uv@0,ChannelData@16,BrushSettings@48,Channel@88};RelayTextureSyncToServer{PaintComponent@0};MulticastSyncChannelData{Channel@0,Data@8}\"" +
-               std::string(",\"replication\":\"component_server_paint_batch\"") +
+               ",\"param_schema\":\"FPaintStroke{Uv@0,WorldPosition@16,bHasWorldPosition@40,BrushSettings@104,ChannelData@144,TargetChannel@176};ServerPaintBatch{Batch@0}\"" +
+               std::string(",\"sdk_replication_api\":\"component_server_paint_batch\"") +
                ",\"multiplayer_replicated\":true";
     }
 
@@ -3914,26 +2779,7 @@ namespace
             ctx.message = "BP_FirstPersonCharacter.RuntimePaintable unavailable";
             return ctx;
         }
-        ctx.relay_component = safe_read<std::uintptr_t>(ctx.controller + meccha_sdk::FieldOffsets::BP_PlayerController_RuntimePaintRelay);
-        if (live_uobject(ctx.relay_component))
-        {
-            ctx.relay_stroke_batch_to_server_function = ref.find_function(ctx.relay_component, "RelayStrokeBatchToServer");
-            ctx.relay_paint_to_server_function = ref.find_function(ctx.relay_component, "RelayPaintToServer");
-            ctx.relay_texture_sync_to_server_function = ref.find_function(ctx.relay_component, "RelayTextureSyncToServer");
-            ctx.server_relay_texture_sync_function = ref.find_function(ctx.relay_component, "ServerRelayTextureSync");
-        }
-        ctx.export_function = ref.find_function(ctx.component, "ExportChannelToBytes");
-        ctx.import_function = ref.find_function(ctx.component, "ImportChannelFromBytes");
-        ctx.get_render_target_function = ref.find_function(ctx.component, "GetRenderTarget");
-        ctx.request_full_texture_sync_function = ref.find_function(ctx.component, "RequestFullTextureSync");
-        ctx.server_request_texture_sync_function = ref.find_function(ctx.component, "ServerRequestTextureSync");
-        ctx.multicast_sync_channel_data_function = ref.find_function(ctx.component, "MulticastSyncChannelData");
-        ctx.multicast_sync_compressed_channel_data_function = ref.find_function(ctx.component, "MulticastSyncCompressedChannelData");
         ctx.server_paint_batch_function = ref.find_function(ctx.component, "ServerPaintBatch");
-        ctx.server_send_stroke_batch_function = ref.find_function(ctx.component, "ServerSendStrokeBatch");
-        ctx.server_send_paint_function = ref.find_function(ctx.component, "ServerSendPaint");
-        ctx.server_paint_function = ref.find_function(ctx.component, "ServerPaint");
-        ctx.paint_at_uv_with_brush_function = ref.find_function(ctx.component, "PaintAtUVWithBrush");
         ctx.ok = true;
         ctx.stage = "sdk_ready";
         ctx.message = "SDK context ready";
@@ -3945,79 +2791,13 @@ namespace
         std::vector<FrontSample> samples{};
         std::string failure{};
         std::uintptr_t mesh{0};
-        std::uintptr_t query{0};
         std::uintptr_t hit_test_function{0};
-        std::uintptr_t deproject_function{0};
-        std::uintptr_t query_function{0};
         std::string sampling_backend{"unset"};
-        std::string hit_test_schema{};
-        std::string deproject_schema{};
-        std::string query_schema{};
         int viewport_width{0};
         int viewport_height{0};
-        int hit_test_calls{0};
-        int hit_test_success{0};
-        int hit_test_failed{0};
-        int deproject_calls{0};
-        int deproject_ok{0};
-        int deproject_return_false{0};
-        int deproject_direction_invalid{0};
-        int deproject_process_failed{0};
-        int query_calls{0};
-        int query_param_failed{0};
-        int query_result_failed{0};
-        int owner_matches{0};
-        int owner_unknown_accepted{0};
-        int owner_mismatch_rejected{0};
         int min_front_hits{2048};
         int target_front_hits{220000};
-        int target_unique_atlas_texels{500000};
-        int unique_atlas_texels{0};
-        int coarse_grid_x{96};
-        int coarse_grid_y{72};
-        int refine_grid_x{640};
-        int refine_grid_y{520};
-        int coarse_seeds{0};
-        int refine_seeds{0};
         int hard_attempt_budget{600000};
-        int adaptive_passes{0};
-        int adaptive_seeds{0};
-        int adaptive_attempts{0};
-        int adaptive_hits{0};
-        double bbox_min_nx{1.0};
-        double bbox_min_ny{1.0};
-        double bbox_max_nx{0.0};
-        double bbox_max_ny{0.0};
-        int attempts{0};
-        int query_success{0};
-        int uv_hits{0};
-        int duplicate_uv{0};
-        int rejected{0};
-        double first_screen_x{0.0};
-        double first_screen_y{0.0};
-        meccha_sdk::FVector first_ray_location{};
-        meccha_sdk::FVector first_ray_direction{};
-        double first_hit_u{0.0};
-        double first_hit_v{0.0};
-        meccha_sdk::FVector first_hit_world_position{};
-        std::uintptr_t first_hit_actor{0};
-        std::uintptr_t first_hit_component{0};
-        std::string first_deproject_failure{};
-        std::string first_query_failure{};
-    };
-
-    struct SdkFrontCaptureProbe
-    {
-        bool ok{false};
-        std::string failure{"front_capture_unavailable"};
-        int requested_samples{0};
-        std::uintptr_t project_world_to_screen_function{0};
-        std::uintptr_t scene_capture_class{0};
-        std::uintptr_t create_render_target_function{0};
-        std::uintptr_t read_render_target_raw_pixel_function{0};
-        std::uintptr_t read_render_target_pixel_function{0};
-        std::uintptr_t read_render_target_raw_function{0};
-        std::uintptr_t read_render_target_function{0};
     };
 
     struct SdkFrontCaptureResult
@@ -4105,21 +2885,6 @@ namespace
         std::string bulk_color_transform{"identity"};
         std::string bulk_calibration_backend{"not_run"};
         std::string capture_transform_backend{"project_world_to_screen_scaled"};
-    };
-
-    struct SdkUvGapFillStats
-    {
-        int candidates{0};
-        int sent{0};
-        int bounded{0};
-        int edge_extended{0};
-        int rejected_unbounded{0};
-        int rejected_normal{0};
-        int rejected_occupied{0};
-        int direct_cells{0};
-        int considered_cells{0};
-        double coverage_before{0.0};
-        double coverage_after{0.0};
     };
 
     auto sdk_find_object_named(Reflection& ref, const char* object_name) -> std::uintptr_t
@@ -4315,123 +3080,6 @@ namespace
         return out;
     }
 
-    auto sdk_probe_front_capture_backend(Reflection& ref,
-                                         const SdkContext& ctx,
-                                         const SdkNativeFrontSampleResult& samples) -> SdkFrontCaptureProbe
-    {
-        SdkFrontCaptureProbe out{};
-        out.requested_samples = static_cast<int>(samples.samples.size());
-        out.project_world_to_screen_function = ref.find_function(ctx.controller, "ProjectWorldLocationToScreen");
-        out.scene_capture_class = ref.find_class("SceneCapture2D");
-        out.create_render_target_function = sdk_find_object_named(ref, "CreateRenderTarget2D");
-        out.read_render_target_raw_pixel_function = sdk_find_object_named(ref, "ReadRenderTargetRawPixel");
-        out.read_render_target_pixel_function = sdk_find_object_named(ref, "ReadRenderTargetPixel");
-        out.read_render_target_raw_function = sdk_find_object_named(ref, "ReadRenderTargetRaw");
-        out.read_render_target_function = sdk_find_object_named(ref, "ReadRenderTarget");
-
-        if (out.requested_samples <= 0)
-        {
-            out.failure = "front_capture_no_surface_samples";
-            return out;
-        }
-        if (!out.project_world_to_screen_function)
-        {
-            out.failure = "front_capture_project_world_to_screen_unavailable";
-            return out;
-        }
-        if (!out.scene_capture_class)
-        {
-            out.failure = "front_capture_scene_capture_class_unavailable";
-            return out;
-        }
-        if (!out.create_render_target_function)
-        {
-            out.failure = "front_capture_create_render_target_unavailable";
-            return out;
-        }
-        if (!out.read_render_target_raw_pixel_function && !out.read_render_target_pixel_function &&
-            !out.read_render_target_raw_function && !out.read_render_target_function)
-        {
-            out.failure = "front_capture_read_render_target_unavailable";
-            return out;
-        }
-
-        out.ok = true;
-        out.failure = "ok";
-        return out;
-    }
-
-    auto sdk_native_front_metadata(const SdkNativeFrontSampleResult& native_front) -> std::string
-    {
-        return ",\"front_sample_count\":" + std::to_string(native_front.samples.size()) +
-               ",\"front_sample_source\":\"native_ue4ss_surface_samples\"" +
-               ",\"front_mapping_required\":\"game_surface_trace_world_position\"" +
-               ",\"front_native_min_surface_samples\":" + std::to_string(native_front.min_front_hits) +
-               ",\"front_native_target_surface_samples\":" + std::to_string(native_front.target_front_hits) +
-               ",\"front_native_target_unique_atlas_texels\":" + std::to_string(native_front.target_unique_atlas_texels) +
-               ",\"front_native_unique_atlas_texels\":" + std::to_string(native_front.unique_atlas_texels) +
-               ",\"front_native_coarse_grid_x\":" + std::to_string(native_front.coarse_grid_x) +
-               ",\"front_native_coarse_grid_y\":" + std::to_string(native_front.coarse_grid_y) +
-               ",\"front_native_refine_grid_x\":" + std::to_string(native_front.refine_grid_x) +
-               ",\"front_native_refine_grid_y\":" + std::to_string(native_front.refine_grid_y) +
-               ",\"front_native_coarse_seeds\":" + std::to_string(native_front.coarse_seeds) +
-               ",\"front_native_refine_seeds\":" + std::to_string(native_front.refine_seeds) +
-               ",\"front_native_hard_attempt_budget\":" + std::to_string(native_front.hard_attempt_budget) +
-               ",\"front_native_adaptive_passes\":" + std::to_string(native_front.adaptive_passes) +
-               ",\"front_native_adaptive_seeds\":" + std::to_string(native_front.adaptive_seeds) +
-               ",\"front_native_adaptive_attempts\":" + std::to_string(native_front.adaptive_attempts) +
-               ",\"front_native_adaptive_hits\":" + std::to_string(native_front.adaptive_hits) +
-               ",\"front_native_bbox_min_nx\":" + std::to_string(native_front.bbox_min_nx) +
-               ",\"front_native_bbox_min_ny\":" + std::to_string(native_front.bbox_min_ny) +
-               ",\"front_native_bbox_max_nx\":" + std::to_string(native_front.bbox_max_nx) +
-               ",\"front_native_bbox_max_ny\":" + std::to_string(native_front.bbox_max_ny) +
-               ",\"front_native_sampling_backend\":\"" + json_escape(native_front.sampling_backend) + "\"" +
-               ",\"front_native_query\":\"" + hex_address(native_front.query) + "\"" +
-               ",\"front_native_mesh\":\"" + hex_address(native_front.mesh) + "\"" +
-               ",\"front_native_hit_test_function\":\"" + hex_address(native_front.hit_test_function) + "\"" +
-               ",\"front_native_deproject_function\":\"" + hex_address(native_front.deproject_function) + "\"" +
-               ",\"front_native_query_function\":\"" + hex_address(native_front.query_function) + "\"" +
-               ",\"front_native_hit_test_calls\":" + std::to_string(native_front.hit_test_calls) +
-               ",\"front_native_hit_test_success\":" + std::to_string(native_front.hit_test_success) +
-               ",\"front_native_hit_test_failed\":" + std::to_string(native_front.hit_test_failed) +
-               ",\"front_native_viewport_width\":" + std::to_string(native_front.viewport_width) +
-               ",\"front_native_viewport_height\":" + std::to_string(native_front.viewport_height) +
-               ",\"front_native_deproject_calls\":" + std::to_string(native_front.deproject_calls) +
-               ",\"front_native_deproject_ok\":" + std::to_string(native_front.deproject_ok) +
-               ",\"front_native_query_calls\":" + std::to_string(native_front.query_calls) +
-               ",\"front_native_owner_matches\":" + std::to_string(native_front.owner_matches) +
-               ",\"front_native_query_success\":" + std::to_string(native_front.query_success) +
-               ",\"front_native_uv_hits\":" + std::to_string(native_front.uv_hits) +
-               ",\"front_native_duplicate_uv\":" + std::to_string(native_front.duplicate_uv) +
-               ",\"front_native_rejected\":" + std::to_string(native_front.rejected) +
-               ",\"front_native_first_hit_u\":" + std::to_string(native_front.first_hit_u) +
-               ",\"front_native_first_hit_v\":" + std::to_string(native_front.first_hit_v) +
-               ",\"front_native_first_hit_world_x\":" + std::to_string(native_front.first_hit_world_position.X) +
-               ",\"front_native_first_hit_world_y\":" + std::to_string(native_front.first_hit_world_position.Y) +
-               ",\"front_native_first_hit_world_z\":" + std::to_string(native_front.first_hit_world_position.Z) +
-               ",\"front_native_first_hit_actor\":\"" + hex_address(native_front.first_hit_actor) + "\"" +
-               ",\"front_native_first_hit_component\":\"" + hex_address(native_front.first_hit_component) + "\"" +
-               ",\"front_native_hit_test_schema\":\"" + json_escape(native_front.hit_test_schema) + "\"" +
-               ",\"front_native_first_deproject_failure\":\"" + json_escape(native_front.first_deproject_failure) + "\"" +
-               ",\"front_native_first_query_failure\":\"" + json_escape(native_front.first_query_failure) + "\"" +
-               ",\"front_native_failure\":\"" + json_escape(native_front.failure) + "\"";
-    }
-
-    auto sdk_front_capture_metadata(const SdkFrontCaptureProbe& capture) -> std::string
-    {
-        return ",\"capture_backend\":\"native_scene_capture_required\"" +
-               std::string(",\"srgb\":true") +
-               ",\"front_capture_requested_samples\":" + std::to_string(capture.requested_samples) +
-               ",\"front_capture_project_world_to_screen_function\":\"" + hex_address(capture.project_world_to_screen_function) + "\"" +
-               ",\"front_capture_scene_capture_class\":\"" + hex_address(capture.scene_capture_class) + "\"" +
-               ",\"front_capture_create_render_target_function\":\"" + hex_address(capture.create_render_target_function) + "\"" +
-               ",\"front_capture_read_raw_pixel_function\":\"" + hex_address(capture.read_render_target_raw_pixel_function) + "\"" +
-               ",\"front_capture_read_pixel_function\":\"" + hex_address(capture.read_render_target_pixel_function) + "\"" +
-               ",\"front_capture_read_raw_function\":\"" + hex_address(capture.read_render_target_raw_function) + "\"" +
-               ",\"front_capture_read_function\":\"" + hex_address(capture.read_render_target_function) + "\"" +
-               ",\"front_capture_failure\":\"" + json_escape(capture.failure) + "\"";
-    }
-
     auto sdk_object_is_or_belongs_to(Reflection& ref, std::uintptr_t object, std::uintptr_t target) -> bool
     {
         if (!live_uobject(object) || !live_uobject(target))
@@ -4464,20 +3112,51 @@ namespace
         return false;
     }
 
-    auto sdk_find_front_mesh(Reflection& ref, const SdkContext& ctx) -> std::uintptr_t
+    struct SdkFrontMeshCandidate
     {
-        if (const auto mesh = read_object_property_by_names(ref,
-                                                            ctx.pawn,
-                                                            {"Mesh",
-                                                             "FirstPersonMesh",
-                                                             "BodyMesh",
-                                                             "CharacterMesh",
-                                                             "SkeletalMeshComponent",
-                                                             "TargetMeshComponent"}))
-        {
-            return mesh;
-        }
-        std::uintptr_t found = 0;
+        std::uintptr_t mesh{0};
+        std::string source{};
+    };
+
+    auto sdk_collect_front_mesh_candidates(Reflection& ref, const SdkContext& ctx) -> std::vector<SdkFrontMeshCandidate>
+    {
+        std::vector<SdkFrontMeshCandidate> out{};
+        auto add_candidate = [&](std::uintptr_t mesh, const char* source) {
+            if (!live_uobject(mesh))
+            {
+                return;
+            }
+            const auto cls = lower_copy(ref.class_name(mesh));
+            if (!contains_text(cls, "mesh"))
+            {
+                return;
+            }
+            for (const auto& existing : out)
+            {
+                if (existing.mesh == mesh)
+                {
+                    return;
+                }
+            }
+            out.push_back({mesh, source ? source : "unknown"});
+        };
+
+        add_candidate(call_no_params_return_object(ref, ctx.component, "GetInitializedPaintMesh"),
+                      "runtime_paint_get_initialized_paint_mesh");
+        add_candidate(read_object_property_by_names(ref,
+                                                    ctx.component,
+                                                    {"MeshComponent", "Mesh", "OwnerMesh"}),
+                      "runtime_paint_component_property");
+        add_candidate(read_object_property_by_names(ref,
+                                                    ctx.pawn,
+                                                    {"Mesh",
+                                                     "FirstPersonMesh",
+                                                     "BodyMesh",
+                                                     "CharacterMesh",
+                                                     "SkeletalMeshComponent",
+                                                     "TargetMeshComponent"}),
+                      "pawn_mesh_property");
+
         ref.for_each_object([&](std::uintptr_t object) {
             if (!live_uobject(object))
             {
@@ -4490,12 +3169,40 @@ namespace
             }
             if (sdk_object_is_or_belongs_to(ref, object, ctx.pawn))
             {
-                found = object;
-                return true;
+                add_candidate(object, "pawn_owned_mesh_component_scan");
             }
             return false;
         });
-        return found;
+        return out;
+    }
+
+    auto sdk_front_mesh_candidates_json(Reflection& ref, const std::vector<SdkFrontMeshCandidate>& candidates) -> std::string
+    {
+        std::string out = "[";
+        bool first = true;
+        for (const auto& candidate : candidates)
+        {
+            if (!first)
+            {
+                out += ",";
+            }
+            first = false;
+            out += "{\"mesh\":\"" + hex_address(candidate.mesh) + "\"";
+            out += ",\"source\":\"" + json_escape(candidate.source) + "\"";
+            out += ",\"class\":\"" + json_escape(ref.class_name(candidate.mesh)) + "\"}";
+        }
+        out += "]";
+        return out;
+    }
+
+    auto sdk_find_front_mesh(Reflection& ref, const SdkContext& ctx) -> std::uintptr_t
+    {
+        const auto candidates = sdk_collect_front_mesh_candidates(ref, ctx);
+        if (!candidates.empty())
+        {
+            return candidates.front().mesh;
+        }
+        return 0;
     }
 
     auto sdk_find_screen_space_brush_query(Reflection& ref, const SdkContext& ctx) -> std::uintptr_t
@@ -4684,736 +3391,195 @@ namespace
         return out;
     }
 
-    auto sdk_decode_brush_query_result(Reflection& ref, std::uintptr_t function, std::uint8_t* params) -> SdkBrushQueryHit
+    struct SdkRecordedStrokeCountParams
     {
-        SdkBrushQueryHit out{};
-        std::uintptr_t return_prop = 0;
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            if (ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName)) == "ReturnValue")
-            {
-                return_prop = prop;
-                break;
-            }
-        }
-        if (!return_prop)
-        {
-            out.failure = "brush_query_return_struct_unavailable";
-            return out;
-        }
-        const auto offset = prop_offset(return_prop);
-        const auto structure = struct_type(ref, return_prop, {"bSuccess", "HitUV", "WorldPosition", "HitComponent", "HitActor"});
-        if (offset < 0 || !structure)
-        {
-            out.failure = "brush_query_return_struct_invalid";
-            return out;
-        }
-        auto* base = params + offset;
-        out.params_ok = true;
-        bool has_success_property = false;
-        if (const auto p = find_property_any(ref, structure, {"bSuccess"}))
-        {
-            has_success_property = true;
-            out.success = sdk_read_bool(p, base);
-        }
-        if (const auto p = find_property_any(ref, structure, {"bHasUV"}))
-        {
-            out.has_uv = sdk_read_bool(p, base);
-        }
-        if (const auto p = find_property_any(ref, structure, {"HitUV"}))
-        {
-            out.has_uv = sdk_read_vector2(ref, p, base, out.u, out.v) || out.has_uv;
-        }
-        if (const auto p = find_property_any(ref, structure, {"WorldPosition", "HitWorldPosition"}))
-        {
-            sdk_read_vector3(ref, p, base, out.world_position);
-        }
-        if (const auto p = find_property_any(ref, structure, {"WorldNormal", "HitNormal"}))
-        {
-            sdk_read_vector3(ref, p, base, out.normal);
-        }
-        if (const auto p = find_property_any(ref, structure, {"HitActor", "Actor"}))
-        {
-            out.actor = sdk_read_object(p, base);
-        }
-        if (const auto p = find_property_any(ref, structure, {"HitComponent", "Component"}))
-        {
-            out.component = sdk_read_object(p, base);
-        }
-        if (!has_success_property)
-        {
-            out.success = out.has_uv;
-        }
-        if (!out.success && out.failure.empty())
-        {
-            out.failure = "brush_query_result_unsuccessful";
-        }
-        return out;
-    }
-
-    auto sdk_query_brush_from_world_ray(Reflection& ref,
-                                        std::uintptr_t query,
-                                        const meccha_sdk::FVector& origin,
-                                        const meccha_sdk::FVector& direction) -> SdkBrushQueryHit
-    {
-        SdkBrushQueryHit out{};
-        const auto function = ref.find_function(query, "QueryFromWorldRay");
-        if (!function)
-        {
-            out.failure = "query_from_world_ray_unavailable";
-            return out;
-        }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size <= 0 || params_size > 4096)
-        {
-            out.failure = "query_from_world_ray_params_size_invalid";
-            return out;
-        }
-        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
-        bool wrote_origin = false;
-        bool wrote_direction = false;
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            const auto name = lower_copy(ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName)));
-            if (name == "returnvalue")
-            {
-                continue;
-            }
-            if (contains_text(name, "origin"))
-            {
-                wrote_origin = sdk_write_vector3(ref, prop, params.data(), origin) || wrote_origin;
-            }
-            else if (contains_text(name, "direction"))
-            {
-                wrote_direction = sdk_write_vector3(ref, prop, params.data(), sdk_vec_normalize(direction)) || wrote_direction;
-            }
-        }
-        if (!wrote_origin || !wrote_direction)
-        {
-            out.failure = !wrote_origin ? "brush_query_origin_param_unresolved" : "brush_query_direction_param_unresolved";
-            return out;
-        }
-        std::string failure{};
-        if (!process_event(query, function, params.data(), failure))
-        {
-            out.failure = "brush_query_process_event_failed:" + failure;
-            return out;
-        }
-        return sdk_decode_brush_query_result(ref, function, params.data());
-    }
-
-    auto sdk_hit_test_at_screen_position(Reflection& ref,
-                                         const SdkContext& ctx,
-                                         std::uintptr_t mesh,
-                                         double screen_x,
-                                         double screen_y) -> SdkBrushQueryHit
-    {
-        SdkBrushQueryHit out{};
-        const auto function = ref.find_function(ctx.component, "HitTestAtScreenPosition");
-        if (!function)
-        {
-            out.failure = "hit_test_at_screen_position_unavailable";
-            return out;
-        }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size != static_cast<int>(sizeof(meccha_sdk::RuntimePaintableComponent_HitTestAtScreenPosition)))
-        {
-            out.failure = "hit_test_params_size_mismatch";
-            return out;
-        }
-
-        meccha_sdk::RuntimePaintableComponent_HitTestAtScreenPosition params{};
-        params.MeshComponent = reinterpret_cast<void*>(mesh);
-        params.ScreenPosition = {screen_x, screen_y};
-        params.PlayerController = reinterpret_cast<void*>(ctx.controller);
-        params.bUseCachedTriangles = true;
-
-        std::string failure{};
-        if (!process_event(ctx.component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            out.failure = "hit_test_process_event_failed:" + failure;
-            return out;
-        }
-
-        out.params_ok = true;
-        out.success = params.ReturnValue.bSuccess;
-        out.has_uv = params.ReturnValue.bSuccess;
-        out.u = params.ReturnValue.HitUV.X;
-        out.v = params.ReturnValue.HitUV.Y;
-        out.world_position = params.ReturnValue.HitWorldPosition;
-        out.normal = params.ReturnValue.HitNormal;
-        out.actor = ctx.pawn;
-        out.component = mesh;
-        if (!out.success)
-        {
-            out.failure = "hit_test_result_unsuccessful";
-        }
-        return out;
-    }
-
-    auto sdk_collect_native_front_samples(Reflection& ref,
-                                          const SdkContext& ctx,
-                                          const std::vector<FrontSample>& color_source) -> SdkNativeFrontSampleResult
-    {
-        SdkNativeFrontSampleResult result{};
-        result.mesh = sdk_find_front_mesh(ref, ctx);
-        result.query = sdk_find_screen_space_brush_query(ref, ctx);
-        result.hit_test_function = ref.find_function(ctx.component, "HitTestAtScreenPosition");
-        result.deproject_function = ref.find_function(ctx.controller, "DeprojectScreenPositionToWorld");
-        result.query_function = result.query ? ref.find_function(result.query, "QueryFromWorldRay") : 0;
-        result.hit_test_schema = function_param_schema(ref, result.hit_test_function);
-        result.deproject_schema = function_param_schema(ref, result.deproject_function);
-        result.query_schema = function_param_schema(ref, result.query_function);
-        const bool use_hit_test = result.mesh && result.hit_test_function;
-        result.sampling_backend = use_hit_test ? "runtime_paintable_hit_test_cached_triangles" : "screenspace_brush_query_world_ray";
-        if (!use_hit_test && !result.query)
-        {
-            result.failure = "screen_space_brush_query_unavailable";
-            return result;
-        }
-        if (!use_hit_test && !sdk_configure_screen_space_brush_query(ref, result.query, ctx.pawn, result.mesh))
-        {
-            result.failure = "screen_space_brush_query_config_failed";
-            return result;
-        }
-        const auto viewport = sdk_get_viewport_info(ref, ctx);
-        result.viewport_width = viewport.width;
-        result.viewport_height = viewport.height;
-        if (viewport.width <= 0 || viewport.height <= 0)
-        {
-            result.failure = "viewport_unavailable";
-            return result;
-        }
-
-        const int target_samples = std::max(result.min_front_hits, result.target_front_hits);
-        const int hard_attempts = std::max(result.hard_attempt_budget, target_samples * 2);
-        result.hard_attempt_budget = hard_attempts;
-        const auto collect_start = std::chrono::steady_clock::now();
-        constexpr double collect_timeout_ms = 210000.0;
-        bool stop_sampling = false;
-        int last_collect_progress = -1;
-        auto total_surface_attempts = [&]() {
-            return result.deproject_calls + result.hit_test_calls;
-        };
-        auto sampling_goal_met = [&]() {
-            return static_cast<int>(result.samples.size()) >= target_samples &&
-                   result.unique_atlas_texels >= result.target_unique_atlas_texels;
-        };
-        auto collect_elapsed_ms = [&]() {
-            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - collect_start).count();
-        };
-        auto emit_collect_progress = [&](bool force) {
-            const auto attempt_progress = hard_attempts > 0
-                ? static_cast<int>((static_cast<double>(total_surface_attempts()) / static_cast<double>(hard_attempts)) * 100.0)
-                : 0;
-            const auto sample_progress = target_samples > 0
-                ? static_cast<int>((static_cast<double>(result.samples.size()) / static_cast<double>(target_samples)) * 100.0)
-                : 0;
-            const auto unique_progress = result.target_unique_atlas_texels > 0
-                ? static_cast<int>((static_cast<double>(result.unique_atlas_texels) / static_cast<double>(result.target_unique_atlas_texels)) * 100.0)
-                : 0;
-            const auto progress = std::max(0, std::min(99, std::max({attempt_progress, sample_progress, unique_progress})));
-            if (!force && progress == last_collect_progress)
-            {
-                return;
-            }
-            last_collect_progress = progress;
-            write_bridge_progress("front_sampling_collecting",
-                                  "collecting native front surface samples",
-                                  progress,
-                                  100,
-                                  collect_elapsed_ms(),
-                                  "\"front_hits\":" + std::to_string(result.samples.size()) +
-                                      ",\"unique_atlas_texels\":" + std::to_string(result.unique_atlas_texels) +
-                                      ",\"deproject_calls\":" + std::to_string(result.deproject_calls) +
-                                      ",\"hit_test_calls\":" + std::to_string(result.hit_test_calls) +
-                                      ",\"sampling_backend\":\"" + json_escape(result.sampling_backend) + "\"" +
-                                      ",\"hard_attempt_budget\":" + std::to_string(hard_attempts) +
-                                      ",\"target_front_hits\":" + std::to_string(target_samples) +
-                                      ",\"target_unique_atlas_texels\":" + std::to_string(result.target_unique_atlas_texels));
-        };
-        std::unordered_set<std::uint64_t> unique_texels{};
-        unique_texels.reserve(static_cast<std::size_t>(target_samples) * 2U);
-        result.samples.reserve(static_cast<std::size_t>(target_samples));
-
-        auto cell_jitter = [](int x, int y, int salt) -> double {
-            std::uint32_t n = static_cast<std::uint32_t>(x) * 0x9E3779B1u ^
-                              static_cast<std::uint32_t>(y) * 0x85EBCA77u ^
-                              static_cast<std::uint32_t>(salt) * 0xC2B2AE3Du;
-            n ^= n >> 16;
-            n *= 0x7FEB352Du;
-            n ^= n >> 15;
-            n *= 0x846CA68Bu;
-            n ^= n >> 16;
-            return static_cast<double>(n & 0xFFFFu) / 65535.0;
-        };
-
-        auto record_bbox = [&](double nx, double ny) {
-            result.bbox_min_nx = std::min(result.bbox_min_nx, nx);
-            result.bbox_min_ny = std::min(result.bbox_min_ny, ny);
-            result.bbox_max_nx = std::max(result.bbox_max_nx, nx);
-            result.bbox_max_ny = std::max(result.bbox_max_ny, ny);
-        };
-
-        auto try_sample = [&](double nx, double ny, bool refined) -> bool {
-            if (stop_sampling || total_surface_attempts() >= hard_attempts || sampling_goal_met())
-            {
-                return false;
-            }
-            if (collect_elapsed_ms() >= collect_timeout_ms)
-            {
-                result.failure = "front_sampling_timeout_before_bridge_timeout";
-                stop_sampling = true;
-                emit_collect_progress(true);
-                return false;
-            }
-            if ((total_surface_attempts() % 2500) == 0)
-            {
-                emit_collect_progress(false);
-            }
-            nx = clamp01(nx);
-            ny = clamp01(ny);
-            const auto screen_x = nx * static_cast<double>(viewport.width);
-            const auto screen_y = ny * static_cast<double>(viewport.height);
-            SdkBrushQueryHit hit{};
-            if (use_hit_test)
-            {
-                ++result.hit_test_calls;
-                hit = sdk_hit_test_at_screen_position(ref, ctx, result.mesh, screen_x, screen_y);
-                if (result.hit_test_calls == 1)
-                {
-                    result.first_screen_x = screen_x;
-                    result.first_screen_y = screen_y;
-                }
-            }
-            else
-            {
-                const auto ray = sdk_deproject_screen_position(ref, ctx, screen_x, screen_y);
-                ++result.deproject_calls;
-                if (result.deproject_calls == 1)
-                {
-                    result.first_screen_x = screen_x;
-                    result.first_screen_y = screen_y;
-                    result.first_ray_location = ray.location;
-                    result.first_ray_direction = ray.direction;
-                }
-                if (!ray.ok)
-                {
-                    if (result.failure.empty())
-                    {
-                        result.failure = ray.failure;
-                    }
-                    if (result.first_deproject_failure.empty())
-                    {
-                        result.first_deproject_failure = ray.failure;
-                    }
-                    if (contains_text(ray.failure, "return_false"))
-                    {
-                        ++result.deproject_return_false;
-                    }
-                    else if (contains_text(ray.failure, "direction_invalid"))
-                    {
-                        ++result.deproject_direction_invalid;
-                    }
-                    else if (contains_text(ray.failure, "process_event"))
-                    {
-                        ++result.deproject_process_failed;
-                    }
-                    ++result.rejected;
-                    return false;
-                }
-                ++result.deproject_ok;
-                hit = sdk_query_brush_from_world_ray(ref, result.query, ray.location, ray.direction);
-                ++result.query_calls;
-            }
-            ++result.attempts;
-            if (!hit.params_ok)
-            {
-                if (result.failure.empty())
-                {
-                    result.failure = hit.failure;
-                }
-                if (result.first_query_failure.empty())
-                {
-                    result.first_query_failure = hit.failure;
-                }
-                if (use_hit_test)
-                {
-                    ++result.hit_test_failed;
-                }
-                ++result.query_param_failed;
-                ++result.rejected;
-                return false;
-            }
-            if (!hit.success || !hit.has_uv || !std::isfinite(hit.u) || !std::isfinite(hit.v) ||
-                !std::isfinite(hit.world_position.X) || !std::isfinite(hit.world_position.Y) || !std::isfinite(hit.world_position.Z))
-            {
-                if (result.samples.empty() && result.first_query_failure.empty())
-                {
-                    result.first_query_failure = hit.failure.empty() ? "brush_query_no_hit" : hit.failure;
-                }
-                ++result.query_result_failed;
-                if (use_hit_test)
-                {
-                    ++result.hit_test_failed;
-                }
-                ++result.rejected;
-                return false;
-            }
-            if (use_hit_test)
-            {
-                ++result.hit_test_success;
-            }
-            ++result.query_success;
-            if (result.query_success == 1)
-            {
-                result.first_hit_u = hit.u;
-                result.first_hit_v = hit.v;
-                result.first_hit_world_position = hit.world_position;
-                result.first_hit_actor = hit.actor;
-                result.first_hit_component = hit.component;
-            }
-            const bool owner_hit = (hit.component && hit.component == result.mesh) ||
-                                   sdk_object_is_or_belongs_to(ref, hit.actor, ctx.pawn) ||
-                                   sdk_object_is_or_belongs_to(ref, hit.component, ctx.pawn);
-            if (!owner_hit)
-            {
-                if (result.samples.empty() && result.first_query_failure.empty())
-                {
-                    result.first_query_failure = (!hit.actor && !hit.component)
-                        ? "brush_query_owner_unavailable"
-                        : "brush_query_owner_mismatch";
-                }
-                if (!hit.actor && !hit.component)
-                {
-                    ++result.owner_unknown_accepted;
-                }
-                else
-                {
-                    ++result.owner_mismatch_rejected;
-                }
-                ++result.rejected;
-                return false;
-            }
-            ++result.owner_matches;
-            ++result.uv_hits;
-            const auto ux = static_cast<std::uint64_t>(std::max(0, std::min(4095, static_cast<int>(clamp01(hit.u) * 4096.0))));
-            const auto uy = static_cast<std::uint64_t>(std::max(0, std::min(4095, static_cast<int>(clamp01(hit.v) * 4096.0))));
-            const auto key = (uy << 32) | ux;
-            if (!unique_texels.insert(key).second)
-            {
-                ++result.duplicate_uv;
-                return false;
-            }
-            result.unique_atlas_texels = static_cast<int>(unique_texels.size());
-
-            FrontSample sample{};
-            sample.u = clamp01(hit.u);
-            sample.v = clamp01(hit.v);
-            sample.r = 0.34;
-            sample.g = 0.36;
-            sample.b = 0.32;
-            sample.roughness = 0.65;
-            sample.radius = 0.0025;
-            sample.screen_nx = nx;
-            sample.screen_ny = ny;
-            sample.has_world_position = true;
-            sample.world_position = hit.world_position;
-            sample.normal = sdk_vec_normalize(hit.normal);
-            result.samples.push_back(sample);
-            record_bbox(nx, ny);
-            if (refined)
-            {
-                ++result.refine_seeds;
-            }
-            else
-            {
-                ++result.coarse_seeds;
-            }
-            return true;
-        };
-
-        for (int y = 0; y < result.coarse_grid_y && !stop_sampling && !sampling_goal_met(); ++y)
-        {
-            for (int x = 0; x < result.coarse_grid_x && !stop_sampling && !sampling_goal_met(); ++x)
-            {
-                const auto jx = (cell_jitter(x, y, 11) - 0.5) * 0.72;
-                const auto jy = (cell_jitter(x, y, 23) - 0.5) * 0.72;
-                const auto nx = 0.24 + ((static_cast<double>(x) + 0.5 + jx) / static_cast<double>(result.coarse_grid_x)) * 0.52;
-                const auto ny = 0.08 + ((static_cast<double>(y) + 0.5 + jy) / static_cast<double>(result.coarse_grid_y)) * 0.84;
-                try_sample(nx, ny, false);
-            }
-        }
-
-        const bool have_bbox = result.bbox_max_nx >= result.bbox_min_nx && result.bbox_max_ny >= result.bbox_min_ny;
-        const auto span_x = have_bbox ? std::max(0.02, result.bbox_max_nx - result.bbox_min_nx) : 0.52;
-        const auto span_y = have_bbox ? std::max(0.02, result.bbox_max_ny - result.bbox_min_ny) : 0.84;
-        const auto query_min_nx = have_bbox ? clamp01(result.bbox_min_nx - span_x * 0.35) : 0.24;
-        const auto query_max_nx = have_bbox ? clamp01(result.bbox_max_nx + span_x * 0.35) : 0.76;
-        const auto query_min_ny = have_bbox ? clamp01(result.bbox_min_ny - span_y * 0.18) : 0.08;
-        const auto query_max_ny = have_bbox ? clamp01(result.bbox_max_ny + span_y * 0.55) : 0.92;
-
-        for (int y = 0; y < result.refine_grid_y && !stop_sampling && !sampling_goal_met(); ++y)
-        {
-            for (int x = 0; x < result.refine_grid_x && !stop_sampling && !sampling_goal_met(); ++x)
-            {
-                const auto jx = (cell_jitter(x, y, 37) - 0.5) * 0.84;
-                const auto jy = (cell_jitter(x, y, 41) - 0.5) * 0.84;
-                const auto local_nx = (static_cast<double>(x) + 0.5 + jx) / static_cast<double>(result.refine_grid_x);
-                const auto local_ny = (static_cast<double>(y) + 0.5 + jy) / static_cast<double>(result.refine_grid_y);
-                const auto nx = query_min_nx + local_nx * (query_max_nx - query_min_nx);
-                const auto ny = query_min_ny + local_ny * (query_max_ny - query_min_ny);
-                try_sample(nx, ny, true);
-            }
-        }
-
-        const double adaptive_base_dx = std::max(0.00045, (query_max_nx - query_min_nx) / static_cast<double>(std::max(64, result.refine_grid_x)));
-        const double adaptive_base_dy = std::max(0.00045, (query_max_ny - query_min_ny) / static_cast<double>(std::max(64, result.refine_grid_y)));
-        const double directions[][2] = {
-            {1.0, 0.0}, {-1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0},
-            {0.7071, 0.7071}, {-0.7071, 0.7071}, {0.7071, -0.7071}, {-0.7071, -0.7071},
-            {1.0, 0.45}, {-1.0, 0.45}, {1.0, -0.45}, {-1.0, -0.45},
-        };
-        for (int pass = 0;
-             pass < 8 && !stop_sampling && total_surface_attempts() < hard_attempts && !sampling_goal_met();
-             ++pass)
-        {
-            const auto seeds = result.samples;
-            if (seeds.empty())
-            {
-                break;
-            }
-            ++result.adaptive_passes;
-            result.adaptive_seeds += static_cast<int>(seeds.size());
-            const auto ring = static_cast<double>(pass + 1);
-            const auto pass_dx = adaptive_base_dx * ring;
-            const auto pass_dy = adaptive_base_dy * ring;
-            for (std::size_t i = 0;
-                 i < seeds.size() && !stop_sampling && total_surface_attempts() < hard_attempts && !sampling_goal_met();
-                 ++i)
-            {
-                const auto& seed = seeds[i];
-                for (int d = 0;
-                     d < static_cast<int>(sizeof(directions) / sizeof(directions[0])) &&
-                     !stop_sampling &&
-                     total_surface_attempts() < hard_attempts &&
-                     !sampling_goal_met();
-                     ++d)
-                {
-                    const auto jitter_scale = 0.82 + cell_jitter(static_cast<int>(i), pass, d) * 0.36;
-                    const auto nx = seed.screen_nx + directions[d][0] * pass_dx * jitter_scale;
-                    const auto ny = seed.screen_ny + directions[d][1] * pass_dy * jitter_scale;
-                    const auto before = result.samples.size();
-                    ++result.adaptive_attempts;
-                    if (try_sample(nx, ny, true) && result.samples.size() > before)
-                    {
-                        ++result.adaptive_hits;
-                    }
-                }
-            }
-        }
-
-        if (result.samples.empty() && result.failure.empty())
-        {
-            result.failure = "native_front_surface_samples_empty";
-        }
-        emit_collect_progress(true);
-        return result;
-    }
-
-    auto sdk_export_channel_bytes(Reflection& ref, const SdkContext& ctx, int channel) -> ChannelBuffer
-    {
-        (void)ref;
-        ChannelBuffer out{};
-        out.channel = channel;
-        if (!ctx.export_function)
-        {
-            out.failure = "export_unavailable";
-            return out;
-        }
-        meccha_sdk::RuntimePaintableComponent_ExportChannelToBytes params{};
-        params.Channel = static_cast<meccha_sdk::EPaintChannel>(channel);
-        std::string failure{};
-        if (!process_event(ctx.component, ctx.export_function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            out.failure = "export_process_event_failed:" + failure;
-            return out;
-        }
-        if (!params.ReturnValue)
-        {
-            out.failure = "export_return_false";
-            return out;
-        }
-        if (!params.OutData.Data || params.OutData.Num <= 0 || params.OutData.Num > 128 * 1024 * 1024 || params.OutData.Max < params.OutData.Num)
-        {
-            out.failure = "export_array_invalid";
-            return out;
-        }
-        out.bytes.resize(static_cast<std::size_t>(params.OutData.Num));
-        if (!safe_copy(out.bytes.data(), params.OutData.Data, out.bytes.size()))
-        {
-            out.failure = "export_array_copy_failed";
-            out.bytes.clear();
-            return out;
-        }
-        out.hash = hash_bytes(out.bytes);
-        const auto [width, height] = infer_channel_dimensions(out.bytes.size());
-        out.width = width;
-        out.height = height;
-        out.bytes_per_pixel = (width > 0 && height > 0 && out.bytes.size() == static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4) ? 4 : 1;
-        out.ok = true;
-        return out;
-    }
-
-    auto sdk_import_channel_bytes(const SdkContext& ctx, int channel, const std::vector<std::uint8_t>& bytes, std::string& failure) -> bool
-    {
-        failure.clear();
-        if (!ctx.import_function)
-        {
-            failure = "import_unavailable";
-            return false;
-        }
-        if (bytes.empty() || bytes.size() > 128 * 1024 * 1024)
-        {
-            failure = "import_bytes_invalid";
-            return false;
-        }
-        meccha_sdk::RuntimePaintableComponent_ImportChannelFromBytes params{};
-        params.Channel = static_cast<meccha_sdk::EPaintChannel>(channel);
-        params.Data.Data = const_cast<std::uint8_t*>(bytes.data());
-        params.Data.Num = static_cast<std::int32_t>(bytes.size());
-        params.Data.Max = static_cast<std::int32_t>(bytes.size());
-        std::string process_failure{};
-        if (!process_event(ctx.component, ctx.import_function, reinterpret_cast<std::uint8_t*>(&params), process_failure))
-        {
-            failure = "import_process_event_failed:" + process_failure;
-            return false;
-        }
-        if (!params.ReturnValue)
-        {
-            failure = "import_return_false";
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_get_render_target(const SdkContext& ctx, int channel) -> std::uintptr_t
-    {
-        if (!ctx.get_render_target_function)
-        {
-            return 0;
-        }
-        meccha_sdk::RuntimePaintableComponent_GetRenderTarget params{};
-        params.Channel = static_cast<meccha_sdk::EPaintChannel>(channel);
-        std::string failure{};
-        if (!process_event(ctx.component, ctx.get_render_target_function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return 0;
-        }
-        return reinterpret_cast<std::uintptr_t>(params.ReturnValue);
-    }
-
-    auto sdk_channel_metadata(const char* prefix, const ChannelBuffer& channel) -> std::string
-    {
-        std::string name(prefix);
-        return ",\"" + name + "_ok\":" + json_bool(channel.ok) +
-               ",\"" + name + "_channel\":" + std::to_string(channel.channel) +
-               ",\"" + name + "_width\":" + std::to_string(channel.width) +
-               ",\"" + name + "_height\":" + std::to_string(channel.height) +
-               ",\"" + name + "_bytes_per_pixel\":" + std::to_string(channel.bytes_per_pixel) +
-               ",\"" + name + "_bytes\":" + std::to_string(channel.bytes.size()) +
-               ",\"" + name + "_hash\":\"" + std::to_string(channel.hash) + "\"" +
-               ",\"" + name + "_first_bytes\":\"" + first_bytes_hex(channel.bytes) + "\"" +
-               ",\"" + name + "_failure\":\"" + json_escape(channel.failure) + "\"";
-    }
-
-    struct ChannelRgbStats
-    {
-        bool ok{false};
-        double min{0.0};
-        double max{0.0};
-        double avg{0.0};
+        int ReturnValue{0};
     };
+    static_assert(sizeof(SdkRecordedStrokeCountParams) == 0x04, "GetRecordedStrokeCount params layout mismatch");
 
-    auto sdk_channel_rgb_stats(const ChannelBuffer& channel) -> ChannelRgbStats
+    struct SdkRuntimePaintReplicationPressure
     {
-        ChannelRgbStats stats{};
-        if (!channel.ok || channel.bytes.empty())
-        {
-            return stats;
-        }
-        const int bpp = std::max(1, channel.bytes_per_pixel);
-        const std::size_t step = static_cast<std::size_t>(bpp);
-        double sum = 0.0;
-        std::size_t count = 0;
-        for (std::size_t offset = 0; offset < channel.bytes.size(); offset += step)
-        {
-            if (bpp >= 3 && offset + 2 < channel.bytes.size())
-            {
-                const double r = static_cast<double>(channel.bytes[offset + 0]) / 255.0;
-                const double g = static_cast<double>(channel.bytes[offset + 1]) / 255.0;
-                const double b = static_cast<double>(channel.bytes[offset + 2]) / 255.0;
-                const double values[3]{r, g, b};
-                for (double value : values)
-                {
-                    if (!stats.ok)
-                    {
-                        stats.min = value;
-                        stats.max = value;
-                        stats.ok = true;
-                    }
-                    stats.min = std::min(stats.min, value);
-                    stats.max = std::max(stats.max, value);
-                    sum += value;
-                    ++count;
-                }
-            }
-            else
-            {
-                const double value = static_cast<double>(channel.bytes[offset]) / 255.0;
-                if (!stats.ok)
-                {
-                    stats.min = value;
-                    stats.max = value;
-                    stats.ok = true;
-                }
-                stats.min = std::min(stats.min, value);
-                stats.max = std::max(stats.max, value);
-                sum += value;
-                ++count;
-            }
-        }
-        stats.avg = count > 0 ? sum / static_cast<double>(count) : 0.0;
-        return stats;
-    }
+        int QueuedBatchCount{0};
+        int QueuedStrokeCount{0};
+        int MaxStrokesPerTick{0};
+        float EstimatedTicksToDrain{0.0f};
+    };
+    static_assert(sizeof(SdkRuntimePaintReplicationPressure) == 0x10, "RuntimePaintReplicationPressure layout mismatch");
 
-    auto sdk_channel_rgb_stats_metadata(const char* prefix, const ChannelBuffer& channel) -> std::string
+    struct SdkReplicationManagerGetQueuedStrokeCountParams
     {
-        const auto stats = sdk_channel_rgb_stats(channel);
-        std::string name(prefix);
-        return ",\"" + name + "_rgb_stats_ok\":" + json_bool(stats.ok) +
-               ",\"" + name + "_rgb_min\":" + std::to_string(stats.min) +
-               ",\"" + name + "_rgb_avg\":" + std::to_string(stats.avg) +
-               ",\"" + name + "_rgb_max\":" + std::to_string(stats.max);
-    }
+        int ReturnValue{0};
+    };
+    static_assert(sizeof(SdkReplicationManagerGetQueuedStrokeCountParams) == 0x04, "GetQueuedStrokeCount params layout mismatch");
 
-    struct SdkReplicatedStats
+    struct SdkReplicationManagerGetQueuedStrokeCountForComponentParams
     {
-        int requested{0};
-        int server_sent{0};
-        int server_failed{0};
-        int batch_calls{0};
-        int single_calls{0};
-        int client_mirror_sent{0};
-        int client_mirror_failed{0};
-        std::string server_rpc{"<none>"};
-        std::string client_mirror_rpc{"<none>"};
-        std::string first_failure{};
+        void* PaintComponent{nullptr};
+        int ReturnValue{0};
+        std::uint8_t Pad_C[0x4]{};
+    };
+    static_assert(sizeof(SdkReplicationManagerGetQueuedStrokeCountForComponentParams) == 0x10,
+                  "GetQueuedStrokeCountForComponent params layout mismatch");
+
+    struct SdkReplicationManagerGetReplicationPressureParams
+    {
+        SdkRuntimePaintReplicationPressure ReturnValue{};
+    };
+    static_assert(sizeof(SdkReplicationManagerGetReplicationPressureParams) == 0x10,
+                  "GetReplicationPressure params layout mismatch");
+
+    struct SdkReplicationSnapshot
+    {
+        bool recorded_count_available{false};
+        int recorded_count{-1};
+        bool manager_available{false};
+        std::uintptr_t manager{0};
+        bool manager_queued_count_available{false};
+        int manager_queued_count{-1};
+        bool manager_component_queued_count_available{false};
+        int manager_component_queued_count{-1};
+        bool manager_pressure_available{false};
+        SdkRuntimePaintReplicationPressure pressure{};
+        std::string failure{};
     };
 
     auto sdk_has_replicated_api(const SdkContext& ctx) -> bool
     {
         return ctx.server_paint_batch_function != 0;
+    }
+
+    auto sdk_find_replication_manager(Reflection& ref) -> std::uintptr_t
+    {
+        return ref.find_first_instance("RuntimePaintReplicationManager");
+    }
+
+    auto sdk_read_recorded_stroke_count(Reflection& ref, std::uintptr_t component, int& out, std::string& failure) -> bool
+    {
+        if (!live_uobject(component))
+        {
+            failure = "paint_component_unavailable";
+            return false;
+        }
+        const auto function = ref.find_function(component, "GetRecordedStrokeCount");
+        if (!function)
+        {
+            failure = "GetRecordedStrokeCount_unavailable";
+            return false;
+        }
+        SdkRecordedStrokeCountParams params{};
+        if (!process_event(component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
+        {
+            return false;
+        }
+        out = params.ReturnValue;
+        return true;
+    }
+
+    auto sdk_capture_replication_snapshot(Reflection& ref, std::uintptr_t component) -> SdkReplicationSnapshot
+    {
+        SdkReplicationSnapshot snapshot{};
+        std::string failure{};
+        int recorded_count = -1;
+        if (sdk_read_recorded_stroke_count(ref, component, recorded_count, failure))
+        {
+            snapshot.recorded_count_available = true;
+            snapshot.recorded_count = recorded_count;
+        }
+        else if (snapshot.failure.empty())
+        {
+            snapshot.failure = failure;
+        }
+
+        const auto manager = sdk_find_replication_manager(ref);
+        snapshot.manager = manager;
+        snapshot.manager_available = live_uobject(manager);
+        if (!snapshot.manager_available)
+        {
+            if (snapshot.failure.empty())
+            {
+                snapshot.failure = "RuntimePaintReplicationManager_unavailable";
+            }
+            return snapshot;
+        }
+
+        if (const auto function = ref.find_function(manager, "GetQueuedStrokeCount"))
+        {
+            SdkReplicationManagerGetQueuedStrokeCountParams params{};
+            failure.clear();
+            if (process_event(manager, function, reinterpret_cast<std::uint8_t*>(&params), failure))
+            {
+                snapshot.manager_queued_count_available = true;
+                snapshot.manager_queued_count = params.ReturnValue;
+            }
+            else if (snapshot.failure.empty())
+            {
+                snapshot.failure = failure;
+            }
+        }
+        else if (snapshot.failure.empty())
+        {
+            snapshot.failure = "GetQueuedStrokeCount_unavailable";
+        }
+
+        if (const auto function = ref.find_function(manager, "GetQueuedStrokeCountForComponent"))
+        {
+            SdkReplicationManagerGetQueuedStrokeCountForComponentParams params{};
+            params.PaintComponent = reinterpret_cast<void*>(component);
+            failure.clear();
+            if (process_event(manager, function, reinterpret_cast<std::uint8_t*>(&params), failure))
+            {
+                snapshot.manager_component_queued_count_available = true;
+                snapshot.manager_component_queued_count = params.ReturnValue;
+            }
+            else if (snapshot.failure.empty())
+            {
+                snapshot.failure = failure;
+            }
+        }
+        else if (snapshot.failure.empty())
+        {
+            snapshot.failure = "GetQueuedStrokeCountForComponent_unavailable";
+        }
+
+        if (const auto function = ref.find_function(manager, "GetReplicationPressure"))
+        {
+            SdkReplicationManagerGetReplicationPressureParams params{};
+            failure.clear();
+            if (process_event(manager, function, reinterpret_cast<std::uint8_t*>(&params), failure))
+            {
+                snapshot.manager_pressure_available = true;
+                snapshot.pressure = params.ReturnValue;
+            }
+            else if (snapshot.failure.empty())
+            {
+                snapshot.failure = failure;
+            }
+        }
+        else if (snapshot.failure.empty())
+        {
+            snapshot.failure = "GetReplicationPressure_unavailable";
+        }
+
+        return snapshot;
+    }
+
+    auto sdk_replication_snapshot_metadata(const char* prefix, const SdkReplicationSnapshot& snapshot) -> std::string
+    {
+        std::string key(prefix ? prefix : "replication");
+        return ",\"" + key + "_recorded_count_available\":" + json_bool(snapshot.recorded_count_available) +
+               ",\"" + key + "_recorded_count\":" + std::to_string(snapshot.recorded_count) +
+               ",\"" + key + "_manager_available\":" + json_bool(snapshot.manager_available) +
+               ",\"" + key + "_manager\":\"" + hex_address(snapshot.manager) + "\"" +
+               ",\"" + key + "_manager_queued_count_available\":" + json_bool(snapshot.manager_queued_count_available) +
+               ",\"" + key + "_manager_queued_count\":" + std::to_string(snapshot.manager_queued_count) +
+               ",\"" + key + "_manager_component_queued_count_available\":" + json_bool(snapshot.manager_component_queued_count_available) +
+               ",\"" + key + "_manager_component_queued_count\":" + std::to_string(snapshot.manager_component_queued_count) +
+               ",\"" + key + "_manager_pressure_available\":" + json_bool(snapshot.manager_pressure_available) +
+               ",\"" + key + "_queued_batch_count\":" + std::to_string(snapshot.pressure.QueuedBatchCount) +
+               ",\"" + key + "_queued_stroke_count\":" + std::to_string(snapshot.pressure.QueuedStrokeCount) +
+               ",\"" + key + "_max_strokes_per_tick\":" + std::to_string(snapshot.pressure.MaxStrokesPerTick) +
+               ",\"" + key + "_estimated_ticks_to_drain\":" + std::to_string(snapshot.pressure.EstimatedTicksToDrain) +
+               ",\"" + key + "_failure\":\"" + json_escape(snapshot.failure) + "\"";
     }
 
     auto sdk_copy_current_brush(const SdkContext& ctx, double radius) -> meccha_sdk::FRuntimeBrushSettings
@@ -5524,239 +3690,6 @@ namespace
             return false;
         }
         return true;
-    }
-
-    auto sdk_call_client_mirror(const SdkContext& ctx,
-                                const meccha_sdk::FPaintStroke& stroke,
-                                std::string& failure) -> bool
-    {
-        if (!ctx.paint_at_uv_with_brush_function)
-        {
-            failure = "PaintAtUVWithBrush_unavailable";
-            return false;
-        }
-        if (!live_uobject(ctx.component))
-        {
-            failure = "paint_component_unavailable";
-            return false;
-        }
-        meccha_sdk::RuntimePaintableComponent_PaintAtUVWithBrush params{};
-        params.Uv = stroke.Uv;
-        params.ChannelData = stroke.ChannelData;
-        params.BrushSettings = stroke.BrushSettings;
-        params.Channel = stroke.TargetChannel;
-        if (!process_event(ctx.component, ctx.paint_at_uv_with_brush_function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_call_relay_batch_rpc(const SdkContext& ctx,
-                                  std::uintptr_t function,
-                                  const std::vector<meccha_sdk::FPaintStroke>& strokes,
-                                  std::size_t offset,
-                                  std::size_t count,
-                                  std::string& failure) -> bool
-    {
-        if (!function || count == 0)
-        {
-            failure = "relay_batch_rpc_unavailable";
-            return false;
-        }
-        if (!live_uobject(ctx.relay_component) || !live_uobject(ctx.component))
-        {
-            failure = "relay_or_paint_component_unavailable";
-            return false;
-        }
-        meccha_sdk::RuntimePaintRelayComponent_RelayStrokeBatchToServer params{};
-        params.PaintComponent = reinterpret_cast<void*>(ctx.component);
-        params.Batch.Strokes.Data = const_cast<meccha_sdk::FPaintStroke*>(strokes.data() + offset);
-        params.Batch.Strokes.Num = static_cast<std::int32_t>(count);
-        params.Batch.Strokes.Max = static_cast<std::int32_t>(count);
-        if (!process_event(ctx.relay_component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_call_relay_single_rpc(const SdkContext& ctx,
-                                   std::uintptr_t function,
-                                   const meccha_sdk::FPaintStroke& stroke,
-                                   std::string& failure) -> bool
-    {
-        if (!function)
-        {
-            failure = "relay_single_rpc_unavailable";
-            return false;
-        }
-        if (!live_uobject(ctx.relay_component) || !live_uobject(ctx.component))
-        {
-            failure = "relay_or_paint_component_unavailable";
-            return false;
-        }
-        meccha_sdk::RuntimePaintRelayComponent_RelayPaintToServer params{};
-        params.PaintComponent = reinterpret_cast<void*>(ctx.component);
-        params.Stroke = stroke;
-        if (!process_event(ctx.relay_component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_call_relay_texture_sync_rpc(const SdkContext& ctx,
-                                         std::uintptr_t function,
-                                         const char* unavailable_stage,
-                                         std::string& failure) -> bool
-    {
-        if (!function)
-        {
-            failure = unavailable_stage;
-            return false;
-        }
-        if (!live_uobject(ctx.relay_component) || !live_uobject(ctx.component))
-        {
-            failure = "relay_or_paint_component_unavailable";
-            return false;
-        }
-        meccha_sdk::RuntimePaintRelayComponent_RelayTextureSyncToServer params{};
-        params.PaintComponent = reinterpret_cast<void*>(ctx.component);
-        if (!process_event(ctx.relay_component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_call_component_no_param_rpc(const SdkContext& ctx,
-                                         std::uintptr_t function,
-                                         const char* unavailable_stage,
-                                         std::string& failure) -> bool
-    {
-        if (!function)
-        {
-            failure = unavailable_stage;
-            return false;
-        }
-        if (!live_uobject(ctx.component))
-        {
-            failure = "paint_component_unavailable";
-            return false;
-        }
-        std::uint8_t params[1]{};
-        if (!process_event(ctx.component, function, params, failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    template <typename ProgressCallback>
-    auto sdk_dispatch_replicated_strokes_with_progress(const SdkContext& ctx,
-                                                       const std::vector<meccha_sdk::FPaintStroke>& strokes,
-                                                       SdkReplicatedStats& stats,
-                                                       ProgressCallback&& progress_callback,
-                                                       int batch_limit_override = 0,
-                                                       int sleep_ms = 16) -> bool
-    {
-        stats.requested = static_cast<int>(strokes.size());
-        if (strokes.empty())
-        {
-            return true;
-        }
-
-        const int raw_limit = safe_read<int>(ctx.component + meccha_sdk::FieldOffsets::RuntimePaintable_MaxReplicatedPaintStrokesPerTick, 24);
-        const int effective_limit = batch_limit_override > 0 ? batch_limit_override : (raw_limit > 0 ? raw_limit : 24);
-        const auto batch_limit = static_cast<std::size_t>(std::max(1, std::min(effective_limit, 256)));
-        for (std::size_t offset = 0; offset < strokes.size(); offset += batch_limit)
-        {
-            const auto count = std::min(batch_limit, strokes.size() - offset);
-            std::string failure{};
-            if (!sdk_call_server_paint_batch(ctx, strokes, offset, count, failure))
-            {
-                stats.server_failed += static_cast<int>(strokes.size() - offset);
-                if (stats.first_failure.empty())
-                {
-                    stats.first_failure = failure.empty() ? "server_paint_batch_failed" : failure;
-                }
-                return false;
-            }
-            stats.server_sent += static_cast<int>(count);
-            ++stats.batch_calls;
-            stats.server_rpc = "ServerPaintBatch";
-            if (!progress_callback(stats, stats.server_sent, static_cast<int>(strokes.size())))
-            {
-                stats.server_failed += std::max(0, static_cast<int>(strokes.size()) - stats.server_sent);
-                if (stats.first_failure.empty())
-                {
-                    stats.first_failure = "server_stream_timeout_before_bridge_timeout";
-                }
-                return false;
-            }
-            if (sleep_ms > 0)
-            {
-                Sleep(static_cast<DWORD>(sleep_ms));
-            }
-        }
-        return stats.server_sent == static_cast<int>(strokes.size());
-    }
-
-    auto sdk_dispatch_replicated_strokes(const SdkContext& ctx,
-                                         const std::vector<meccha_sdk::FPaintStroke>& strokes,
-                                         SdkReplicatedStats& stats) -> bool
-    {
-        return sdk_dispatch_replicated_strokes_with_progress(ctx, strokes, stats, [](const SdkReplicatedStats&, int, int) {
-            return true;
-        });
-    }
-
-    auto sdk_apply_local_echo_strokes(const SdkContext& ctx,
-                                      const std::vector<meccha_sdk::FPaintStroke>& strokes,
-                                      SdkReplicatedStats& stats) -> bool
-    {
-        if (strokes.empty())
-        {
-            return true;
-        }
-        for (std::size_t i = 0; i < strokes.size(); ++i)
-        {
-            std::string failure{};
-            if (sdk_call_client_mirror(ctx, strokes[i], failure))
-            {
-                ++stats.client_mirror_sent;
-                stats.client_mirror_rpc = "PaintAtUVWithBrush";
-            }
-            else
-            {
-                ++stats.client_mirror_failed;
-                if (stats.first_failure.empty())
-                {
-                    stats.first_failure = failure.empty() ? "PaintAtUVWithBrush_failed" : failure;
-                }
-            }
-            if ((i % 64) == 63)
-            {
-                Sleep(1);
-            }
-        }
-        return stats.client_mirror_sent > 0;
-    }
-
-    auto sdk_stats_metadata(const char* prefix, const SdkReplicatedStats& stats) -> std::string
-    {
-        std::string name(prefix);
-        return ",\"" + name + "_requested\":" + std::to_string(stats.requested) +
-               ",\"" + name + "_server_sent\":" + std::to_string(stats.server_sent) +
-               ",\"" + name + "_server_failed\":" + std::to_string(stats.server_failed) +
-               ",\"" + name + "_batch_calls\":" + std::to_string(stats.batch_calls) +
-               ",\"" + name + "_single_calls\":" + std::to_string(stats.single_calls) +
-               ",\"" + name + "_client_mirror_sent\":" + std::to_string(stats.client_mirror_sent) +
-               ",\"" + name + "_client_mirror_failed\":" + std::to_string(stats.client_mirror_failed) +
-               ",\"" + name + "_server_rpc\":\"" + json_escape(stats.server_rpc) + "\"" +
-               ",\"" + name + "_client_mirror_rpc\":\"" + json_escape(stats.client_mirror_rpc) + "\"" +
-               ",\"" + name + "_first_failure\":\"" + json_escape(stats.first_failure) + "\"";
     }
 
     struct SdkFrontColorStats
@@ -7073,8 +5006,6 @@ namespace
             const auto px = std::max(0, std::min(out.width - 1, static_cast<int>(std::round(sx * capture_scale_x))));
             const auto py = std::max(0, std::min(out.height - 1, static_cast<int>(std::round(sy * capture_scale_y))));
             auto projected_surface = surface;
-            projected_surface.capture_nx = clamp01(sx / static_cast<double>(std::max(1, viewport_width)));
-            projected_surface.capture_ny = clamp01(sy / static_cast<double>(std::max(1, viewport_height)));
             projected.push_back(ProjectedFrontSample{projected_surface, px, py, {}, false});
         }
         if (projected.empty())
@@ -7245,7 +5176,6 @@ namespace
             {
                 ++out.raw_whiteish_samples;
             }
-            const auto floor_like = projected_sample.surface.floor_like;
             auto resolved_color = raw_color;
             resolved_color.roughness = 0.65;
             resolved_color.metallic = 0.0;
@@ -7262,11 +5192,6 @@ namespace
             sample.b = clamp01(resolved_color.b);
             sample.metallic = clamp01(resolved_color.metallic);
             sample.roughness = clamp01(resolved_color.roughness);
-            sample.radius = std::max(0.0015, std::min(0.0035, 2.5 / static_cast<double>(std::max(out.width, out.height))));
-            sample.floor_like = floor_like;
-            sample.atlas_priority = 11;
-            sample.atlas_radius = 3;
-            sample.atlas_weight = 72.0;
             out.samples.push_back(sample);
             const double values[]{sample.r, sample.g, sample.b};
             bool whiteish = true;
@@ -7400,1580 +5325,6 @@ namespace
                                                                         capture.texture_source == "bulk_calibrated_direct_texture"));
     }
 
-    struct SdkAtlasSideBackResult
-    {
-        std::vector<FrontSample> samples{};
-        int attempts{0};
-        int success{0};
-        int owner_hits{0};
-        int uv_hits{0};
-        int side_hits{0};
-        int back_hits{0};
-        int duplicate_texels{0};
-        int nearest_sources{0};
-        int front_reuse_samples{0};
-        bool front_reuse_used{false};
-        int attempt_budget{0};
-        double time_budget_ms{0.0};
-        double elapsed_ms{0.0};
-        bool timed_out{false};
-        bool attempt_budget_exhausted{false};
-        int splat_radius{0};
-        std::string backend{"not_run"};
-        std::string failure{"not_run"};
-    };
-
-    struct SdkTextureAtlasStats
-    {
-        int width{0};
-        int height{0};
-        int direct_texels{0};
-        int filled_by_extension{0};
-        int filled_by_full_nearest{0};
-        int preserved_original{0};
-        int source_samples{0};
-        int worker_threads{1};
-        int gap_fill_radius{0};
-    };
-
-    struct SdkTextureAtlas
-    {
-        bool ok{false};
-        std::string failure{"atlas_not_built"};
-        std::vector<std::uint8_t> albedo{};
-        std::vector<std::uint8_t> metallic{};
-        std::vector<std::uint8_t> roughness{};
-        std::vector<std::uint8_t> painted_mask{};
-        std::uint64_t hash{1469598103934665603ULL};
-        std::uint64_t metallic_hash{1469598103934665603ULL};
-        std::uint64_t roughness_hash{1469598103934665603ULL};
-        SdkTextureAtlasStats stats{};
-    };
-
-    struct SdkAtlasStrokePlan
-    {
-        std::vector<meccha_sdk::FPaintStroke> strokes{};
-        int stroke_cap{600000};
-        int target_strokes{30000};
-        int source_texels{0};
-        int merged_8{0};
-        int merged_4{0};
-        int merged_2{0};
-        int singles{0};
-        double merge_error_max{2.0 / 255.0};
-        bool cap_exceeded{false};
-        std::string failure{"not_run"};
-    };
-
-    auto sdk_byte_from_unit(double value) -> std::uint8_t
-    {
-        return static_cast<std::uint8_t>(std::round(clamp01(value) * 255.0));
-    }
-
-    auto sdk_texel_key(double u, double v, int width, int height) -> std::uint64_t
-    {
-        const auto x = static_cast<std::uint64_t>(std::max(0, std::min(std::max(0, width - 1), static_cast<int>(clamp01(u) * static_cast<double>(std::max(1, width))))));
-        const auto y = static_cast<std::uint64_t>(std::max(0, std::min(std::max(0, height - 1), static_cast<int>(clamp01(v) * static_cast<double>(std::max(1, height))))));
-        return (y << 32) | x;
-    }
-
-    auto sdk_collect_atlas_side_back_samples(Reflection& ref,
-                                             const SdkContext& ctx,
-                                             const SdkNativeFrontSampleResult& native_front,
-                                             const std::vector<FrontSample>& direct_samples,
-                                             int width,
-                                             int height,
-                                             bool side_only = false) -> SdkAtlasSideBackResult
-    {
-        SdkAtlasSideBackResult out{};
-        out.failure = "side_back_unavailable";
-        if (direct_samples.empty())
-        {
-            out.failure = "side_back_no_direct_samples";
-            return out;
-        }
-        auto query = native_front.query ? native_front.query : sdk_find_screen_space_brush_query(ref, ctx);
-        if (!query || !sdk_configure_screen_space_brush_query(ref, query, ctx.pawn, native_front.mesh))
-        {
-            out.failure = "side_back_query_unavailable";
-            return out;
-        }
-        out.backend = side_only ? "screen_space_brush_query_static_hybrid_front_side_probe"
-                                : "screen_space_brush_query_virtual_views_bounded";
-        out.time_budget_ms = side_only ? 16000.0 : 36000.0;
-        out.attempt_budget = side_only ? 70000 : 140000;
-        const auto side_back_started = std::chrono::steady_clock::now();
-        auto side_back_elapsed_ms = [&]() {
-            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - side_back_started).count();
-        };
-        auto side_back_should_stop = [&]() {
-            out.elapsed_ms = side_back_elapsed_ms();
-            if (out.elapsed_ms >= out.time_budget_ms)
-            {
-                out.timed_out = true;
-                if (out.failure == "side_back_unavailable" || out.failure == "ok")
-                {
-                    out.failure = out.samples.empty() ? "side_back_time_budget_exhausted_no_samples" : "ok_time_budget_exhausted_partial";
-                }
-                return true;
-            }
-            if (out.attempts >= out.attempt_budget)
-            {
-                out.attempt_budget_exhausted = true;
-                if (out.failure == "side_back_unavailable" || out.failure == "ok")
-                {
-                    out.failure = out.samples.empty() ? "side_back_attempt_budget_exhausted_no_samples" : "ok_attempt_budget_exhausted_partial";
-                }
-                return true;
-            }
-            return false;
-        };
-
-        std::unordered_set<std::uint64_t> unique_texels{};
-        unique_texels.reserve(direct_samples.size() + 32768);
-        meccha_sdk::FVector min_world = direct_samples.front().world_position;
-        meccha_sdk::FVector max_world = direct_samples.front().world_position;
-        meccha_sdk::FVector sum_world{};
-        for (const auto& sample : direct_samples)
-        {
-            unique_texels.insert(sdk_texel_key(sample.u, sample.v, width, height));
-            sum_world = sdk_vec_add(sum_world, sample.world_position);
-            min_world.X = std::min(min_world.X, sample.world_position.X);
-            min_world.Y = std::min(min_world.Y, sample.world_position.Y);
-            min_world.Z = std::min(min_world.Z, sample.world_position.Z);
-            max_world.X = std::max(max_world.X, sample.world_position.X);
-            max_world.Y = std::max(max_world.Y, sample.world_position.Y);
-            max_world.Z = std::max(max_world.Z, sample.world_position.Z);
-        }
-        const auto center = sdk_vec_mul(sum_world, 1.0 / static_cast<double>(std::max<std::size_t>(1, direct_samples.size())));
-        const auto extent = sdk_vec_sub(max_world, min_world);
-        const auto half_width = std::max(90.0, std::min(300.0, std::max(std::abs(extent.X), std::abs(extent.Y)) * 0.86));
-        const auto half_height = std::max(120.0, std::min(360.0, std::abs(extent.Z) * 0.86));
-        const auto ray_distance = std::max(260.0, std::min(820.0, std::max({std::abs(extent.X), std::abs(extent.Y), std::abs(extent.Z), 160.0}) * 2.8));
-        auto base_outward = sdk_vec_sub(native_front.first_ray_location, center);
-        base_outward.Z = 0.0;
-        if (sdk_vec_len(base_outward) < 0.01)
-        {
-            base_outward = {1.0, 0.0, 0.0};
-        }
-        base_outward = sdk_vec_normalize(base_outward);
-        auto frame_forward = sdk_vec_normalize(sdk_vec_sub(center, native_front.first_ray_location));
-        if (sdk_vec_len(frame_forward) < 0.01)
-        {
-            frame_forward = sdk_vec_normalize(native_front.first_ray_direction);
-        }
-        auto frame_right = sdk_vec_normalize(sdk_vec_cross({0.0, 0.0, 1.0}, frame_forward));
-        if (sdk_vec_len(frame_right) < 0.01)
-        {
-            frame_right = {1.0, 0.0, 0.0};
-        }
-        auto frame_up = sdk_vec_normalize(sdk_vec_cross(frame_forward, frame_right));
-        if (sdk_vec_len(frame_up) < 0.01)
-        {
-            frame_up = {0.0, 0.0, 1.0};
-        }
-        auto rotate_z = [](const meccha_sdk::FVector& v, double degrees) {
-            const auto radians = degrees * 3.14159265358979323846 / 180.0;
-            const auto c = std::cos(radians);
-            const auto s = std::sin(radians);
-            return meccha_sdk::FVector{v.X * c - v.Y * s, v.X * s + v.Y * c, v.Z};
-        };
-        auto rotate_yaw_pitch = [&](const meccha_sdk::FVector& v, double yaw_degrees, double pitch_degrees) {
-            auto yawed = sdk_vec_normalize(rotate_z(v, yaw_degrees));
-            yawed.Z = 0.0;
-            if (sdk_vec_len(yawed) < 0.01)
-            {
-                yawed = base_outward;
-            }
-            yawed = sdk_vec_normalize(yawed);
-            const auto pitch = pitch_degrees * 3.14159265358979323846 / 180.0;
-            const auto c = std::cos(pitch);
-            const auto s = std::sin(pitch);
-            return sdk_vec_normalize({yawed.X * c, yawed.Y * c, s});
-        };
-        auto nearest_direct = [&](const meccha_sdk::FVector& world) -> const FrontSample* {
-            const FrontSample* best = nullptr;
-            double best_score = 1000000000000.0;
-            for (const auto& sample : direct_samples)
-            {
-                const auto delta = sdk_vec_sub(sample.world_position, world);
-                const auto right_delta = sdk_vec_dot(delta, frame_right);
-                const auto up_delta = sdk_vec_dot(delta, frame_up);
-                const auto forward_delta = sdk_vec_dot(delta, frame_forward);
-                const auto score = right_delta * right_delta +
-                                   up_delta * up_delta * 1.35 +
-                                   forward_delta * forward_delta * 0.16;
-                if (score < best_score)
-                {
-                    best_score = score;
-                    best = &sample;
-                }
-            }
-            return best;
-        };
-        constexpr std::size_t centerline_bin_count = 96;
-        std::vector<const FrontSample*> centerline_bins(centerline_bin_count, nullptr);
-        std::vector<double> centerline_scores(centerline_bin_count, 1000000000000.0);
-        double min_up = 1000000000000.0;
-        double max_up = -1000000000000.0;
-        for (const auto& sample : direct_samples)
-        {
-            const auto delta = sdk_vec_sub(sample.world_position, center);
-            const auto up_delta = sdk_vec_dot(delta, frame_up);
-            min_up = std::min(min_up, up_delta);
-            max_up = std::max(max_up, up_delta);
-        }
-        const auto up_span = std::max(1.0, max_up - min_up);
-        for (const auto& sample : direct_samples)
-        {
-            const auto delta = sdk_vec_sub(sample.world_position, center);
-            const auto right_delta = sdk_vec_dot(delta, frame_right);
-            const auto up_delta = sdk_vec_dot(delta, frame_up);
-            const auto forward_delta = sdk_vec_dot(delta, frame_forward);
-            const auto normalized_up = std::max(0.0, std::min(0.999999, (up_delta - min_up) / up_span));
-            const auto bin = std::min(centerline_bin_count - 1, static_cast<std::size_t>(normalized_up * static_cast<double>(centerline_bin_count)));
-            const auto score = std::abs(right_delta) + std::abs(forward_delta) * 0.04;
-            if (score < centerline_scores[bin])
-            {
-                centerline_scores[bin] = score;
-                centerline_bins[bin] = &sample;
-            }
-        }
-        std::vector<const FrontSample*> centerline_targets{};
-        centerline_targets.reserve(centerline_bin_count);
-        for (const auto* sample : centerline_bins)
-        {
-            if (sample)
-            {
-                centerline_targets.push_back(sample);
-            }
-        }
-        auto try_ray = [&](const meccha_sdk::FVector& origin, const meccha_sdk::FVector& ray_dir, bool back_view) {
-            if (side_back_should_stop())
-            {
-                return;
-            }
-            ++out.attempts;
-            const auto hit = sdk_query_brush_from_world_ray(ref, query, origin, ray_dir);
-            if (!hit.params_ok || !hit.success)
-            {
-                if (out.failure == "side_back_unavailable")
-                {
-                    out.failure = hit.failure.empty() ? "side_back_query_no_hit" : hit.failure;
-                }
-                return;
-            }
-            ++out.success;
-            const bool owner_hit = (hit.component && hit.component == native_front.mesh) ||
-                                   sdk_object_is_or_belongs_to(ref, hit.actor, ctx.pawn) ||
-                                   sdk_object_is_or_belongs_to(ref, hit.component, ctx.pawn);
-            if (!owner_hit || !hit.has_uv || !std::isfinite(hit.u) || !std::isfinite(hit.v))
-            {
-                return;
-            }
-            ++out.owner_hits;
-            ++out.uv_hits;
-            const auto key = sdk_texel_key(hit.u, hit.v, width, height);
-            if (!unique_texels.insert(key).second)
-            {
-                ++out.duplicate_texels;
-                return;
-            }
-            const auto* nearest = nearest_direct(hit.world_position);
-            if (!nearest)
-            {
-                return;
-            }
-            ++out.nearest_sources;
-            FrontSample sample = *nearest;
-            sample.u = clamp01(hit.u);
-            sample.v = clamp01(hit.v);
-            sample.world_position = hit.world_position;
-            sample.normal = sdk_vec_normalize(hit.normal);
-            sample.has_world_position = true;
-            sample.radius = std::max(0.0015, nearest->radius);
-            sample.floor_like = nearest->floor_like;
-            sample.atlas_priority = sample.floor_like ? 8 : 7;
-            sample.atlas_radius = 2;
-            sample.atlas_weight = sample.floor_like ? 56.0 : 48.0;
-            out.samples.push_back(sample);
-            if (back_view)
-            {
-                ++out.back_hits;
-            }
-            else
-            {
-                ++out.side_hits;
-            }
-        };
-
-        const std::vector<double> yaw_offsets = side_only
-            ? std::vector<double>{-60.0, -45.0, -30.0, -15.0, 15.0, 30.0, 45.0, 60.0}
-            : std::vector<double>{-165.0, -150.0, -135.0, -120.0, -105.0, -90.0, -75.0, -60.0, 60.0, 75.0, 90.0, 105.0, 120.0, 135.0, 150.0, 165.0, 180.0};
-        const double pitch_offsets[]{-30.0, -15.0, 0.0, 15.0, 30.0};
-        constexpr int grid_x = 32;
-        constexpr int grid_y = 48;
-        std::size_t virtual_view_index = 0;
-        for (const auto yaw : yaw_offsets)
-        {
-            for (const auto pitch : pitch_offsets)
-            {
-                if (side_back_should_stop())
-                {
-                    break;
-                }
-                const auto outward = rotate_yaw_pitch(base_outward, yaw, pitch);
-                const auto origin = sdk_vec_add(center, sdk_vec_mul(outward, ray_distance));
-                const auto view_forward = sdk_vec_normalize(sdk_vec_sub(center, origin));
-                auto view_right = sdk_vec_normalize(sdk_vec_cross({0.0, 0.0, 1.0}, view_forward));
-                if (sdk_vec_len(view_right) < 0.01)
-                {
-                    view_right = {1.0, 0.0, 0.0};
-                }
-                auto view_up = sdk_vec_normalize(sdk_vec_cross(view_forward, view_right));
-                if (sdk_vec_len(view_up) < 0.01)
-                {
-                    view_up = {0.0, 0.0, 1.0};
-                }
-                for (int y = 0; y < grid_y; ++y)
-                {
-                    for (int x = 0; x < grid_x; ++x)
-                    {
-                        if (side_back_should_stop())
-                        {
-                            break;
-                        }
-                        const auto lx = ((static_cast<double>(x) + 0.5) / static_cast<double>(grid_x) - 0.5) * 2.0;
-                        const auto ly = ((static_cast<double>(y) + 0.5) / static_cast<double>(grid_y) - 0.5) * 2.0;
-                        const auto target = sdk_vec_add(sdk_vec_add(center, sdk_vec_mul(view_right, lx * half_width)), sdk_vec_mul(view_up, ly * half_height));
-                        try_ray(origin, sdk_vec_normalize(sdk_vec_sub(target, origin)), !side_only && std::abs(yaw) > 165.0);
-                    }
-                }
-                constexpr int direct_target_rays_per_view = 1536;
-                const auto seed_count = direct_samples.size();
-                const auto stride = std::max<std::size_t>(1, seed_count / static_cast<std::size_t>(direct_target_rays_per_view));
-                const auto view_offset = (virtual_view_index * 131u) % std::max<std::size_t>(1, seed_count);
-                const auto target_rays = std::min<std::size_t>(static_cast<std::size_t>(direct_target_rays_per_view), seed_count);
-                for (std::size_t i = 0; i < target_rays; ++i)
-                {
-                    const auto seed_index = (view_offset + i * stride) % seed_count;
-                    const auto jitter_x = (static_cast<double>((i * 17u + virtual_view_index * 7u) % 11u) - 5.0) * 1.4;
-                    const auto jitter_y = (static_cast<double>((i * 23u + virtual_view_index * 5u) % 13u) - 6.0) * 1.2;
-                    const auto target = sdk_vec_add(sdk_vec_add(direct_samples[seed_index].world_position, sdk_vec_mul(view_right, jitter_x)),
-                                                    sdk_vec_mul(view_up, jitter_y));
-                    try_ray(origin, sdk_vec_normalize(sdk_vec_sub(target, origin)), !side_only && std::abs(yaw) > 165.0);
-                    if (side_back_should_stop())
-                    {
-                        break;
-                    }
-                }
-                ++virtual_view_index;
-            }
-        }
-        if (!side_only)
-        {
-            const double centerline_yaw_offsets[]{-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0};
-            const double centerline_pitch_offsets[]{-45.0, -25.0, 0.0, 25.0, 45.0};
-            const double centerline_jitter[][2]{{0.0, 0.0}, {4.0, 0.0}, {-4.0, 0.0}, {0.0, 5.0}, {0.0, -5.0}};
-            for (const auto yaw : centerline_yaw_offsets)
-            {
-                for (const auto pitch : centerline_pitch_offsets)
-                {
-                    if (side_back_should_stop())
-                    {
-                        break;
-                    }
-                    const auto outward = rotate_yaw_pitch(base_outward, yaw, pitch);
-                    const auto origin = sdk_vec_add(center, sdk_vec_mul(outward, ray_distance));
-                    const auto view_forward = sdk_vec_normalize(sdk_vec_sub(center, origin));
-                    auto view_right = sdk_vec_normalize(sdk_vec_cross({0.0, 0.0, 1.0}, view_forward));
-                    if (sdk_vec_len(view_right) < 0.01)
-                    {
-                        view_right = frame_right;
-                    }
-                    auto view_up = sdk_vec_normalize(sdk_vec_cross(view_forward, view_right));
-                    if (sdk_vec_len(view_up) < 0.01)
-                    {
-                        view_up = frame_up;
-                    }
-                    for (const auto* target_seed : centerline_targets)
-                    {
-                        for (const auto& jitter : centerline_jitter)
-                        {
-                            if (side_back_should_stop())
-                            {
-                                break;
-                            }
-                            const auto target = sdk_vec_add(sdk_vec_add(target_seed->world_position, sdk_vec_mul(view_right, jitter[0])),
-                                                            sdk_vec_mul(view_up, jitter[1]));
-                            try_ray(origin, sdk_vec_normalize(sdk_vec_sub(target, origin)), std::abs(yaw) > 40.0);
-                        }
-                    }
-                }
-            }
-        }
-        out.elapsed_ms = side_back_elapsed_ms();
-        if (!out.samples.empty())
-        {
-            const auto pixels = static_cast<double>(std::max(1, width) * std::max(1, height));
-            const auto density_radius = static_cast<int>(std::ceil(std::sqrt(pixels / static_cast<double>(out.samples.size())) * 0.18));
-            out.splat_radius = side_only ? 1 : std::max(2, std::min(6, density_radius));
-            for (auto& sample : out.samples)
-            {
-                sample.atlas_radius = side_only ? std::min(std::max(sample.atlas_radius, 0), out.splat_radius)
-                                                : std::max(sample.atlas_radius, out.splat_radius);
-                sample.atlas_weight = std::max(sample.atlas_weight, sample.floor_like ? 70.0 : 60.0);
-            }
-        }
-        if (!out.timed_out && !out.attempt_budget_exhausted)
-        {
-            out.failure = out.samples.empty() ? out.failure : "ok";
-        }
-        return out;
-    }
-
-    auto sdk_build_front_uv_mirror_side_back_samples(const std::vector<FrontSample>& direct_samples,
-                                                     int width,
-                                                     int height) -> SdkAtlasSideBackResult
-    {
-        SdkAtlasSideBackResult out{};
-        out.failure = "front_uv_mirror_fast";
-        out.backend = "front_uv_mirror_fast";
-        if (direct_samples.empty())
-        {
-            out.failure = "front_uv_mirror_no_direct_samples";
-            return out;
-        }
-
-        std::unordered_set<std::uint64_t> unique_texels{};
-        unique_texels.reserve(direct_samples.size() * 2U + 1024U);
-        constexpr int uv_grid = 128;
-        std::vector<std::uint8_t> occupied(static_cast<std::size_t>(uv_grid * uv_grid), 0);
-        auto uv_cell_index = [&](double u, double v) -> int {
-            const auto x = std::max(0, std::min(uv_grid - 1, static_cast<int>(clamp01(u) * static_cast<double>(uv_grid))));
-            const auto y = std::max(0, std::min(uv_grid - 1, static_cast<int>(clamp01(v) * static_cast<double>(uv_grid))));
-            return y * uv_grid + x;
-        };
-        for (const auto& sample : direct_samples)
-        {
-            unique_texels.insert(sdk_texel_key(sample.u, sample.v, width, height));
-            occupied[static_cast<std::size_t>(uv_cell_index(sample.u, sample.v))] = 1;
-        }
-
-        struct UvIslandBounds
-        {
-            double min_u{1.0};
-            double max_u{0.0};
-            double min_v{1.0};
-            double max_v{0.0};
-            int cells{0};
-        };
-        std::vector<int> component_ids(static_cast<std::size_t>(uv_grid * uv_grid), -1);
-        std::vector<UvIslandBounds> islands{};
-        std::vector<int> stack{};
-        stack.reserve(uv_grid * uv_grid);
-        for (int cell = 0; cell < uv_grid * uv_grid; ++cell)
-        {
-            if (!occupied[static_cast<std::size_t>(cell)] || component_ids[static_cast<std::size_t>(cell)] >= 0)
-            {
-                continue;
-            }
-            const auto component_id = static_cast<int>(islands.size());
-            islands.push_back({});
-            stack.clear();
-            stack.push_back(cell);
-            component_ids[static_cast<std::size_t>(cell)] = component_id;
-            while (!stack.empty())
-            {
-                const auto current = stack.back();
-                stack.pop_back();
-                const auto cx = current % uv_grid;
-                const auto cy = current / uv_grid;
-                auto& bounds = islands.back();
-                bounds.min_u = std::min(bounds.min_u, static_cast<double>(cx) / static_cast<double>(uv_grid));
-                bounds.max_u = std::max(bounds.max_u, static_cast<double>(cx + 1) / static_cast<double>(uv_grid));
-                bounds.min_v = std::min(bounds.min_v, static_cast<double>(cy) / static_cast<double>(uv_grid));
-                bounds.max_v = std::max(bounds.max_v, static_cast<double>(cy + 1) / static_cast<double>(uv_grid));
-                ++bounds.cells;
-                for (int dy = -1; dy <= 1; ++dy)
-                {
-                    for (int dx = -1; dx <= 1; ++dx)
-                    {
-                        if (dx == 0 && dy == 0)
-                        {
-                            continue;
-                        }
-                        const auto nx = cx + dx;
-                        const auto ny = cy + dy;
-                        if (nx < 0 || ny < 0 || nx >= uv_grid || ny >= uv_grid)
-                        {
-                            continue;
-                        }
-                        const auto next = ny * uv_grid + nx;
-                        if (!occupied[static_cast<std::size_t>(next)] || component_ids[static_cast<std::size_t>(next)] >= 0)
-                        {
-                            continue;
-                        }
-                        component_ids[static_cast<std::size_t>(next)] = component_id;
-                        stack.push_back(next);
-                    }
-                }
-            }
-        }
-
-        out.attempts = static_cast<int>(direct_samples.size());
-        auto add_mirror_sample = [&](const FrontSample& source,
-                                     double u,
-                                     double v,
-                                     int priority,
-                                     double weight,
-                                     const char* kind) {
-            FrontSample sample = source;
-            sample.u = clamp01(u);
-            sample.v = clamp01(v);
-            sample.atlas_priority = priority;
-            sample.atlas_radius = std::max(1, source.atlas_radius);
-            sample.atlas_weight = weight;
-            const auto key = sdk_texel_key(sample.u, sample.v, width, height);
-            if (!unique_texels.insert(key).second)
-            {
-                ++out.duplicate_texels;
-                return;
-            }
-            out.samples.push_back(sample);
-            ++out.success;
-            ++out.owner_hits;
-            ++out.uv_hits;
-            ++out.back_hits;
-            ++out.nearest_sources;
-            (void)kind;
-        };
-        for (const auto& source : direct_samples)
-        {
-            const auto component_id = component_ids[static_cast<std::size_t>(uv_cell_index(source.u, source.v))];
-            if (component_id >= 0 && component_id < static_cast<int>(islands.size()))
-            {
-                const auto& island = islands[static_cast<std::size_t>(component_id)];
-                if (island.cells >= 2 && island.max_u > island.min_u && island.max_v > island.min_v)
-                {
-                    add_mirror_sample(source,
-                                      island.min_u + island.max_u - source.u,
-                                      source.v,
-                                      source.floor_like ? 8 : 7,
-                                      source.floor_like ? 48.0 : 42.0,
-                                      "island_u");
-                }
-            }
-            add_mirror_sample(source,
-                              1.0 - source.u,
-                              source.v,
-                              source.floor_like ? 6 : 5,
-                              source.floor_like ? 34.0 : 30.0,
-                              "global_u");
-            add_mirror_sample(source,
-                              source.u,
-                              1.0 - source.v,
-                              source.floor_like ? 4 : 3,
-                              source.floor_like ? 26.0 : 22.0,
-                              "global_v");
-            add_mirror_sample(source,
-                              1.0 - source.u,
-                              1.0 - source.v,
-                              source.floor_like ? 4 : 3,
-                              source.floor_like ? 22.0 : 18.0,
-                              "global_uv");
-        }
-        out.failure = out.samples.empty() ? "front_uv_mirror_no_new_texels" : "ok_front_uv_mirror_fast";
-        return out;
-    }
-
-    auto sdk_side_back_metadata(const SdkAtlasSideBackResult& side) -> std::string
-    {
-        return ",\"side_back_attempts\":" + std::to_string(side.attempts) +
-               ",\"side_back_success\":" + std::to_string(side.success) +
-               ",\"side_back_owner_hits\":" + std::to_string(side.owner_hits) +
-               ",\"side_back_uv_hits\":" + std::to_string(side.uv_hits) +
-               ",\"side_hits\":" + std::to_string(side.side_hits) +
-               ",\"back_hits\":" + std::to_string(side.back_hits) +
-               ",\"side_back_duplicate_texels\":" + std::to_string(side.duplicate_texels) +
-               ",\"side_back_nearest_sources\":" + std::to_string(side.nearest_sources) +
-               ",\"side_back_front_reuse_used\":" + json_bool(side.front_reuse_used) +
-               ",\"side_back_front_reuse_samples\":" + std::to_string(side.front_reuse_samples) +
-               ",\"side_back_front_reuse_disabled_reason\":\"front UV mirror/reuse is not UV island aware and can move colors between body parts\"" +
-               ",\"side_back_attempt_budget\":" + std::to_string(side.attempt_budget) +
-               ",\"side_back_time_budget_ms\":" + std::to_string(side.time_budget_ms) +
-               ",\"side_back_elapsed_ms\":" + std::to_string(side.elapsed_ms) +
-               ",\"side_back_timed_out\":" + json_bool(side.timed_out) +
-               ",\"side_back_attempt_budget_exhausted\":" + json_bool(side.attempt_budget_exhausted) +
-               ",\"side_back_splat_radius\":" + std::to_string(side.splat_radius) +
-               ",\"side_back_backend\":\"" + json_escape(side.backend) + "\"" +
-               ",\"side_back_cached_triangle_candidate\":false" +
-               ",\"side_back_cached_triangle_blocker\":\"HitTestAtScreenPosition is current-view screen-space only and FScreenSpacePaintResult has no FaceIndex; virtual back coverage still requires ScreenSpaceBrushQuery or exact mesh render-data layout\"" +
-               ",\"side_back_failure\":\"" + json_escape(side.failure) + "\"";
-    }
-
-    auto sdk_assemble_texture_atlas(const ChannelBuffer& before_albedo,
-                                    const ChannelBuffer& before_metallic,
-                                    const ChannelBuffer& before_roughness,
-                                    const std::vector<FrontSample>& samples) -> SdkTextureAtlas
-    {
-        SdkTextureAtlas out{};
-        out.stats.width = before_albedo.width;
-        out.stats.height = before_albedo.height;
-        out.stats.source_samples = static_cast<int>(samples.size());
-        const auto width = std::max(1, before_albedo.width);
-        const auto height = std::max(1, before_albedo.height);
-        const auto pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-        if (before_albedo.bytes.size() < pixels * 4)
-        {
-            out.failure = "atlas_albedo_bytes_invalid";
-            return out;
-        }
-        if (before_metallic.bytes.empty() || before_roughness.bytes.empty())
-        {
-            out.failure = "atlas_material_channel_bytes_invalid";
-            return out;
-        }
-        struct Texel
-        {
-            double r{0.0};
-            double g{0.0};
-            double b{0.0};
-            double roughness{0.0};
-            double metallic{0.0};
-            double weight{0.0};
-            int priority{0};
-            bool floor_like{false};
-        };
-        std::vector<Texel> texels(pixels);
-        std::vector<std::uint8_t> direct_mask(pixels, 0);
-        auto splat = [&](const FrontSample& sample) {
-            const auto priority = sample.atlas_priority > 0 ? sample.atlas_priority : (sample.floor_like ? 12 : 11);
-            const auto weight = sample.atlas_weight > 0.0 ? sample.atlas_weight : (sample.floor_like ? 88.0 : 72.0);
-            const auto cx = std::max(0, std::min(width - 1, static_cast<int>(std::round(clamp01(sample.u) * static_cast<double>(width - 1)))));
-            const auto cy = std::max(0, std::min(height - 1, static_cast<int>(std::round(clamp01(sample.v) * static_cast<double>(height - 1)))));
-            const auto radius = std::max(0, sample.atlas_radius);
-            for (int dy = -radius; dy <= radius; ++dy)
-            {
-                for (int dx = -radius; dx <= radius; ++dx)
-                {
-                    if (dx * dx + dy * dy > radius * radius)
-                    {
-                        continue;
-                    }
-                    const auto x = cx + dx;
-                    const auto y = cy + dy;
-                    if (x < 0 || y < 0 || x >= width || y >= height)
-                    {
-                        continue;
-                    }
-                    const auto index = static_cast<std::size_t>(y * width + x);
-                    auto& texel = texels[index];
-                    if (priority < texel.priority)
-                    {
-                        continue;
-                    }
-                    if (priority > texel.priority)
-                    {
-                        texel = Texel{};
-                        texel.priority = priority;
-                    }
-                    const auto dist_sq = static_cast<double>(dx * dx + dy * dy);
-                    const auto radius_sq = static_cast<double>(std::max(1, radius) * std::max(1, radius));
-                    const auto local_weight = radius <= 0
-                        ? weight
-                        : weight * std::max(0.15, std::min(1.0, 1.0 - dist_sq / (radius_sq + 1.0)));
-                    texel.r += clamp01(sample.r) * local_weight;
-                    texel.g += clamp01(sample.g) * local_weight;
-                    texel.b += clamp01(sample.b) * local_weight;
-                    texel.roughness += clamp01(sample.roughness) * local_weight;
-                    texel.metallic += clamp01(sample.metallic) * local_weight;
-                    texel.weight += local_weight;
-                    texel.floor_like = texel.floor_like || sample.floor_like;
-                    direct_mask[index] = 1;
-                }
-            }
-        };
-        for (const auto& sample : samples)
-        {
-            splat(sample);
-        }
-        for (const auto mask : direct_mask)
-        {
-            if (mask)
-            {
-                ++out.stats.direct_texels;
-            }
-        }
-
-        std::vector<Texel> extended_texels = texels;
-        std::vector<std::uint8_t> painted_mask = direct_mask;
-        const auto estimate_seed_radius_for_density = [](int texture_width, int texture_height, int seed_count) -> int {
-            if (texture_width <= 0 || texture_height <= 0 || seed_count <= 0)
-            {
-                return 1;
-            }
-            const auto pixels_per_seed = (static_cast<double>(std::max(1, texture_width)) *
-                                          static_cast<double>(std::max(1, texture_height))) /
-                                         static_cast<double>(std::max(1, seed_count));
-            const auto radius = static_cast<int>(std::round(std::sqrt(pixels_per_seed) * 0.48));
-            return std::max(1, std::min(24, radius));
-        };
-        constexpr bool kEnableAtlasGapFill = false;
-        if constexpr (kEnableAtlasGapFill)
-        {
-            const int front_gap_fill_radius = std::max(
-                8,
-                std::min(
-                    24,
-                    estimate_seed_radius_for_density(width, height, static_cast<int>(std::max<std::size_t>(1, samples.size()))) * 3));
-            out.stats.gap_fill_radius = front_gap_fill_radius;
-            std::vector<int> extension_counts(static_cast<std::size_t>(std::max(1, static_cast<int>(sdk_worker_count_for_items(pixels)))), 0);
-            sdk_parallel_ranges(pixels, [&](std::size_t begin, std::size_t end, unsigned worker) {
-                auto& local_filled = extension_counts[static_cast<std::size_t>(worker)];
-                for (std::size_t index = begin; index < end; ++index)
-                {
-                    if (direct_mask[index])
-                    {
-                        continue;
-                    }
-                    const auto y = static_cast<int>(index / static_cast<std::size_t>(width));
-                    const auto x = static_cast<int>(index - static_cast<std::size_t>(y * width));
-                    int best_distance_sq = front_gap_fill_radius * front_gap_fill_radius + 1;
-                    int best_priority = -1;
-                    std::size_t best_index = static_cast<std::size_t>(-1);
-                    for (int dy = -front_gap_fill_radius; dy <= front_gap_fill_radius; ++dy)
-                    {
-                        const auto sy = y + dy;
-                        if (sy < 0 || sy >= height)
-                        {
-                            continue;
-                        }
-                        for (int dx = -front_gap_fill_radius; dx <= front_gap_fill_radius; ++dx)
-                        {
-                            const auto sx = x + dx;
-                            if (sx < 0 || sx >= width)
-                            {
-                                continue;
-                            }
-                            const auto distance_sq = dx * dx + dy * dy;
-                            if (distance_sq > front_gap_fill_radius * front_gap_fill_radius)
-                            {
-                                continue;
-                            }
-                            const auto source_index = static_cast<std::size_t>(sy * width + sx);
-                            if (!direct_mask[source_index] || texels[source_index].weight <= 0.000001)
-                            {
-                                continue;
-                            }
-                            const auto priority = texels[source_index].priority;
-                            if (priority > best_priority ||
-                                (priority == best_priority && distance_sq < best_distance_sq))
-                            {
-                                best_priority = priority;
-                                best_distance_sq = distance_sq;
-                                best_index = source_index;
-                            }
-                        }
-                    }
-                    if (best_index != static_cast<std::size_t>(-1))
-                    {
-                        extended_texels[index] = texels[best_index];
-                        painted_mask[index] = 1;
-                        ++local_filled;
-                    }
-                }
-            });
-            for (const auto count : extension_counts)
-            {
-                out.stats.filled_by_extension += count;
-            }
-            constexpr bool kEnableFullNearestGapFill = false;
-            if constexpr (kEnableFullNearestGapFill)
-            {
-                int full_nearest_filled = 0;
-                std::vector<std::size_t> fill_queue{};
-                fill_queue.reserve(pixels);
-                for (std::size_t index = 0; index < pixels; ++index)
-                {
-                    if (painted_mask[index] && index < extended_texels.size() && extended_texels[index].weight > 0.000001)
-                    {
-                        fill_queue.push_back(index);
-                    }
-                }
-                for (std::size_t head = 0; head < fill_queue.size(); ++head)
-                {
-                    const auto source_index = fill_queue[head];
-                    if (source_index >= extended_texels.size() || extended_texels[source_index].weight <= 0.000001)
-                    {
-                        continue;
-                    }
-                    const auto y = static_cast<int>(source_index / static_cast<std::size_t>(width));
-                    const auto x = static_cast<int>(source_index - static_cast<std::size_t>(y * width));
-                    for (int dy = -1; dy <= 1; ++dy)
-                    {
-                        for (int dx = -1; dx <= 1; ++dx)
-                        {
-                            if (dx == 0 && dy == 0)
-                            {
-                                continue;
-                            }
-                            const auto nx = x + dx;
-                            const auto ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= width || ny >= height)
-                            {
-                                continue;
-                            }
-                            const auto target_index = static_cast<std::size_t>(ny * width + nx);
-                            if (target_index >= painted_mask.size() || painted_mask[target_index])
-                            {
-                                continue;
-                            }
-                            extended_texels[target_index] = extended_texels[source_index];
-                            painted_mask[target_index] = 1;
-                            fill_queue.push_back(target_index);
-                            ++full_nearest_filled;
-                        }
-                    }
-                }
-                out.stats.filled_by_extension += full_nearest_filled;
-                out.stats.filled_by_full_nearest = full_nearest_filled;
-            }
-        }
-
-        out.albedo = before_albedo.bytes;
-        out.metallic = before_metallic.bytes;
-        out.roughness = before_roughness.bytes;
-        out.painted_mask = std::move(painted_mask);
-        out.stats.worker_threads = static_cast<int>(sdk_worker_count_for_items(pixels));
-        auto write_scalar = [](std::vector<std::uint8_t>& bytes,
-                               int bytes_per_pixel,
-                               std::size_t index,
-                               std::uint8_t value) {
-            if (bytes.empty())
-            {
-                return;
-            }
-            if (bytes_per_pixel >= 4)
-            {
-                const auto offset = index * 4;
-                if (offset + 3 >= bytes.size())
-                {
-                    return;
-                }
-                bytes[offset + 0] = value;
-                bytes[offset + 1] = value;
-                bytes[offset + 2] = value;
-                bytes[offset + 3] = 255;
-                return;
-            }
-            if (index < bytes.size())
-            {
-                bytes[index] = value;
-            }
-        };
-        std::vector<int> preserved_counts(static_cast<std::size_t>(std::max(1, out.stats.worker_threads)), 0);
-        sdk_parallel_ranges(pixels, [&](std::size_t begin, std::size_t end, unsigned worker) {
-            auto& local_preserved = preserved_counts[static_cast<std::size_t>(worker)];
-            for (std::size_t index = begin; index < end; ++index)
-            {
-                if (!out.painted_mask[index] || extended_texels[index].weight <= 0.000001)
-                {
-                    ++local_preserved;
-                    continue;
-                }
-                const auto inv = 1.0 / extended_texels[index].weight;
-                const auto offset = index * 4;
-                out.albedo[offset + 0] = sdk_byte_from_unit(clamp01(extended_texels[index].r * inv));
-                out.albedo[offset + 1] = sdk_byte_from_unit(clamp01(extended_texels[index].g * inv));
-                out.albedo[offset + 2] = sdk_byte_from_unit(clamp01(extended_texels[index].b * inv));
-                out.albedo[offset + 3] = before_albedo.bytes[offset + 3];
-                write_scalar(out.metallic, before_metallic.bytes_per_pixel, index, sdk_byte_from_unit(clamp01(extended_texels[index].metallic * inv)));
-                write_scalar(out.roughness, before_roughness.bytes_per_pixel, index, sdk_byte_from_unit(clamp01(extended_texels[index].roughness * inv)));
-            }
-        });
-        for (const auto count : preserved_counts)
-        {
-            out.stats.preserved_original += count;
-        }
-        out.hash = hash_bytes(out.albedo);
-        out.metallic_hash = hash_bytes(out.metallic);
-        out.roughness_hash = hash_bytes(out.roughness);
-        out.ok = out.stats.direct_texels > 0;
-        out.failure = out.ok ? "ok" : "atlas_no_direct_texels";
-        return out;
-    }
-
-    auto sdk_atlas_metadata(const SdkTextureAtlas& atlas) -> std::string
-    {
-        const auto pixels = static_cast<double>(std::max(1, atlas.stats.width) * std::max(1, atlas.stats.height));
-        return ",\"atlas_source\":\"cpu_intermediate\"" +
-               std::string(",\"albedo_width\":") + std::to_string(atlas.stats.width) +
-               ",\"albedo_height\":" + std::to_string(atlas.stats.height) +
-               ",\"srgb\":true" +
-               ",\"direct_texels\":" + std::to_string(atlas.stats.direct_texels) +
-               ",\"filled_by_extension\":" + std::to_string(atlas.stats.filled_by_extension) +
-               ",\"filled_by_full_nearest\":" + std::to_string(atlas.stats.filled_by_full_nearest) +
-               ",\"preserved_original\":" + std::to_string(atlas.stats.preserved_original) +
-               ",\"atlas_gap_fill_radius\":" + std::to_string(atlas.stats.gap_fill_radius) +
-               ",\"direct_texel_ratio\":" + std::to_string(static_cast<double>(atlas.stats.direct_texels) / pixels) +
-               ",\"filled_by_extension_ratio\":" + std::to_string(static_cast<double>(atlas.stats.filled_by_extension) / pixels) +
-               ",\"filled_by_full_nearest_ratio\":" + std::to_string(static_cast<double>(atlas.stats.filled_by_full_nearest) / pixels) +
-               ",\"preserved_original_ratio\":" + std::to_string(static_cast<double>(atlas.stats.preserved_original) / pixels) +
-               ",\"gap_fill_disabled\":true" +
-               ",\"gap_fill_mode\":\"disabled_until_uv_chart_aware_fill\"" +
-               ",\"gap_fill_disabled_reason\":\"local UV extension can cross mesh UV islands and move colors between body parts\"" +
-               ",\"material_channel_write_disabled\":false" +
-               ",\"material_channel_mode\":\"painted_texels_only\"" +
-               ",\"atlas_source_samples\":" + std::to_string(atlas.stats.source_samples) +
-               ",\"atlas_hash\":\"" + std::to_string(atlas.hash) + "\"" +
-               ",\"atlas_metallic_hash\":\"" + std::to_string(atlas.metallic_hash) + "\"" +
-               ",\"atlas_roughness_hash\":\"" + std::to_string(atlas.roughness_hash) + "\"" +
-               ",\"atlas_failure\":\"" + json_escape(atlas.failure) + "\"";
-    }
-
-    auto sdk_write_atlas_debug_artifacts(const SdkTextureAtlas& atlas) -> std::string
-    {
-        const int width = atlas.stats.width;
-        const int height = atlas.stats.height;
-        const std::size_t pixels = width > 0 && height > 0
-            ? static_cast<std::size_t>(width) * static_cast<std::size_t>(height)
-            : 0U;
-        bool coverage_json_written = false;
-        bool mask_written = false;
-        bool preview_written = false;
-
-        std::string coverage = "{";
-        coverage += "\"stage\":\"uv_coverage\",";
-        coverage += "\"width\":" + std::to_string(width) + ",";
-        coverage += "\"height\":" + std::to_string(height) + ",";
-        coverage += "\"direct_texels\":" + std::to_string(atlas.stats.direct_texels) + ",";
-        coverage += "\"filled_by_extension\":" + std::to_string(atlas.stats.filled_by_extension) + ",";
-        coverage += "\"preserved_original\":" + std::to_string(atlas.stats.preserved_original) + ",";
-        coverage += "\"source_samples\":" + std::to_string(atlas.stats.source_samples) + ",";
-        coverage += "\"worker_threads\":" + std::to_string(atlas.stats.worker_threads) + ",";
-        coverage += "\"hash\":\"" + std::to_string(atlas.hash) + "\",";
-        coverage += "\"metallic_hash\":\"" + std::to_string(atlas.metallic_hash) + "\",";
-        coverage += "\"roughness_hash\":\"" + std::to_string(atlas.roughness_hash) + "\",";
-        coverage += "\"failure\":\"" + json_escape(atlas.failure) + "\"";
-        coverage += "}\n";
-        coverage_json_written = write_runtime_artifact_text(L"uv_coverage.json", coverage);
-
-        if (pixels > 0 && atlas.painted_mask.size() >= pixels)
-        {
-            std::string pgm = "P5\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
-            pgm.reserve(pgm.size() + pixels);
-            for (std::size_t index = 0; index < pixels; ++index)
-            {
-                pgm.push_back(atlas.painted_mask[index] ? static_cast<char>(255) : static_cast<char>(0));
-            }
-            mask_written = write_runtime_artifact_binary(L"atlas_coverage_mask.pgm", pgm);
-        }
-
-        if (pixels > 0 && atlas.albedo.size() >= pixels * 4U)
-        {
-            std::string ppm = "P6\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
-            ppm.reserve(ppm.size() + pixels * 3U);
-            for (std::size_t index = 0; index < pixels; ++index)
-            {
-                const auto offset = index * 4U;
-                ppm.push_back(static_cast<char>(atlas.albedo[offset + 0]));
-                ppm.push_back(static_cast<char>(atlas.albedo[offset + 1]));
-                ppm.push_back(static_cast<char>(atlas.albedo[offset + 2]));
-            }
-            preview_written = write_runtime_artifact_binary(L"atlas_preview.ppm", ppm);
-        }
-
-        return std::string(",\"uv_coverage_dump_written\":") + json_bool(coverage_json_written) +
-               ",\"atlas_coverage_mask_written\":" + json_bool(mask_written) +
-               ",\"atlas_preview_written\":" + json_bool(preview_written) +
-               ",\"runtime_artifact_dir\":\"%LOCALAPPDATA%\\\\MecchaCamouflage\\\\runtime\"";
-    }
-
-    auto sdk_write_static_hybrid_artifacts(const SdkTextureAtlas& atlas,
-                                           int front_hits,
-                                           const SdkAtlasSideBackResult& side) -> std::string
-    {
-        const int width = atlas.stats.width;
-        const int height = atlas.stats.height;
-        const std::size_t pixels = width > 0 && height > 0
-            ? static_cast<std::size_t>(width) * static_cast<std::size_t>(height)
-            : 0U;
-        bool atlas_preview_written = false;
-        bool edge_weight_written = false;
-        bool chart_map_written = false;
-        bool coverage_written = false;
-        bool quality_written = false;
-
-        if (pixels > 0 && atlas.albedo.size() >= pixels * 4U)
-        {
-            std::string ppm = "P6\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
-            ppm.reserve(ppm.size() + pixels * 3U);
-            for (std::size_t index = 0; index < pixels; ++index)
-            {
-                const auto offset = index * 4U;
-                ppm.push_back(static_cast<char>(atlas.albedo[offset + 0]));
-                ppm.push_back(static_cast<char>(atlas.albedo[offset + 1]));
-                ppm.push_back(static_cast<char>(atlas.albedo[offset + 2]));
-            }
-            atlas_preview_written = write_runtime_artifact_binary(L"hybrid_atlas_preview.ppm", ppm);
-        }
-
-        if (pixels > 0 && atlas.painted_mask.size() >= pixels)
-        {
-            std::string edge = "P5\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
-            edge.reserve(edge.size() + pixels);
-            for (std::size_t index = 0; index < pixels; ++index)
-            {
-                edge.push_back(atlas.painted_mask[index] ? static_cast<char>(255) : static_cast<char>(0));
-            }
-            edge_weight_written = write_runtime_artifact_binary(L"hybrid_edge_weight.pgm", edge);
-
-            std::string chart = "P6\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
-            chart.reserve(chart.size() + pixels * 3U);
-            for (std::size_t index = 0; index < pixels; ++index)
-            {
-                if (atlas.painted_mask[index])
-                {
-                    chart.push_back(static_cast<char>(64));
-                    chart.push_back(static_cast<char>(196));
-                    chart.push_back(static_cast<char>(96));
-                }
-                else
-                {
-                    chart.push_back(static_cast<char>(0));
-                    chart.push_back(static_cast<char>(0));
-                    chart.push_back(static_cast<char>(0));
-                }
-            }
-            chart_map_written = write_runtime_artifact_binary(L"hybrid_uv_chart_map.ppm", chart);
-        }
-
-        const auto pixel_count = static_cast<double>(std::max<std::size_t>(1U, pixels));
-        std::string coverage = "{";
-        coverage += "\"stage\":\"hybrid_view_coverage\",";
-        coverage += "\"route\":\"static_hybrid_front_side_probe\",";
-        coverage += "\"width\":" + std::to_string(width) + ",";
-        coverage += "\"height\":" + std::to_string(height) + ",";
-        coverage += "\"front_hits\":" + std::to_string(front_hits) + ",";
-        coverage += "\"side_hits\":" + std::to_string(side.side_hits) + ",";
-        coverage += "\"back_hits\":0,";
-        coverage += "\"side_attempts\":" + std::to_string(side.attempts) + ",";
-        coverage += "\"side_success\":" + std::to_string(side.success) + ",";
-        coverage += "\"side_owner_hits\":" + std::to_string(side.owner_hits) + ",";
-        coverage += "\"side_uv_hits\":" + std::to_string(side.uv_hits) + ",";
-        coverage += "\"direct_texels\":" + std::to_string(atlas.stats.direct_texels) + ",";
-        coverage += "\"direct_texel_ratio\":" + std::to_string(static_cast<double>(atlas.stats.direct_texels) / pixel_count) + ",";
-        coverage += "\"side_backend\":\"" + json_escape(side.backend) + "\",";
-        coverage += "\"side_failure\":\"" + json_escape(side.failure) + "\",";
-        coverage += "\"views\":\"front_dominant_plus_side_-60_-45_-30_-15_15_30_45_60\"";
-        coverage += "}\n";
-        coverage_written = write_runtime_artifact_text(L"hybrid_view_coverage.json", coverage);
-
-        std::string quality = "{";
-        quality += "\"stage\":\"hybrid_quality\",";
-        quality += "\"route\":\"static_hybrid_front_side_probe\",";
-        quality += "\"mesh_chart_available\":false,";
-        quality += "\"chart_aware_fill_enabled\":false,";
-        quality += "\"chart_aware_fill_failure\":\"mesh_chart_unavailable\",";
-        quality += "\"fallback_used\":false,";
-        quality += "\"paint_used\":false,";
-        quality += "\"texture_import_used\":false,";
-        quality += "\"texture_sync_used\":false,";
-        quality += "\"back_views_used\":false,";
-        quality += "\"front_hits\":" + std::to_string(front_hits) + ",";
-        quality += "\"side_hits\":" + std::to_string(side.side_hits) + ",";
-        quality += "\"back_hits\":0,";
-        quality += "\"direct_texels\":" + std::to_string(atlas.stats.direct_texels) + ",";
-        quality += "\"direct_texel_ratio\":" + std::to_string(static_cast<double>(atlas.stats.direct_texels) / pixel_count) + ",";
-        quality += "\"metallic\":0.0,";
-        quality += "\"roughness_interior\":0.88,";
-        quality += "\"roughness_side\":0.94,";
-        quality += "\"roughness_edge\":0.98,";
-        quality += "\"albedo_space\":\"srgb_preview_linear_calculation_not_yet_enabled\",";
-        quality += "\"hybrid_stage\":\"front_side_probe_artifacts_only\"";
-        quality += "}\n";
-        quality_written = write_runtime_artifact_text(L"hybrid_quality.json", quality);
-
-        return std::string(",\"hybrid_atlas_preview_written\":") + json_bool(atlas_preview_written) +
-               ",\"hybrid_edge_weight_written\":" + json_bool(edge_weight_written) +
-               ",\"hybrid_view_coverage_written\":" + json_bool(coverage_written) +
-               ",\"hybrid_uv_chart_map_written\":" + json_bool(chart_map_written) +
-               ",\"hybrid_quality_written\":" + json_bool(quality_written) +
-               ",\"hybrid_runtime_artifact_dir\":\"%LOCALAPPDATA%\\\\MecchaCamouflage\\\\runtime\"";
-    }
-
-    auto sdk_build_atlas_strokes(const SdkContext& ctx,
-                                 const SdkTextureAtlas& atlas,
-                                 meccha_sdk::EPaintChannel target_channel,
-                                 bool use_world_position,
-                                 int stroke_cap = 600000) -> SdkAtlasStrokePlan
-    {
-        SdkAtlasStrokePlan plan{};
-        plan.stroke_cap = std::max(1, stroke_cap);
-        if (!atlas.ok || atlas.albedo.empty() || atlas.painted_mask.empty() || atlas.stats.width <= 0 || atlas.stats.height <= 0)
-        {
-            plan.failure = "atlas_unavailable";
-            return plan;
-        }
-        const auto width = atlas.stats.width;
-        const auto height = atlas.stats.height;
-        const auto pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-        std::vector<std::uint8_t> used(pixels, 0);
-        auto block_ok = [&](int x, int y, int size, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) -> bool {
-            if (x + size > width || y + size > height)
-            {
-                return false;
-            }
-            int r_min = 255, g_min = 255, b_min = 255;
-            int r_max = 0, g_max = 0, b_max = 0;
-            bool any = false;
-            for (int by = 0; by < size; ++by)
-            {
-                for (int bx = 0; bx < size; ++bx)
-                {
-                    const auto index = static_cast<std::size_t>((y + by) * width + (x + bx));
-                    if (index >= pixels || used[index] || !atlas.painted_mask[index])
-                    {
-                        return false;
-                    }
-                    const auto offset = index * 4;
-                    const int cr = atlas.albedo[offset + 0];
-                    const int cg = atlas.albedo[offset + 1];
-                    const int cb = atlas.albedo[offset + 2];
-                    r_min = std::min(r_min, cr); r_max = std::max(r_max, cr);
-                    g_min = std::min(g_min, cg); g_max = std::max(g_max, cg);
-                    b_min = std::min(b_min, cb); b_max = std::max(b_max, cb);
-                    any = true;
-                }
-            }
-            if (!any || r_max - r_min > 2 || g_max - g_min > 2 || b_max - b_min > 2)
-            {
-                return false;
-            }
-            r = static_cast<std::uint8_t>((r_min + r_max) / 2);
-            g = static_cast<std::uint8_t>((g_min + g_max) / 2);
-            b = static_cast<std::uint8_t>((b_min + b_max) / 2);
-            return true;
-        };
-        auto mark_used = [&](int x, int y, int size) {
-            for (int by = 0; by < size; ++by)
-            {
-                for (int bx = 0; bx < size; ++bx)
-                {
-                    used[static_cast<std::size_t>((y + by) * width + (x + bx))] = 1;
-                }
-            }
-        };
-        auto push_stroke = [&](int x, int y, int size, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-            const auto radius_uv = std::max(0.75 / static_cast<double>(std::max(width, height)),
-                                            (static_cast<double>(size) * 0.45) / static_cast<double>(std::max(width, height)));
-            auto brush = sdk_copy_current_brush(ctx, radius_uv);
-            const auto channel = sdk_make_channel(sdk_srgb_to_linear_unit(static_cast<double>(r) / 255.0),
-                                                  sdk_srgb_to_linear_unit(static_cast<double>(g) / 255.0),
-                                                  sdk_srgb_to_linear_unit(static_cast<double>(b) / 255.0),
-                                                  0.0,
-                                                  0.65,
-                                                  meccha_sdk::EPaintChannelApplyMode::Override);
-            const auto u = (static_cast<double>(x) + static_cast<double>(size) * 0.5) / static_cast<double>(width);
-            const auto v = (static_cast<double>(y) + static_cast<double>(size) * 0.5) / static_cast<double>(height);
-            if (use_world_position)
-            {
-                plan.strokes.push_back(sdk_make_stroke(u, v, channel, brush, target_channel, ctx.body_world_position));
-            }
-            else
-            {
-                plan.strokes.push_back(sdk_make_uv_stroke(u, v, channel, brush, target_channel));
-            }
-            if (size >= 8) ++plan.merged_8;
-            else if (size >= 4) ++plan.merged_4;
-            else if (size >= 2) ++plan.merged_2;
-            else ++plan.singles;
-        };
-        const int block_sizes[]{2, 1};
-        for (int y = 0; y < height; ++y)
-        {
-            for (int x = 0; x < width; ++x)
-            {
-                const auto index = static_cast<std::size_t>(y * width + x);
-                if (used[index] || !atlas.painted_mask[index])
-                {
-                    continue;
-                }
-                ++plan.source_texels;
-                bool emitted = false;
-                for (const auto size : block_sizes)
-                {
-                    std::uint8_t r = 0, g = 0, b = 0;
-                    if (block_ok(x, y, size, r, g, b))
-                    {
-                        push_stroke(x, y, size, r, g, b);
-                        mark_used(x, y, size);
-                        emitted = true;
-                        break;
-                    }
-                }
-                if (!emitted)
-                {
-                    const auto offset = index * 4;
-                    push_stroke(x, y, 1, atlas.albedo[offset + 0], atlas.albedo[offset + 1], atlas.albedo[offset + 2]);
-                    used[index] = 1;
-                }
-                if (static_cast<int>(plan.strokes.size()) > plan.stroke_cap)
-                {
-                    plan.cap_exceeded = true;
-                    plan.failure = "atlas_stroke_budget_exceeded";
-                    return plan;
-                }
-            }
-        }
-        plan.failure = plan.strokes.empty() ? "atlas_strokes_empty" : "ok";
-        return plan;
-    }
-
-    auto sdk_atlas_stroke_metadata(const SdkAtlasStrokePlan& plan) -> std::string
-    {
-        return ",\"stroke_count\":" + std::to_string(plan.strokes.size()) +
-               ",\"stroke_cap\":" + std::to_string(plan.stroke_cap) +
-               ",\"stroke_target\":" + std::to_string(plan.target_strokes) +
-               ",\"stroke_source_texels\":" + std::to_string(plan.source_texels) +
-               ",\"stroke_merged_8\":" + std::to_string(plan.merged_8) +
-               ",\"stroke_merged_4\":" + std::to_string(plan.merged_4) +
-               ",\"stroke_merged_2\":" + std::to_string(plan.merged_2) +
-               ",\"stroke_singles\":" + std::to_string(plan.singles) +
-               ",\"merge_error_max\":" + std::to_string(plan.merge_error_max) +
-               ",\"stroke_color_space\":\"srgb_to_linear_flinearcolor\"" +
-               ",\"stroke_radius_factor\":0.45" +
-               ",\"stroke_block_sizes\":\"2,1\"" +
-               ",\"atlas_stroke_cap_exceeded\":" + std::string(json_bool(plan.cap_exceeded)) +
-               ",\"atlas_stroke_failure\":\"" + json_escape(plan.failure) + "\"";
-    }
-
-    auto sdk_append_uv_gap_fill(std::vector<FrontSample>& samples, double brush_radius, SdkUvGapFillStats& stats) -> void
-    {
-        if (samples.empty())
-        {
-            return;
-        }
-        struct Cell
-        {
-            bool covered{false};
-            bool direct{false};
-            FrontSample sample{};
-        };
-        const auto cell_size = std::max(0.000001, brush_radius * 0.5);
-        const auto grid_edge = std::max(8, std::min(512, static_cast<int>(std::ceil(1.0 / cell_size))));
-        const auto actual_cell = 1.0 / static_cast<double>(grid_edge);
-        const auto footprint = std::max(0, static_cast<int>(std::floor(brush_radius / actual_cell)));
-        std::vector<Cell> cells(static_cast<std::size_t>(grid_edge * grid_edge));
-        auto index_for = [grid_edge](int x, int y) { return static_cast<std::size_t>(y * grid_edge + x); };
-        auto cell_for = [grid_edge](double value) {
-            return std::max(0, std::min(grid_edge - 1, static_cast<int>(std::floor(clamp01(value) * static_cast<double>(grid_edge)))));
-        };
-        int min_x = grid_edge - 1;
-        int min_y = grid_edge - 1;
-        int max_x = 0;
-        int max_y = 0;
-        for (const auto& sample : samples)
-        {
-            const auto cx = cell_for(sample.u);
-            const auto cy = cell_for(sample.v);
-            min_x = std::min(min_x, cx);
-            min_y = std::min(min_y, cy);
-            max_x = std::max(max_x, cx);
-            max_y = std::max(max_y, cy);
-            for (int dy = -footprint; dy <= footprint; ++dy)
-            {
-                for (int dx = -footprint; dx <= footprint; ++dx)
-                {
-                    if (footprint > 0 && dx * dx + dy * dy > footprint * footprint)
-                    {
-                        continue;
-                    }
-                    const auto x = cx + dx;
-                    const auto y = cy + dy;
-                    if (x < 0 || y < 0 || x >= grid_edge || y >= grid_edge)
-                    {
-                        continue;
-                    }
-                    auto& cell = cells[index_for(x, y)];
-                    cell.covered = true;
-                    cell.direct = true;
-                    cell.sample = sample;
-                }
-            }
-        }
-        const auto margin = footprint + 4;
-        min_x = std::max(0, min_x - margin);
-        min_y = std::max(0, min_y - margin);
-        max_x = std::min(grid_edge - 1, max_x + margin);
-        max_y = std::min(grid_edge - 1, max_y + margin);
-        stats.considered_cells = std::max(1, (max_x - min_x + 1) * (max_y - min_y + 1));
-        auto covered_count = [&]() {
-            int count = 0;
-            for (int y = min_y; y <= max_y; ++y)
-            {
-                for (int x = min_x; x <= max_x; ++x)
-                {
-                    if (cells[index_for(x, y)].covered)
-                    {
-                        ++count;
-                    }
-                }
-            }
-            return count;
-        };
-        stats.direct_cells = covered_count();
-        stats.coverage_before = static_cast<double>(stats.direct_cells) / static_cast<double>(stats.considered_cells);
-        auto source_at = [&](int x, int y, int dx, int dy, FrontSample& out, int& distance) {
-            for (int step = 1; step <= 5; ++step)
-            {
-                const auto sx = x + dx * step;
-                const auto sy = y + dy * step;
-                if (sx < 0 || sy < 0 || sx >= grid_edge || sy >= grid_edge)
-                {
-                    continue;
-                }
-                const auto& cell = cells[index_for(sx, sy)];
-                if (cell.direct)
-                {
-                    out = cell.sample;
-                    distance = step;
-                    return true;
-                }
-            }
-            return false;
-        };
-        auto normal_dot = [](const FrontSample& a, const FrontSample& b) {
-            return a.normal.X * b.normal.X + a.normal.Y * b.normal.Y + a.normal.Z * b.normal.Z;
-        };
-        const auto max_fill = std::min(4096, static_cast<int>(samples.size()) * 3);
-        std::vector<FrontSample> fill{};
-        fill.reserve(static_cast<std::size_t>(max_fill));
-        for (int y = min_y; y <= max_y && static_cast<int>(fill.size()) < max_fill; ++y)
-        {
-            for (int x = min_x; x <= max_x && static_cast<int>(fill.size()) < max_fill; ++x)
-            {
-                if (cells[index_for(x, y)].covered)
-                {
-                    ++stats.rejected_occupied;
-                    continue;
-                }
-                FrontSample left{}, right{}, up{}, down{};
-                int dl = 0, dr = 0, du = 0, dd = 0;
-                const bool has_lr = source_at(x, y, -1, 0, left, dl) && source_at(x, y, 1, 0, right, dr);
-                const bool has_ud = source_at(x, y, 0, -1, up, du) && source_at(x, y, 0, 1, down, dd);
-                if (!has_lr && !has_ud)
-                {
-                    ++stats.rejected_unbounded;
-                    continue;
-                }
-                std::vector<FrontSample> sources{};
-                if (has_lr)
-                {
-                    sources.push_back(left);
-                    sources.push_back(right);
-                }
-                if (has_ud)
-                {
-                    sources.push_back(up);
-                    sources.push_back(down);
-                }
-                bool normal_ok = true;
-                for (std::size_t i = 0; i < sources.size() && normal_ok; ++i)
-                {
-                    for (std::size_t j = i + 1; j < sources.size(); ++j)
-                    {
-                        if (normal_dot(sources[i], sources[j]) < 0.62)
-                        {
-                            normal_ok = false;
-                            break;
-                        }
-                    }
-                }
-                ++stats.candidates;
-                if (!normal_ok)
-                {
-                    ++stats.rejected_normal;
-                    continue;
-                }
-                FrontSample out{};
-                out.u = (static_cast<double>(x) + 0.5) * actual_cell;
-                out.v = (static_cast<double>(y) + 0.5) * actual_cell;
-                out.radius = brush_radius;
-                out.has_world_position = true;
-                const auto inv = 1.0 / static_cast<double>(sources.size());
-                for (const auto& source : sources)
-                {
-                    out.r += source.r * inv;
-                    out.g += source.g * inv;
-                    out.b += source.b * inv;
-                    out.roughness += source.roughness * inv;
-                    out.metallic += source.metallic * inv;
-                    out.world_position.X += source.world_position.X * inv;
-                    out.world_position.Y += source.world_position.Y * inv;
-                    out.world_position.Z += source.world_position.Z * inv;
-                    out.normal.X += source.normal.X * inv;
-                    out.normal.Y += source.normal.Y * inv;
-                    out.normal.Z += source.normal.Z * inv;
-                }
-                out.normal = sdk_vec_normalize(out.normal);
-                fill.push_back(out);
-                cells[index_for(x, y)].covered = true;
-                ++stats.bounded;
-            }
-        }
-        stats.sent = static_cast<int>(fill.size());
-        stats.coverage_after = static_cast<double>(covered_count()) / static_cast<double>(stats.considered_cells);
-        samples.insert(samples.end(), fill.begin(), fill.end());
-    }
-
-    auto sdk_gap_fill_metadata(const SdkUvGapFillStats& stats) -> std::string
-    {
-        return ",\"uv_gap_fill_candidates\":" + std::to_string(stats.candidates) +
-               ",\"uv_gap_fill_sent\":" + std::to_string(stats.sent) +
-               ",\"uv_gap_fill_bounded\":" + std::to_string(stats.bounded) +
-               ",\"uv_gap_fill_edge_extended\":" + std::to_string(stats.edge_extended) +
-               ",\"uv_gap_fill_rejected_unbounded\":" + std::to_string(stats.rejected_unbounded) +
-               ",\"uv_gap_fill_rejected_normal\":" + std::to_string(stats.rejected_normal) +
-               ",\"uv_gap_fill_rejected_occupied\":" + std::to_string(stats.rejected_occupied) +
-               ",\"uv_gap_fill_direct_cells\":" + std::to_string(stats.direct_cells) +
-               ",\"uv_gap_fill_considered_cells\":" + std::to_string(stats.considered_cells) +
-               ",\"uv_gap_fill_coverage_before\":" + std::to_string(stats.coverage_before) +
-               ",\"uv_gap_fill_coverage_after\":" + std::to_string(stats.coverage_after);
-    }
-
-    auto sdk_front_world_position_count(const std::vector<FrontSample>& samples) -> int
-    {
-        int count = 0;
-        for (const auto& sample : samples)
-        {
-            if (sample.has_world_position)
-            {
-                ++count;
-            }
-        }
-        return count;
-    }
-
-    struct SdkMetallicBasePlan
-    {
-        std::vector<meccha_sdk::FPaintStroke> strokes{};
-        int grid{0};
-        int texture_width{0};
-        int texture_height{0};
-        double brush_radius{0.0};
-        double brush_footprint_texels{0.0};
-    };
-
-    auto sdk_build_metallic_base_plan(const SdkContext& ctx, const ChannelBuffer& albedo) -> SdkMetallicBasePlan
-    {
-        SdkMetallicBasePlan plan{};
-        plan.texture_width = albedo.width > 0 ? albedo.width : 1024;
-        plan.texture_height = albedo.height > 0 ? albedo.height : 1024;
-        const auto texture_edge = std::max(1, std::max(plan.texture_width, plan.texture_height));
-        constexpr double texture_min_radius = 0.02;
-        constexpr double texture_max_radius = 0.20;
-        plan.brush_radius = std::min(texture_max_radius, std::max(0.001, std::max(0.02, texture_min_radius)));
-        plan.brush_footprint_texels = std::max(1.0, plan.brush_radius * static_cast<double>(texture_edge) * 2.0);
-        const auto spacing_uv = std::min(1.0 / 16.0, std::max(1.0 / 96.0, plan.brush_radius * 1.25));
-        plan.grid = std::max(16, std::min(96, static_cast<int>(std::ceil(1.0 / spacing_uv))));
-        const auto brush = sdk_copy_current_brush(ctx, plan.brush_radius);
-        const auto channel = sdk_make_channel(1.0,
-                                              1.0,
-                                              1.0,
-                                              1.0,
-                                              0.0,
-                                              meccha_sdk::EPaintChannelApplyMode::Override);
-        plan.strokes.reserve(static_cast<std::size_t>(plan.grid) * static_cast<std::size_t>(plan.grid));
-        for (int y = 0; y < plan.grid; ++y)
-        {
-            for (int x = 0; x < plan.grid; ++x)
-            {
-                plan.strokes.push_back(sdk_make_uv_stroke((static_cast<double>(x) + 0.5) / static_cast<double>(plan.grid),
-                                                          (static_cast<double>(y) + 0.5) / static_cast<double>(plan.grid),
-                                                          channel,
-                                                          brush,
-                                                          meccha_sdk::EPaintChannel::AlbedoMetallicRoughness));
-            }
-        }
-        return plan;
-    }
-
-    auto sdk_build_front_strokes(const SdkContext& ctx, const std::vector<FrontSample>& samples) -> std::vector<meccha_sdk::FPaintStroke>
-    {
-        std::vector<meccha_sdk::FPaintStroke> strokes{};
-        strokes.reserve(samples.size());
-        for (const auto& sample : samples)
-        {
-            const auto brush = sdk_copy_current_brush(ctx, sample.radius);
-            const auto channel = sdk_make_channel(sdk_srgb_to_linear_unit(sample.r),
-                                                  sdk_srgb_to_linear_unit(sample.g),
-                                                  sdk_srgb_to_linear_unit(sample.b),
-                                                  0.0,
-                                                  0.65,
-                                                  meccha_sdk::EPaintChannelApplyMode::AlphaBlend);
-            const auto world_position = sample.has_world_position ? sample.world_position : ctx.body_world_position;
-            strokes.push_back(sdk_make_stroke(sample.u,
-                                              sample.v,
-                                              channel,
-                                              brush,
-                                              meccha_sdk::EPaintChannel::AlbedoMetallicRoughness,
-                                              world_position));
-        }
-        return strokes;
-    }
-
-    auto sdk_colorize_native_front_samples(const std::vector<FrontSample>& native_surface_samples,
-                                           const std::vector<FrontSample>& payload_samples)
-        -> std::vector<FrontSample>
-    {
-        std::vector<FrontSample> samples{};
-        if (native_surface_samples.empty())
-        {
-            return samples;
-        }
-        samples.reserve(native_surface_samples.size());
-        for (const auto& surface : native_surface_samples)
-        {
-            FrontSample sample = surface;
-            const FrontSample* nearest_payload = nullptr;
-            double best_distance = 1000000.0;
-            for (const auto& payload : payload_samples)
-            {
-                const auto du = clamp01(payload.u) - clamp01(surface.u);
-                const auto dv = clamp01(payload.v) - clamp01(surface.v);
-                const auto distance = du * du + dv * dv;
-                if (!nearest_payload || distance < best_distance)
-                {
-                    nearest_payload = &payload;
-                    best_distance = distance;
-                }
-            }
-            if (nearest_payload)
-            {
-                sample.r = clamp01(nearest_payload->r);
-                sample.g = clamp01(nearest_payload->g);
-                sample.b = clamp01(nearest_payload->b);
-                sample.radius = std::max(0.012, std::min(0.035, nearest_payload->radius > 0.0 ? nearest_payload->radius : 0.018));
-            }
-            else
-            {
-                sample.r = 0.34;
-                sample.g = 0.36;
-                sample.b = 0.32;
-                sample.radius = 0.018;
-            }
-            sample.u = clamp01(surface.u);
-            sample.v = clamp01(surface.v);
-            sample.roughness = 0.65;
-            sample.has_world_position = true;
-            sample.world_position = surface.world_position;
-            samples.push_back(sample);
-        }
-        return samples;
-    }
-
     auto sdk_find_color_picker_caller(Reflection& ref) -> std::uintptr_t
     {
         if (const auto instance = ref.find_first_instance("ColorPicker"))
@@ -8997,384 +5348,15 @@ namespace
         return cdo ? cdo : cls;
     }
 
-    auto sdk_template_uv_brush_auto_flush_probe(Reflection& ref, const SdkContext& ctx, std::string metadata) -> std::string
-    {
-        const auto viewport = sdk_get_viewport_info(ref, ctx);
-        const auto mesh = sdk_find_front_mesh(ref, ctx);
-        const auto color_picker = sdk_find_color_picker_caller(ref);
-        const auto sample_function = color_picker ? ref.find_function(color_picker, "SampleViewportGBuffer") : 0;
-        const auto paint_uv_function = ctx.paint_at_uv_with_brush_function ? ctx.paint_at_uv_with_brush_function : ref.find_function(ctx.component, "PaintAtUVWithBrush");
-        const auto hide_function = mesh ? ref.find_function(mesh, "SetHiddenInGame") : 0;
-        const auto begin_stroke_function = ref.find_function(ctx.component, "BeginStroke");
-        const auto end_stroke_function = ref.find_function(ctx.component, "EndStroke");
-        const auto clear_recorded_function = ref.find_function(ctx.component, "ClearRecordedStrokes");
-        const auto flush_recorded_function = ref.find_function(ctx.component, "FlushRecordedStrokesToServer");
-        const auto send_batch_function = ref.find_function(ctx.component, "SendStrokeBatchToServer");
-
-        metadata += ",\"route\":\"template_uv_brush_auto_flush_probe\"";
-        metadata += ",\"template_brush_like\":true";
-        metadata += ",\"texture_import_used\":false";
-        metadata += ",\"paint_at_screen_position_used\":false";
-        metadata += ",\"paint_at_uv_with_brush_used\":true";
-        const bool viewport_available = viewport.width > 0 && viewport.height > 0;
-        metadata += std::string(",\"viewport_available\":") + json_bool(viewport_available);
-        metadata += ",\"viewport_width\":" + std::to_string(viewport.width);
-        metadata += ",\"viewport_height\":" + std::to_string(viewport.height);
-        metadata += std::string(",\"front_mesh_available\":") + json_bool(mesh != 0);
-        metadata += std::string(",\"front_mesh\":\"") + hex_address(mesh) + "\"";
-        metadata += std::string(",\"color_picker_available\":") + json_bool(color_picker != 0);
-        metadata += std::string(",\"function_sample_viewport_gbuffer_available\":") + json_bool(sample_function != 0);
-        metadata += std::string(",\"function_sample_viewport_gbuffer_schema\":\"") + json_escape(function_param_schema(ref, sample_function)) + "\"";
-        metadata += std::string(",\"function_paint_at_uv_with_brush_available\":") + json_bool(paint_uv_function != 0);
-        metadata += std::string(",\"function_paint_at_uv_with_brush_schema\":\"") + json_escape(function_param_schema(ref, paint_uv_function)) + "\"";
-        metadata += std::string(",\"function_set_hidden_in_game_available\":") + json_bool(hide_function != 0);
-        metadata += std::string(",\"function_begin_stroke_available\":") + json_bool(begin_stroke_function != 0);
-        metadata += std::string(",\"function_end_stroke_available\":") + json_bool(end_stroke_function != 0);
-        metadata += std::string(",\"function_clear_recorded_strokes_available\":") + json_bool(clear_recorded_function != 0);
-        metadata += std::string(",\"function_flush_recorded_strokes_to_server_available\":") + json_bool(flush_recorded_function != 0);
-        metadata += std::string(",\"function_send_stroke_batch_to_server_available\":") + json_bool(send_batch_function != 0);
-
-        if (!viewport_available)
-        {
-            return response_json(false, "viewport_unavailable", 0, 1, "viewport size is unavailable", metadata);
-        }
-        if (!mesh)
-        {
-            return response_json(false, "front_mesh_unavailable", 0, 1, "front mesh component was not found", metadata);
-        }
-        if (!color_picker || !sample_function)
-        {
-            return response_json(false, "gbuffer_sample_unavailable", 0, 1, "SampleViewportGBuffer is unavailable", metadata);
-        }
-        if (!paint_uv_function)
-        {
-            return response_json(false, "paint_at_uv_with_brush_unavailable", 0, 1, "PaintAtUVWithBrush is unavailable", metadata);
-        }
-        if (!flush_recorded_function && !send_batch_function)
-        {
-            return response_json(false, "recorded_stroke_flush_unavailable", 0, 1, "recorded stroke flush functions are unavailable", metadata);
-        }
-
-        constexpr std::uintptr_t OffAutoRecordStrokes = 0x01AC;
-        constexpr std::uintptr_t OffAutoFlushStrokes = 0x01AD;
-        constexpr std::uintptr_t OffAutoFlushThreshold = 0x01B0;
-        constexpr std::uintptr_t OffCurrentBrushSettings = meccha_sdk::FieldOffsets::RuntimePaintable_CurrentBrushSettings;
-
-        const bool old_auto_record = safe_read<bool>(ctx.component + OffAutoRecordStrokes, false);
-        const bool old_auto_flush = safe_read<bool>(ctx.component + OffAutoFlushStrokes, false);
-        const int old_auto_flush_threshold = safe_read<int>(ctx.component + OffAutoFlushThreshold, 0);
-        meccha_sdk::FRuntimeBrushSettings old_brush{};
-        safe_copy(&old_brush, reinterpret_cast<const void*>(ctx.component + OffCurrentBrushSettings), sizeof(old_brush));
-
-        const bool new_auto_record = true;
-        const bool new_auto_flush_initial = false;
-        const bool new_auto_flush_stream = true;
-        const int new_auto_flush_threshold = 4096;
-        meccha_sdk::FRuntimeBrushSettings probe_brush = old_brush;
-        probe_brush.Radius = 0.012f;
-        probe_brush.Hardness = 1.0f;
-        probe_brush.Opacity = 1.0f;
-        probe_brush.Spacing = 0.15f;
-        probe_brush.Falloff = meccha_sdk::EBrushFalloff::Spherical;
-        probe_brush.BlendMode = meccha_sdk::EPaintBlendMode::Normal;
-
-        struct GBufferPaintPoint
-        {
-            double x{0.0};
-            double y{0.0};
-            double u{0.0};
-            double v{0.0};
-            meccha_sdk::FVector world_position{};
-        };
-        std::vector<GBufferPaintPoint> paint_points{};
-        paint_points.reserve(52000);
-        constexpr int target_paint_points = 50000;
-        constexpr int hard_hit_test_budget = 85000;
-        int hit_prefilter_calls = 0;
-        int hit_prefilter_success = 0;
-        int template_point_hits = 0;
-        bool collect_template_points = false;
-        double bbox_min_nx = 1.0;
-        double bbox_min_ny = 1.0;
-        double bbox_max_nx = 0.0;
-        double bbox_max_ny = 0.0;
-        auto record_prefilter_hit = [&](double nx, double ny, const SdkBrushQueryHit& hit) {
-            (void)hit;
-            ++hit_prefilter_success;
-            bbox_min_nx = std::min(bbox_min_nx, nx);
-            bbox_min_ny = std::min(bbox_min_ny, ny);
-            bbox_max_nx = std::max(bbox_max_nx, nx);
-            bbox_max_ny = std::max(bbox_max_ny, ny);
-            if (collect_template_points && static_cast<int>(paint_points.size()) < target_paint_points)
-            {
-                ++template_point_hits;
-                paint_points.push_back(GBufferPaintPoint{
-                    nx * static_cast<double>(viewport.width),
-                    ny * static_cast<double>(viewport.height),
-                    clamp01(hit.u),
-                    clamp01(hit.v),
-                    hit.world_position});
-            }
-        };
-        auto try_prefilter_hit = [&](double nx, double ny) {
-            if (hit_prefilter_calls >= hard_hit_test_budget ||
-                (collect_template_points && static_cast<int>(paint_points.size()) >= target_paint_points))
-            {
-                return;
-            }
-            nx = clamp01(nx);
-            ny = clamp01(ny);
-            ++hit_prefilter_calls;
-            const auto hit = sdk_hit_test_at_screen_position(ref,
-                                                             ctx,
-                                                             mesh,
-                                                             nx * static_cast<double>(viewport.width),
-                                                             ny * static_cast<double>(viewport.height));
-            if (hit.success && hit.has_uv)
-            {
-                record_prefilter_hit(nx, ny, hit);
-            }
-        };
-
-        constexpr int coarse_cols = 112;
-        constexpr int coarse_rows = 84;
-        for (int y = 0; y < coarse_rows && static_cast<int>(paint_points.size()) < target_paint_points; ++y)
-        {
-            const double ny = 0.06 + ((static_cast<double>(y) + 0.5) / static_cast<double>(coarse_rows)) * 0.90;
-            for (int x = 0; x < coarse_cols && static_cast<int>(paint_points.size()) < target_paint_points; ++x)
-            {
-                const double nx = 0.12 + ((static_cast<double>(x) + 0.5) / static_cast<double>(coarse_cols)) * 0.76;
-                try_prefilter_hit(nx, ny);
-            }
-        }
-        const bool have_bbox = bbox_max_nx >= bbox_min_nx && bbox_max_ny >= bbox_min_ny;
-        if (have_bbox && static_cast<int>(paint_points.size()) < target_paint_points)
-        {
-            const double span_x = std::max(0.04, bbox_max_nx - bbox_min_nx);
-            const double span_y = std::max(0.04, bbox_max_ny - bbox_min_ny);
-            const double min_nx = clamp01(bbox_min_nx - span_x * 0.22);
-            const double max_nx = clamp01(bbox_max_nx + span_x * 0.22);
-            const double min_ny = clamp01(bbox_min_ny - span_y * 0.16);
-            const double max_ny = clamp01(bbox_max_ny + span_y * 0.40);
-            collect_template_points = true;
-            constexpr int refine_cols = 220;
-            constexpr int refine_rows = 260;
-            for (int y = 0; y < refine_rows && static_cast<int>(paint_points.size()) < target_paint_points; ++y)
-            {
-                const double ty = refine_rows <= 1 ? 0.5 : static_cast<double>(y) / static_cast<double>(refine_rows - 1);
-                const double ny = min_ny + (max_ny - min_ny) * ty;
-                for (int x = 0; x < refine_cols && static_cast<int>(paint_points.size()) < target_paint_points; ++x)
-                {
-                    const double tx = refine_cols <= 1 ? 0.5 : static_cast<double>(x) / static_cast<double>(refine_cols - 1);
-                    const double nx = min_nx + (max_nx - min_nx) * tx;
-                    try_prefilter_hit(nx, ny);
-                }
-            }
-        }
-        write_bridge_progress("gbuffer_hit_prefilter_done",
-                              "prefiltered screen points with RuntimePaintable hit test",
-                              2,
-                              8,
-                              0.0,
-                              "\"hit_prefilter_calls\":" + std::to_string(hit_prefilter_calls) +
-                                  ",\"hit_prefilter_success\":" + std::to_string(hit_prefilter_success) +
-                                  ",\"template_point_hits\":" + std::to_string(template_point_hits) +
-                                  ",\"paint_points\":" + std::to_string(paint_points.size()));
-
-        const bool hidden_for_gbuffer = hide_function ? sdk_call_two_bools(ref, mesh, "SetHiddenInGame", true, true) : false;
-        if (hidden_for_gbuffer)
-        {
-            Sleep(16);
-        }
-
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoRecordStrokes), &new_auto_record, sizeof(new_auto_record));
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoFlushStrokes), &new_auto_flush_initial, sizeof(new_auto_flush_initial));
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoFlushThreshold), &new_auto_flush_threshold, sizeof(new_auto_flush_threshold));
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffCurrentBrushSettings), &probe_brush, sizeof(probe_brush));
-
-        const bool clear_called = clear_recorded_function ? sdk_call_no_params(ref, ctx.component, "ClearRecordedStrokes") : false;
-        const bool begin_called = begin_stroke_function ? sdk_call_no_params(ref, ctx.component, "BeginStroke") : false;
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoFlushStrokes), &new_auto_flush_stream, sizeof(new_auto_flush_stream));
-
-        int gbuffer_calls = 0;
-        int gbuffer_success = 0;
-        int paint_calls = 0;
-        int paint_success = 0;
-        int paint_uv_success = 0;
-        int process_failures = 0;
-        double rgb_min = 1.0;
-        double rgb_max = 0.0;
-        double rgb_sum_r = 0.0;
-        double rgb_sum_g = 0.0;
-        double rgb_sum_b = 0.0;
-        double metallic_sum = 0.0;
-        double roughness_sum = 0.0;
-        std::string first_failure{};
-
-        for (std::size_t point_index = 0; point_index < paint_points.size(); ++point_index)
-        {
-            const double screen_x = paint_points[point_index].x;
-            const double screen_y = paint_points[point_index].y;
-
-            meccha_sdk::ColorPicker_SampleViewportGBuffer sample{};
-            sample.WorldContextObject = reinterpret_cast<void*>(ctx.world);
-            sample.ScreenPosition = meccha_sdk::FVector2D{screen_x, screen_y};
-            std::string sample_failure{};
-            ++gbuffer_calls;
-            if (!process_event(color_picker, sample_function, reinterpret_cast<std::uint8_t*>(&sample), sample_failure) || !sample.ReturnValue)
-            {
-                if (first_failure.empty())
-                {
-                    first_failure = sample_failure.empty() ? "SampleViewportGBuffer returned false" : sample_failure;
-                }
-                continue;
-            }
-
-            ++gbuffer_success;
-            const double r = clamp01(sample.OutBaseColor.R);
-            const double g = clamp01(sample.OutBaseColor.G);
-            const double b = clamp01(sample.OutBaseColor.B);
-            const double metallic = clamp01(sample.OutMetallic);
-            const double roughness = clamp01(sample.OutRoughness);
-            rgb_min = std::min(rgb_min, std::min(r, std::min(g, b)));
-            rgb_max = std::max(rgb_max, std::max(r, std::max(g, b)));
-            rgb_sum_r += r;
-            rgb_sum_g += g;
-            rgb_sum_b += b;
-            metallic_sum += metallic;
-            roughness_sum += roughness;
-
-            meccha_sdk::RuntimePaintableComponent_PaintAtUVWithBrush paint{};
-            paint.Uv = meccha_sdk::FVector2D{paint_points[point_index].u, paint_points[point_index].v};
-            paint.ChannelData.AlbedoColor = meccha_sdk::FLinearColor{
-                static_cast<float>(r),
-                static_cast<float>(g),
-                static_cast<float>(b),
-                1.0f};
-            paint.ChannelData.Metallic = static_cast<float>(metallic);
-            paint.ChannelData.Roughness = static_cast<float>(roughness);
-            paint.ChannelData.Height = 0.0f;
-            paint.ChannelData.ApplyMode = meccha_sdk::EPaintChannelApplyMode::Override;
-            paint.Channel = meccha_sdk::EPaintChannel::AlbedoMetallicRoughness;
-            paint.BrushSettings = probe_brush;
-
-            std::string paint_failure{};
-            ++paint_calls;
-            if (!process_event(ctx.component, paint_uv_function, reinterpret_cast<std::uint8_t*>(&paint), paint_failure))
-            {
-                ++process_failures;
-                if (first_failure.empty())
-                {
-                    first_failure = paint_failure;
-                }
-                continue;
-            }
-            ++paint_success;
-            ++paint_uv_success;
-            if ((point_index % 250) == 249 || point_index + 1 == paint_points.size())
-            {
-                const int step = 2 + static_cast<int>((static_cast<double>(point_index + 1) / static_cast<double>(std::max<std::size_t>(1, paint_points.size()))) * 5.0);
-                write_bridge_progress("template_uv_brush_streaming",
-                                      "sampling hidden-target viewport GBuffer and painting via UV brush",
-                                      std::min(6, step),
-                                      8,
-                                      0.0,
-                                      "\"gbuffer_success\":" + std::to_string(gbuffer_success) +
-                                          ",\"paint_success\":" + std::to_string(paint_success) +
-                                          ",\"paint_uv_success\":" + std::to_string(paint_uv_success));
-            }
-        }
-
-        const bool restored_after_gbuffer = hidden_for_gbuffer ? sdk_call_two_bools(ref, mesh, "SetHiddenInGame", false, true) : false;
-        const bool end_called = end_stroke_function ? sdk_call_no_params(ref, ctx.component, "EndStroke") : false;
-        const bool flush_called = flush_recorded_function ? sdk_call_no_params(ref, ctx.component, "FlushRecordedStrokesToServer") : false;
-        const bool send_batch_called = send_batch_function ? sdk_call_no_params(ref, ctx.component, "SendStrokeBatchToServer") : false;
-
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoRecordStrokes), &old_auto_record, sizeof(old_auto_record));
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoFlushStrokes), &old_auto_flush, sizeof(old_auto_flush));
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffAutoFlushThreshold), &old_auto_flush_threshold, sizeof(old_auto_flush_threshold));
-        safe_copy(reinterpret_cast<void*>(ctx.component + OffCurrentBrushSettings), &old_brush, sizeof(old_brush));
-
-        const double denom = std::max(1, gbuffer_success);
-        metadata += ",\"gbuffer_targeting\":\"hit_test_prefiltered_uv_brush\"";
-        metadata += ",\"gbuffer_target_paint_points\":" + std::to_string(target_paint_points);
-        metadata += ",\"hit_prefilter_calls\":" + std::to_string(hit_prefilter_calls);
-        metadata += ",\"hit_prefilter_success\":" + std::to_string(hit_prefilter_success);
-        metadata += ",\"template_point_hits\":" + std::to_string(template_point_hits);
-        metadata += ",\"paint_points\":" + std::to_string(paint_points.size());
-        metadata += ",\"gbuffer_calls\":" + std::to_string(gbuffer_calls);
-        metadata += ",\"gbuffer_success\":" + std::to_string(gbuffer_success);
-        metadata += ",\"paint_calls\":" + std::to_string(paint_calls);
-        metadata += ",\"paint_uv_process_success\":" + std::to_string(paint_success);
-        metadata += ",\"paint_uv_success\":" + std::to_string(paint_uv_success);
-        metadata += ",\"paint_process_failures\":" + std::to_string(process_failures);
-        metadata += ",\"auto_record_enabled\":true";
-        metadata += ",\"auto_flush_enabled\":true";
-        metadata += ",\"auto_flush_threshold\":" + std::to_string(new_auto_flush_threshold);
-        metadata += std::string(",\"target_hidden_for_gbuffer\":") + json_bool(hidden_for_gbuffer);
-        metadata += std::string(",\"target_restored_after_gbuffer\":") + json_bool(!hidden_for_gbuffer || restored_after_gbuffer);
-        metadata += std::string(",\"clear_recorded_strokes_called\":") + json_bool(clear_called);
-        metadata += std::string(",\"begin_stroke_called\":") + json_bool(begin_called);
-        metadata += std::string(",\"end_stroke_called\":") + json_bool(end_called);
-        metadata += std::string(",\"flush_recorded_strokes_to_server_called\":") + json_bool(flush_called);
-        metadata += std::string(",\"send_stroke_batch_to_server_called\":") + json_bool(send_batch_called);
-        metadata += ",\"gbuffer_rgb_min\":" + std::to_string(rgb_min);
-        metadata += ",\"gbuffer_rgb_max\":" + std::to_string(rgb_max);
-        metadata += ",\"gbuffer_rgb_avg_r\":" + std::to_string(rgb_sum_r / denom);
-        metadata += ",\"gbuffer_rgb_avg_g\":" + std::to_string(rgb_sum_g / denom);
-        metadata += ",\"gbuffer_rgb_avg_b\":" + std::to_string(rgb_sum_b / denom);
-        metadata += ",\"gbuffer_metallic_avg\":" + std::to_string(metallic_sum / denom);
-        metadata += ",\"gbuffer_roughness_avg\":" + std::to_string(roughness_sum / denom);
-        metadata += std::string(",\"first_failure\":\"") + json_escape(first_failure) + "\"";
-        metadata += ",\"bridge_events\":[\"template_uv_brush_auto_flush_probe\"]";
-
-        write_bridge_progress("template_uv_brush_auto_flush_done",
-                              "template UV brush auto-flush paint probe completed",
-                              8,
-                              8,
-                              0.0,
-                              "\"gbuffer_success\":" + std::to_string(gbuffer_success) +
-                                  ",\"paint_success\":" + std::to_string(paint_success) +
-                                  ",\"paint_uv_success\":" + std::to_string(paint_uv_success));
-
-        if (gbuffer_success <= 0 || paint_success <= 0 || paint_uv_success <= 0)
-        {
-            return response_json(false,
-                                 "template_uv_brush_no_paint",
-                                 paint_uv_success,
-                                 1,
-                                 "template UV brush route did not produce paint calls",
-                                 metadata);
-        }
-        if (!flush_called && !send_batch_called)
-        {
-            return response_json(false,
-                                 "template_uv_brush_not_flushed",
-                                 paint_success,
-                                 1,
-                                 "paint calls ran but recorded strokes were not flushed",
-                                 metadata);
-        }
-        return response_json(true,
-                             "template_uv_brush_paint_done",
-                             paint_uv_success,
-                             0,
-                             "template UV brush paint dispatched with hidden-target GBuffer sampling",
-                             metadata);
-    }
-
     struct TemplateUvBrushAsyncJob
     {
         enum class Phase
         {
             Phase0BaseGrid,
             Phase0Dense,
-            Phase0LowerRescan,
-            Phase0UvExpand,
-            Phase0ScreenFill,
             CaptureSource,
             BeginPaint,
-            PaintBrush,
+            ReplicateStrokes,
             Finish
         };
 
@@ -9392,80 +5374,64 @@ namespace
             bool has_color{false};
         };
 
+        struct ScreenCandidate
+        {
+            double nx{0.0};
+            double ny{0.0};
+        };
+
         std::shared_ptr<QueuedPaintJob> queued{};
         Phase phase{Phase::Phase0BaseGrid};
         std::uintptr_t world{0};
         std::uintptr_t controller{0};
         std::uintptr_t component{0};
         std::uintptr_t mesh{0};
-        std::uintptr_t color_picker{0};
         std::uintptr_t hit_test_function{0};
-        std::uintptr_t sample_function{0};
-        std::uintptr_t paint_uv_function{0};
-        std::uintptr_t begin_stroke_function{0};
-        std::uintptr_t end_stroke_function{0};
-        std::uintptr_t clear_recorded_function{0};
-        std::uintptr_t flush_recorded_function{0};
-        std::uintptr_t send_batch_function{0};
-        std::uintptr_t hide_function{0};
+        std::uintptr_t server_paint_batch_function{0};
         int viewport_width{0};
         int viewport_height{0};
         int base_cols{54};
         int base_rows{86};
-        int dense_cols{448};
         int dense_rows{640};
-        int lower_cols{96};
-        int lower_rows{78};
         int next_index{0};
         int capture_index{0};
-        int paint_index{0};
-        int point_target{131072};
+        int replicate_index{0};
+        int point_target{60000};
+        int paint_sample_attempts{0};
+        int paint_sample_success{0};
+        int paint_sample_failures{0};
+        int sampler_probe_attempts{0};
+        int sampler_probe_misses{0};
+        int candidate_count{0};
+        double silhouette_area_px{0.0};
         int base_attempts{0};
         int base_hits{0};
         int dense_attempts{0};
         int dense_hits{0};
-        int lower_attempts{0};
-        int lower_hits{0};
-        int uv_expand_index{0};
-        int uv_expand_added{0};
-        int screen_fill_index{0};
-        int screen_fill_added{0};
         int dedupe_skipped{0};
-        int gbuffer_calls{0};
-        int gbuffer_success{0};
-        int gbuffer_failures{0};
-        int paint_success{0};
-        int process_failures{0};
+        int runtime_hit_test_attempts{0};
+        int runtime_hit_test_hits{0};
+        int runtime_hit_test_failures{0};
+        int basecolor_samples{0};
+        int server_batch_success{0};
+        int server_batch_failures{0};
+        int server_batch_calls{0};
+        int server_strokes_sent{0};
+        int server_batch_limit{512};
         int commit_pulses{0};
         int progress_percent{-1};
-        double paint_tick_budget_ms{6.0};
-        int max_paints_per_tick{4096};
-        int screen_capture_width{0};
-        int screen_capture_height{0};
-        int screen_capture_origin_x{0};
-        int screen_capture_origin_y{0};
+        double template_point_elapsed_ms{0.0};
+        double template_capture_elapsed_ms{0.0};
+        double server_batch_elapsed_ms{0.0};
         double bbox_min_nx{1.0};
         double bbox_min_ny{1.0};
         double bbox_max_nx{0.0};
         double bbox_max_ny{0.0};
         bool source_sorted{false};
-        bool old_auto_record{false};
-        bool old_auto_flush{false};
-        int old_auto_flush_threshold{0};
-        int auto_flush_threshold{4096};
         meccha_sdk::FRuntimeBrushSettings old_brush{};
         meccha_sdk::FRuntimeBrushSettings brush{};
-        bool clear_called{false};
-        bool begin_called{false};
-        bool end_called{false};
-        bool flush_called{false};
-        bool send_batch_called{false};
-        bool hide_called{false};
-        bool restore_called{false};
-        bool color_hide_requested{false};
-        bool mesh_hidden_for_color{false};
-        bool screen_capture_attempted{false};
-        bool screen_capture_ready{false};
+        bool explicit_stroke_batch_used{false};
+        SdkReplicationSnapshot replication_after_explicit_batches{};
         double brush_radius{0.008};
         double rgb_min{1.0};
         double rgb_max{0.0};
@@ -9474,16 +5440,18 @@ namespace
         double rgb_sum_b{0.0};
         double metallic_sum{0.0};
         double roughness_sum{0.0};
-        double gbuffer_sample_elapsed_ms{0.0};
         std::string metadata{};
         std::string first_failure{};
-        std::string source_path{"streamed_sample_viewport_gbuffer"};
+        std::string server_batch_rpc{"<none>"};
+        std::string color_source{"scene_capture_basecolor_bulk_readback"};
         std::vector<TemplatePoint> points{};
+        std::vector<ScreenCandidate> dense_candidates{};
+        std::vector<int> silhouette_min_ix{};
+        std::vector<int> silhouette_max_ix{};
         std::vector<std::uint8_t> uv_bins{};
-        std::vector<std::uint8_t> screen_rgb{};
         std::chrono::steady_clock::time_point started{};
+        std::chrono::steady_clock::time_point server_batch_started{};
         std::chrono::steady_clock::time_point last_tick{};
-        std::chrono::steady_clock::time_point hidden_at{};
     };
 
     std::mutex g_template_uv_brush_mutex;
@@ -9550,6 +5518,7 @@ namespace
 
     auto template_hit_to_point(const std::shared_ptr<TemplateUvBrushAsyncJob>& job, double screen_x, double screen_y) -> bool
     {
+        ++job->runtime_hit_test_attempts;
         meccha_sdk::RuntimePaintableComponent_HitTestAtScreenPosition hit{};
         hit.MeshComponent = reinterpret_cast<void*>(job->mesh);
         hit.ScreenPosition = meccha_sdk::FVector2D{screen_x, screen_y};
@@ -9558,114 +5527,124 @@ namespace
         std::string failure{};
         if (!process_event(job->component, job->hit_test_function, reinterpret_cast<std::uint8_t*>(&hit), failure) || !hit.ReturnValue.bSuccess)
         {
+            ++job->runtime_hit_test_failures;
             return false;
         }
-        return template_add_template_point(job, screen_x, screen_y, hit.ReturnValue.HitUV.X, hit.ReturnValue.HitUV.Y);
+        if (template_add_template_point(job, screen_x, screen_y, hit.ReturnValue.HitUV.X, hit.ReturnValue.HitUV.Y))
+        {
+            ++job->runtime_hit_test_hits;
+            return true;
+        }
+        return false;
     }
 
-    auto template_call_two_bools_direct(std::uintptr_t object, std::uintptr_t function, bool first, bool second) -> bool
+    auto template_build_dense_candidates(const std::shared_ptr<TemplateUvBrushAsyncJob>& job) -> void
     {
-        if (!object || !function)
+        if (!job || job->base_rows <= 0 || job->base_cols <= 0 || job->viewport_width <= 0 || job->viewport_height <= 0)
         {
-            return false;
+            return;
         }
-        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
-        if (params_size <= 0 || params_size > 1024)
-        {
-            return false;
-        }
-        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
-        int bool_index = 0;
-        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
-        {
-            const bool value = bool_index == 0 ? first : second;
-            if (write_bool(prop, params.data(), value))
-            {
-                ++bool_index;
-            }
-        }
-        std::string failure{};
-        return bool_index > 0 && process_event(object, function, params.data(), failure);
-    }
+        job->dense_candidates.clear();
+        job->silhouette_area_px = 0.0;
 
-    auto template_capture_client_rgb(const std::shared_ptr<TemplateUvBrushAsyncJob>& job) -> bool
-    {
-        if (!job || job->viewport_width <= 0 || job->viewport_height <= 0)
+        struct RowInterval
         {
-            return false;
-        }
+            double min_nx{0.0};
+            double max_nx{0.0};
+            bool valid{false};
+        };
 
-        POINT origin{0, 0};
-        HWND hwnd = GetForegroundWindow();
-        if (hwnd)
-        {
-            RECT client{};
-            if (GetClientRect(hwnd, &client))
-            {
-                ClientToScreen(hwnd, &origin);
-            }
-        }
+        std::vector<RowInterval> rows(static_cast<std::size_t>(std::max(1, job->dense_rows)));
+        const double min_ny = clamp01(job->bbox_min_ny);
+        const double max_ny = clamp01(job->bbox_max_ny);
+        const double span_ny = std::max(0.001, max_ny - min_ny);
 
-        const int width = job->viewport_width;
-        const int height = job->viewport_height;
-        HDC screen_dc = GetDC(nullptr);
-        if (!screen_dc)
-        {
-            return false;
-        }
-        HDC mem_dc = CreateCompatibleDC(screen_dc);
-        HBITMAP bitmap = mem_dc ? CreateCompatibleBitmap(screen_dc, width, height) : nullptr;
-        HGDIOBJ old_obj = bitmap ? SelectObject(mem_dc, bitmap) : nullptr;
-        bool ok = false;
-        if (mem_dc && bitmap && old_obj)
-        {
-            if (BitBlt(mem_dc, 0, 0, width, height, screen_dc, origin.x, origin.y, SRCCOPY | CAPTUREBLT))
+        auto nearest_base_row = [&](double ny) -> int {
+            const double normalized = clamp01((ny - 0.02) / 0.96);
+            const int preferred = std::max(0, std::min(job->base_rows - 1, static_cast<int>(std::round(normalized * static_cast<double>(job->base_rows - 1)))));
+            int best = -1;
+            int best_distance = 1000000;
+            for (int row = 0; row < job->base_rows; ++row)
             {
-                BITMAPINFO bmi{};
-                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                bmi.bmiHeader.biWidth = width;
-                bmi.bmiHeader.biHeight = -height;
-                bmi.bmiHeader.biPlanes = 1;
-                bmi.bmiHeader.biBitCount = 32;
-                bmi.bmiHeader.biCompression = BI_RGB;
-                std::vector<std::uint8_t> bgra(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
-                if (GetDIBits(mem_dc, bitmap, 0, static_cast<UINT>(height), bgra.data(), &bmi, DIB_RGB_COLORS) == static_cast<int>(height))
+                if (row >= static_cast<int>(job->silhouette_min_ix.size()) ||
+                    row >= static_cast<int>(job->silhouette_max_ix.size()) ||
+                    job->silhouette_min_ix[static_cast<std::size_t>(row)] > job->silhouette_max_ix[static_cast<std::size_t>(row)])
                 {
-                    job->screen_rgb.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3u, 0);
-                    for (int y = 0; y < height; ++y)
-                    {
-                        for (int x = 0; x < width; ++x)
-                        {
-                            const std::size_t src = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 4u;
-                            const std::size_t dst = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 3u;
-                            job->screen_rgb[dst + 0] = bgra[src + 2];
-                            job->screen_rgb[dst + 1] = bgra[src + 1];
-                            job->screen_rgb[dst + 2] = bgra[src + 0];
-                        }
-                    }
-                    job->screen_capture_width = width;
-                    job->screen_capture_height = height;
-                    job->screen_capture_origin_x = origin.x;
-                    job->screen_capture_origin_y = origin.y;
-                    job->source_path = "hidden_client_screenshot";
-                    ok = true;
+                    continue;
+                }
+                const int distance = std::abs(row - preferred);
+                if (distance < best_distance)
+                {
+                    best = row;
+                    best_distance = distance;
                 }
             }
-        }
-        if (old_obj)
+            return best;
+        };
+
+        const double row_height_px = span_ny * static_cast<double>(job->viewport_height) / static_cast<double>(std::max(1, job->dense_rows));
+        for (int row = 0; row < job->dense_rows; ++row)
         {
-            SelectObject(mem_dc, old_obj);
+            const double ty = (static_cast<double>(row) + 0.5) / static_cast<double>(std::max(1, job->dense_rows));
+            const double ny = min_ny + span_ny * ty;
+            const int base_row = nearest_base_row(ny);
+            if (base_row < 0)
+            {
+                continue;
+            }
+            const int min_ix = std::max(0, job->silhouette_min_ix[static_cast<std::size_t>(base_row)] - 1);
+            const int max_ix = std::min(job->base_cols - 1, job->silhouette_max_ix[static_cast<std::size_t>(base_row)] + 1);
+            if (min_ix > max_ix)
+            {
+                continue;
+            }
+            const double min_nx = clamp01(0.06 + (static_cast<double>(min_ix) / static_cast<double>(job->base_cols)) * 0.88);
+            const double max_nx = clamp01(0.06 + (static_cast<double>(max_ix + 1) / static_cast<double>(job->base_cols)) * 0.88);
+            if (max_nx <= min_nx)
+            {
+                continue;
+            }
+            rows[static_cast<std::size_t>(row)] = RowInterval{min_nx, max_nx, true};
+            job->silhouette_area_px += (max_nx - min_nx) * static_cast<double>(job->viewport_width) * row_height_px;
         }
-        if (bitmap)
+
+        const int hard_cap = std::max(1, job->point_target);
+        const int dynamic_target = std::max(1, std::min(hard_cap, static_cast<int>(std::ceil(job->silhouette_area_px / 9.0))));
+        const double spacing_px = std::max(1.0, std::sqrt(std::max(1.0, job->silhouette_area_px) / static_cast<double>(dynamic_target)));
+        std::vector<TemplateUvBrushAsyncJob::ScreenCandidate> candidates{};
+        candidates.reserve(static_cast<std::size_t>(dynamic_target));
+        for (int row = 0; row < job->dense_rows; ++row)
         {
-            DeleteObject(bitmap);
+            const auto& interval = rows[static_cast<std::size_t>(row)];
+            if (!interval.valid)
+            {
+                continue;
+            }
+            const double ty = (static_cast<double>(row) + 0.5) / static_cast<double>(std::max(1, job->dense_rows));
+            const double ny = min_ny + span_ny * ty;
+            const double width_px = std::max(1.0, (interval.max_nx - interval.min_nx) * static_cast<double>(job->viewport_width));
+            const int cols = std::max(1, static_cast<int>(std::ceil(width_px / spacing_px)));
+            for (int col = 0; col < cols; ++col)
+            {
+                const double tx = (static_cast<double>(col) + 0.5) / static_cast<double>(cols);
+                candidates.push_back(TemplateUvBrushAsyncJob::ScreenCandidate{interval.min_nx + (interval.max_nx - interval.min_nx) * tx, ny});
+            }
         }
-        if (mem_dc)
+
+        if (static_cast<int>(candidates.size()) > hard_cap)
         {
-            DeleteDC(mem_dc);
+            job->dense_candidates.reserve(static_cast<std::size_t>(hard_cap));
+            for (int i = 0; i < hard_cap; ++i)
+            {
+                const std::size_t index = static_cast<std::size_t>((static_cast<unsigned long long>(i) * static_cast<unsigned long long>(candidates.size())) / static_cast<unsigned long long>(hard_cap));
+                job->dense_candidates.push_back(candidates[std::min(index, candidates.size() - 1)]);
+            }
         }
-        ReleaseDC(nullptr, screen_dc);
-        return ok;
+        else
+        {
+            job->dense_candidates.swap(candidates);
+        }
+        job->candidate_count = static_cast<int>(job->dense_candidates.size());
     }
 
     auto start_template_uv_brush_async_job(const std::string& request, const std::shared_ptr<QueuedPaintJob>& queued_job) -> bool
@@ -9696,17 +5675,20 @@ namespace
         const auto ctx = sdk_resolve_context(ref);
         std::string metadata = sdk_context_metadata(ref, ctx);
         metadata += ",\"route\":\"template_brush_paint\"";
-        metadata += ",\"template_pipeline\":\"phase0_template_points_template_load\"";
+        metadata += ",\"template_apply_backend\":\"server_paint_batch\"";
+        metadata += ",\"replication\":\"server_paint_batch\"";
+        metadata += ",\"template_pipeline\":\"phase0_template_points_server_batch\"";
         metadata += ",\"texture_import_used\":false";
-        metadata += ",\"paint_at_uv_with_brush_used\":true";
+        metadata += ",\"local_paint_used\":false";
+        metadata += ",\"paint_at_uv_with_brush_used\":false";
+        metadata += ",\"paint_at_uv_with_brush_production_forbidden\":true";
+        metadata += ",\"server_paint_batch_used\":true";
+        metadata += ",\"explicit_stroke_batch_used\":true";
         metadata += ",\"paint_at_screen_position_used\":false";
         metadata += ",\"live_set_hidden_in_game_used\":false";
-        metadata += ",\"high_gbuffer_batched_ported\":\"scene_capture_basecolor_bulk_readback\"";
         metadata += ",\"scene_capture_basecolor_required\":true";
-        metadata += ",\"viewport_gbuffer_required\":false";
-        metadata += ",\"uv_expand_enabled\":false";
-        metadata += ",\"screen_fill_enabled\":false";
-        metadata += ",\"template_min_direct_points\":50000";
+        metadata += ",\"template_min_direct_points\":0";
+        metadata += ",\"template_color_sample_hard_cap\":60000";
         metadata += ",\"template_paint_target_channel\":\"Albedo\"";
         metadata += ",\"template_material_channel_overwrite\":false";
         metadata += ",\"template_material_source\":\"preserve_existing_material_channels\"";
@@ -9722,31 +5704,35 @@ namespace
         }
 
         const auto viewport = sdk_get_viewport_info(ref, ctx);
-        const auto mesh = sdk_find_front_mesh(ref, ctx);
-        const auto color_picker = sdk_find_color_picker_caller(ref);
+        const auto mesh_candidates = sdk_collect_front_mesh_candidates(ref, ctx);
+        const auto mesh = mesh_candidates.empty() ? 0 : mesh_candidates.front().mesh;
         const auto hit_test_function = ref.find_function(ctx.component, "HitTestAtScreenPosition");
-        const auto sample_function = color_picker ? ref.find_function(color_picker, "SampleViewportGBuffer") : 0;
-        const auto paint_uv_function = ctx.paint_at_uv_with_brush_function ? ctx.paint_at_uv_with_brush_function : ref.find_function(ctx.component, "PaintAtUVWithBrush");
-        const auto hide_function = mesh ? ref.find_function(mesh, "SetHiddenInGame") : 0;
-        const auto begin_stroke_function = ref.find_function(ctx.component, "BeginStroke");
-        const auto end_stroke_function = ref.find_function(ctx.component, "EndStroke");
-        const auto clear_recorded_function = ref.find_function(ctx.component, "ClearRecordedStrokes");
-        const auto flush_recorded_function = ref.find_function(ctx.component, "FlushRecordedStrokesToServer");
-        const auto send_batch_function = ref.find_function(ctx.component, "SendStrokeBatchToServer");
+        const auto screen_query = sdk_find_screen_space_brush_query(ref, ctx);
+        const auto query_at_screen_function = screen_query ? ref.find_function(screen_query, "QueryAtScreenPosition") : 0;
+        constexpr bool screen_query_configured = false;
+        const auto server_paint_batch_function = ctx.server_paint_batch_function ?
+            ctx.server_paint_batch_function :
+            ref.find_function(ctx.component, "ServerPaintBatch");
 
         metadata += std::string(",\"viewport_available\":") + json_bool(viewport.width > 0 && viewport.height > 0);
         metadata += ",\"viewport_width\":" + std::to_string(viewport.width);
         metadata += ",\"viewport_height\":" + std::to_string(viewport.height);
+        metadata += ",\"front_mesh_candidate_count\":" + std::to_string(mesh_candidates.size());
+        metadata += ",\"front_mesh_candidates\":" + sdk_front_mesh_candidates_json(ref, mesh_candidates);
+        metadata += std::string(",\"front_mesh_source\":\"") + (mesh_candidates.empty() ? "" : json_escape(mesh_candidates.front().source)) + "\"";
         metadata += std::string(",\"front_mesh_available\":") + json_bool(mesh != 0);
-        metadata += std::string(",\"color_picker_available\":") + json_bool(color_picker != 0);
         metadata += std::string(",\"function_hit_test_at_screen_position_available\":") + json_bool(hit_test_function != 0);
-        metadata += std::string(",\"function_sample_viewport_gbuffer_available\":") + json_bool(sample_function != 0);
-        metadata += std::string(",\"function_paint_at_uv_with_brush_available\":") + json_bool(paint_uv_function != 0);
-        metadata += std::string(",\"function_set_hidden_in_game_available\":") + json_bool(hide_function != 0);
-        metadata += std::string(",\"function_begin_stroke_available\":") + json_bool(begin_stroke_function != 0);
-        metadata += std::string(",\"function_end_stroke_available\":") + json_bool(end_stroke_function != 0);
-        metadata += std::string(",\"function_flush_recorded_strokes_to_server_available\":") + json_bool(flush_recorded_function != 0);
-        metadata += std::string(",\"function_send_stroke_batch_to_server_available\":") + json_bool(send_batch_function != 0);
+        metadata += std::string(",\"screen_space_brush_query_available\":") + json_bool(screen_query != 0);
+        metadata += std::string(",\"screen_space_brush_query\":\"") + hex_address(screen_query) + "\"";
+        metadata += std::string(",\"function_query_at_screen_position_available\":") + json_bool(query_at_screen_function != 0);
+        metadata += std::string(",\"screen_space_brush_query_configured\":") + json_bool(screen_query_configured);
+        metadata += std::string(",\"screen_space_brush_query_used\":") + json_bool(screen_query_configured);
+        metadata += ",\"screen_space_brush_query_production_disabled\":true";
+        metadata += ",\"screen_space_brush_query_production_disabled_reason\":\"query_at_screen_position_caused_working_set_spike_and_slower_dense_sampling\"";
+        metadata += ",\"runtime_hit_test_used\":true";
+        metadata += std::string(",\"template_dense_sampling_backend\":\"") +
+            (screen_query_configured ? "screen_space_brush_query_at_screen_position" : "runtime_paintable_hit_test_cached_triangles") + "\"";
+        metadata += std::string(",\"function_server_paint_batch_available_for_production\":") + json_bool(server_paint_batch_function != 0);
 
         if (viewport.width <= 0 || viewport.height <= 0)
         {
@@ -9760,22 +5746,18 @@ namespace
                                            response_json(false, "template_phase0_surface_unavailable", 0, 1, "front mesh HitTestAtScreenPosition is unavailable", metadata));
             return true;
         }
-        if (!paint_uv_function || !begin_stroke_function || !end_stroke_function)
+        if (!server_paint_batch_function)
         {
             complete_template_uv_brush_job(std::make_shared<TemplateUvBrushAsyncJob>(TemplateUvBrushAsyncJob{queued_job}),
-                                           response_json(false, "template_paint_api_unavailable", 0, 1, "PaintAtUVWithBrush or stroke functions are unavailable", metadata));
-            return true;
-        }
-        if (!flush_recorded_function && !send_batch_function)
-        {
-            complete_template_uv_brush_job(std::make_shared<TemplateUvBrushAsyncJob>(TemplateUvBrushAsyncJob{queued_job}),
-                                           response_json(false, "template_commit_unavailable", 0, 1, "recorded stroke flush functions are unavailable", metadata));
+                                           response_json(false,
+                                                         "template_server_batch_unavailable",
+                                                         0,
+                                                         1,
+                                                         "ServerPaintBatch is unavailable; local paint fallback is disabled",
+                                                         metadata));
             return true;
         }
 
-        constexpr std::uintptr_t OffAutoRecordStrokes = 0x01AC;
-        constexpr std::uintptr_t OffAutoFlushStrokes = 0x01AD;
-        constexpr std::uintptr_t OffAutoFlushThreshold = 0x01B0;
         constexpr std::uintptr_t OffCurrentBrushSettings = meccha_sdk::FieldOffsets::RuntimePaintable_CurrentBrushSettings;
 
         auto job = std::make_shared<TemplateUvBrushAsyncJob>();
@@ -9784,21 +5766,10 @@ namespace
         job->controller = ctx.controller;
         job->component = ctx.component;
         job->mesh = mesh;
-        job->color_picker = color_picker;
         job->hit_test_function = hit_test_function;
-        job->sample_function = sample_function;
-        job->paint_uv_function = paint_uv_function;
-        job->hide_function = hide_function;
-        job->begin_stroke_function = begin_stroke_function;
-        job->end_stroke_function = end_stroke_function;
-        job->clear_recorded_function = clear_recorded_function;
-        job->flush_recorded_function = flush_recorded_function;
-        job->send_batch_function = send_batch_function;
+        job->server_paint_batch_function = server_paint_batch_function;
         job->viewport_width = viewport.width;
         job->viewport_height = viewport.height;
-        job->old_auto_record = safe_read<bool>(ctx.component + OffAutoRecordStrokes, false);
-        job->old_auto_flush = safe_read<bool>(ctx.component + OffAutoFlushStrokes, false);
-        job->old_auto_flush_threshold = safe_read<int>(ctx.component + OffAutoFlushThreshold, 0);
         safe_copy(&job->old_brush, reinterpret_cast<const void*>(ctx.component + OffCurrentBrushSettings), sizeof(job->old_brush));
         job->brush = job->old_brush;
         job->brush.Hardness = 1.0f;
@@ -9806,12 +5777,15 @@ namespace
         job->brush.Spacing = 0.18f;
         job->brush.Falloff = meccha_sdk::EBrushFalloff::Spherical;
         job->brush.BlendMode = meccha_sdk::EPaintBlendMode::Normal;
+        job->server_batch_limit = 512;
         job->metadata = metadata;
         job->metadata += ",\"template_base_cols\":" + std::to_string(job->base_cols);
         job->metadata += ",\"template_base_rows\":" + std::to_string(job->base_rows);
-        job->metadata += ",\"template_dense_cols\":" + std::to_string(job->dense_cols);
-        job->metadata += ",\"template_dense_rows\":" + std::to_string(job->dense_rows);
-        job->metadata += ",\"template_point_target\":" + std::to_string(job->point_target);
+        job->metadata += ",\"template_candidate_rows\":" + std::to_string(job->dense_rows);
+        job->metadata += ",\"template_point_hard_cap\":" + std::to_string(job->point_target);
+        job->metadata += ",\"template_explicit_stroke_batch_enabled\":true";
+        job->metadata += ",\"template_explicit_stroke_batch_limit\":" + std::to_string(job->server_batch_limit);
+        job->metadata += ",\"template_dense_order\":\"front_silhouette_interval_top_down\"";
         job->started = std::chrono::steady_clock::now();
         job->last_tick = job->started;
         job->points.reserve(static_cast<std::size_t>(job->point_target));
@@ -9825,7 +5799,7 @@ namespace
                               0,
                               100,
                               0.0,
-                              "\"source_path\":\"scene_capture_basecolor_bulk_readback\"");
+                              "\"color_source\":\"scene_capture_basecolor_bulk_readback\"");
         if (const auto thread_id = g_game_thread_id.load())
         {
             PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
@@ -9851,41 +5825,13 @@ namespace
                 PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
             }
         };
-        auto post_delayed = [](DWORD delay_ms) {
-            if (const auto thread_id = g_game_thread_id.load())
-            {
-                std::thread([thread_id, delay_ms]() {
-                    Sleep(delay_ms);
-                    PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
-                }).detach();
-            }
-        };
-        auto cleanup_state = [&]() {
-            constexpr std::uintptr_t OffAutoRecordStrokes = 0x01AC;
-            constexpr std::uintptr_t OffAutoFlushStrokes = 0x01AD;
-            constexpr std::uintptr_t OffAutoFlushThreshold = 0x01B0;
-            constexpr std::uintptr_t OffCurrentBrushSettings = meccha_sdk::FieldOffsets::RuntimePaintable_CurrentBrushSettings;
-            safe_copy(reinterpret_cast<void*>(job->component + OffAutoRecordStrokes), &job->old_auto_record, sizeof(job->old_auto_record));
-            safe_copy(reinterpret_cast<void*>(job->component + OffAutoFlushStrokes), &job->old_auto_flush, sizeof(job->old_auto_flush));
-            safe_copy(reinterpret_cast<void*>(job->component + OffAutoFlushThreshold), &job->old_auto_flush_threshold, sizeof(job->old_auto_flush_threshold));
-            safe_copy(reinterpret_cast<void*>(job->component + OffCurrentBrushSettings), &job->old_brush, sizeof(job->old_brush));
-            if (job->mesh_hidden_for_color && job->mesh)
-            {
-                Reflection restore_ref{};
-                std::string restore_failure{};
-                if (restore_ref.init(restore_failure))
-                {
-                    job->restore_called = sdk_call_two_bools(restore_ref, job->mesh, "SetHiddenInGame", false, true);
-                }
-                job->mesh_hidden_for_color = false;
-            }
-        };
+        auto cleanup_state = []() {};
         auto fail_job = [&](const char* stage, const std::string& message) {
             cleanup_state();
             complete_template_uv_brush_job(job,
                                            response_json(false,
                                                          stage,
-                                                         job->paint_success,
+                                                         job->server_strokes_sent,
                                                          1,
                                                          message,
                                                          job->metadata + ",\"route\":\"template_brush_paint\",\"async_phase_failed\":true"));
@@ -9900,13 +5846,19 @@ namespace
         auto job_elapsed_ms = [&]() {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - job->started).count();
         };
+        auto capture_replication_snapshot = [&]() -> SdkReplicationSnapshot {
+            Reflection ref{};
+            std::string failure{};
+            if (!ref.init(failure))
+            {
+                SdkReplicationSnapshot snapshot{};
+                snapshot.failure = "reflection_unavailable:" + failure;
+                return snapshot;
+            }
+            return sdk_capture_replication_snapshot(ref, job->component);
+        };
 
         job->last_tick = std::chrono::steady_clock::now();
-
-        constexpr std::uintptr_t OffAutoRecordStrokes = 0x01AC;
-        constexpr std::uintptr_t OffAutoFlushStrokes = 0x01AD;
-        constexpr std::uintptr_t OffAutoFlushThreshold = 0x01B0;
-        constexpr std::uintptr_t OffCurrentBrushSettings = meccha_sdk::FieldOffsets::RuntimePaintable_CurrentBrushSettings;
 
         switch (job->phase)
         {
@@ -9914,6 +5866,11 @@ namespace
         {
             constexpr int chunk = 768;
             const int total = job->base_cols * job->base_rows;
+            if (job->silhouette_min_ix.empty() || job->silhouette_max_ix.empty())
+            {
+                job->silhouette_min_ix.assign(static_cast<std::size_t>(std::max(1, job->base_rows)), 1000000);
+                job->silhouette_max_ix.assign(static_cast<std::size_t>(std::max(1, job->base_rows)), -1);
+            }
             const int end = std::min(total, job->next_index + chunk);
             for (; job->next_index < end; ++job->next_index)
             {
@@ -9936,6 +5893,12 @@ namespace
                     continue;
                 }
                 ++job->base_hits;
+                if (iy >= 0 && iy < job->base_rows)
+                {
+                    auto row = static_cast<std::size_t>(iy);
+                    job->silhouette_min_ix[row] = std::min(job->silhouette_min_ix[row], ix);
+                    job->silhouette_max_ix[row] = std::max(job->silhouette_max_ix[row], ix);
+                }
                 job->bbox_min_nx = std::min(job->bbox_min_nx, nx);
                 job->bbox_min_ny = std::min(job->bbox_min_ny, ny);
                 job->bbox_max_nx = std::max(job->bbox_max_nx, nx);
@@ -9966,6 +5929,12 @@ namespace
                 job->bbox_max_nx = clamp01(job->bbox_max_nx + span_x * 0.16);
                 job->bbox_min_ny = clamp01(job->bbox_min_ny - span_y * 0.08);
                 job->bbox_max_ny = clamp01(job->bbox_max_ny + span_y * 0.14);
+                template_build_dense_candidates(job);
+                if (job->dense_candidates.empty())
+                {
+                    fail_job("template_phase0_no_dense_candidates", "template phase0 silhouette produced no dense candidates");
+                    return;
+                }
                 job->next_index = 0;
                 job->progress_percent = -1;
                 job->phase = TemplateUvBrushAsyncJob::Phase::Phase0Dense;
@@ -9975,19 +5944,16 @@ namespace
         }
         case TemplateUvBrushAsyncJob::Phase::Phase0Dense:
         {
-            constexpr int chunk = 192;
-            const int total = job->dense_cols * job->dense_rows;
+            constexpr int chunk = 768;
+            const int total = static_cast<int>(job->dense_candidates.size());
             const int end = std::min(total, job->next_index + chunk);
-            for (; job->next_index < end; ++job->next_index)
+            for (; job->next_index < end && static_cast<int>(job->points.size()) < job->point_target; ++job->next_index)
             {
-                const int ix = job->next_index % job->dense_cols;
-                const int iy = job->next_index / job->dense_cols;
-                const double tx = (static_cast<double>(ix) + 0.5) / static_cast<double>(job->dense_cols);
-                const double ty = (static_cast<double>(iy) + 0.5) / static_cast<double>(job->dense_rows);
-                const double nx = job->bbox_min_nx + (job->bbox_max_nx - job->bbox_min_nx) * tx;
-                const double ny = job->bbox_min_ny + (job->bbox_max_ny - job->bbox_min_ny) * ty;
+                const auto& candidate = job->dense_candidates[static_cast<std::size_t>(job->next_index)];
                 ++job->dense_attempts;
-                if (template_hit_to_point(job, nx * static_cast<double>(job->viewport_width), ny * static_cast<double>(job->viewport_height)))
+                if (template_hit_to_point(job,
+                                          candidate.nx * static_cast<double>(job->viewport_width),
+                                          candidate.ny * static_cast<double>(job->viewport_height)))
                 {
                     ++job->dense_hits;
                 }
@@ -10003,163 +5969,20 @@ namespace
                                       job_elapsed_ms(),
                                       "\"points\":" + std::to_string(job->points.size()) +
                                           ",\"dense_hits\":" + std::to_string(job->dense_hits) +
-                                          ",\"dense_attempts\":" + std::to_string(job->dense_attempts));
-            }
-            if (job->next_index >= total)
-            {
-                job->progress_percent = -1;
-                std::sort(job->points.begin(), job->points.end(), [](const auto& a, const auto& b) {
-                    if (a.y == b.y) return a.x < b.x;
-                    return a.y < b.y;
-                });
-                job->source_sorted = true;
-                job->screen_fill_index = 0;
-                job->progress_percent = -1;
-                job->phase = TemplateUvBrushAsyncJob::Phase::CaptureSource;
-            }
-            post_next();
-            return;
-        }
-        case TemplateUvBrushAsyncJob::Phase::Phase0LowerRescan:
-        {
-            constexpr int chunk = 192;
-            const int total = job->lower_cols * job->lower_rows;
-            const int end = std::min(total, job->next_index + chunk);
-            const double lower_start = job->bbox_min_ny + (job->bbox_max_ny - job->bbox_min_ny) * 0.48;
-            for (; job->next_index < end && static_cast<int>(job->points.size()) < job->point_target; ++job->next_index)
-            {
-                const int ix = job->next_index % job->lower_cols;
-                const int iy = job->next_index / job->lower_cols;
-                const double tx = (static_cast<double>(ix) + 0.5) / static_cast<double>(job->lower_cols);
-                const double ty = (static_cast<double>(iy) + 0.5) / static_cast<double>(job->lower_rows);
-                const double nx = job->bbox_min_nx + (job->bbox_max_nx - job->bbox_min_nx) * tx;
-                const double ny = lower_start + (job->bbox_max_ny - lower_start) * ty;
-                ++job->lower_attempts;
-                if (template_hit_to_point(job, nx * static_cast<double>(job->viewport_width), ny * static_cast<double>(job->viewport_height)))
-                {
-                    ++job->lower_hits;
-                }
-            }
-            const int percent = 32 + (total > 0 ? static_cast<int>((static_cast<long long>(job->next_index) * 8LL) / total) : 8);
-            if (percent != job->progress_percent)
-            {
-                job->progress_percent = percent;
-                write_bridge_progress("template_phase0_lower_rescan",
-                                      "phase0 lower rescan",
-                                      percent,
-                                      100,
-                                      job_elapsed_ms(),
-                                      "\"points\":" + std::to_string(job->points.size()) +
-                                          ",\"lower_hits\":" + std::to_string(job->lower_hits));
+                                          ",\"dense_attempts\":" + std::to_string(job->dense_attempts) +
+                                          ",\"dense_candidates\":" + std::to_string(job->candidate_count));
             }
             if (job->next_index >= total || static_cast<int>(job->points.size()) >= job->point_target)
             {
+                job->sampler_probe_attempts = job->base_attempts + job->dense_attempts;
+                job->sampler_probe_misses = std::max(0, job->sampler_probe_attempts - job->base_hits - job->dense_hits);
+                job->template_point_elapsed_ms = job_elapsed_ms();
                 job->progress_percent = -1;
                 std::sort(job->points.begin(), job->points.end(), [](const auto& a, const auto& b) {
                     if (a.y == b.y) return a.x < b.x;
                     return a.y < b.y;
                 });
                 job->source_sorted = true;
-                job->phase = TemplateUvBrushAsyncJob::Phase::CaptureSource;
-            }
-            post_next();
-            return;
-        }
-        case TemplateUvBrushAsyncJob::Phase::Phase0UvExpand:
-        {
-            const int original_count = static_cast<int>(job->points.size());
-            if (original_count <= 0)
-            {
-                fail_job("template_phase0_no_template_points", "template phase0 produced no template points");
-                return;
-            }
-            constexpr int chunk = 2400;
-            const int end = std::min(original_count, job->uv_expand_index + chunk);
-            const double uv_delta = 0.0019;
-            for (; job->uv_expand_index < end && static_cast<int>(job->points.size()) < job->point_target; ++job->uv_expand_index)
-            {
-                if ((job->uv_expand_index % 3) != 0)
-                {
-                    continue;
-                }
-                const auto p = job->points[static_cast<std::size_t>(job->uv_expand_index)];
-                if (template_add_template_point(job, p.x, p.y, p.u + uv_delta, p.v)) ++job->uv_expand_added;
-                if (template_add_template_point(job, p.x, p.y, p.u - uv_delta, p.v)) ++job->uv_expand_added;
-                if (template_add_template_point(job, p.x, p.y, p.u, p.v + uv_delta)) ++job->uv_expand_added;
-                if (template_add_template_point(job, p.x, p.y, p.u, p.v - uv_delta)) ++job->uv_expand_added;
-            }
-            const int percent = 40 + static_cast<int>((static_cast<long long>(job->uv_expand_index) * 6LL) / std::max(1, original_count));
-            if (percent != job->progress_percent)
-            {
-                job->progress_percent = percent;
-                write_bridge_progress("template_phase0_uv_expand",
-                                      "phase0 uv expand",
-                                      percent,
-                                      100,
-                                      job_elapsed_ms(),
-                                      "\"points\":" + std::to_string(job->points.size()) +
-                                          ",\"uv_expand_added\":" + std::to_string(job->uv_expand_added));
-            }
-            if (job->uv_expand_index >= original_count || static_cast<int>(job->points.size()) >= job->point_target)
-            {
-                job->screen_fill_index = 0;
-                job->progress_percent = -1;
-                std::sort(job->points.begin(), job->points.end(), [](const auto& a, const auto& b) {
-                    if (a.y == b.y) return a.x < b.x;
-                    return a.y < b.y;
-                });
-                job->phase = TemplateUvBrushAsyncJob::Phase::Phase0ScreenFill;
-            }
-            post_next();
-            return;
-        }
-        case TemplateUvBrushAsyncJob::Phase::Phase0ScreenFill:
-        {
-            const int original_count = static_cast<int>(job->points.size());
-            constexpr int chunk = 3200;
-            const int fill_target = std::min(job->point_target, std::max(original_count + 1, original_count * 2));
-            const int end = std::min(original_count - 1, job->screen_fill_index + chunk);
-            const double max_dx = static_cast<double>(job->viewport_width) * 0.018;
-            const double max_dy = static_cast<double>(job->viewport_height) * 0.004;
-            for (; job->screen_fill_index < end && static_cast<int>(job->points.size()) < fill_target; ++job->screen_fill_index)
-            {
-                const auto& a = job->points[static_cast<std::size_t>(job->screen_fill_index)];
-                const auto& b = job->points[static_cast<std::size_t>(job->screen_fill_index + 1)];
-                if (std::abs(a.y - b.y) > max_dy || std::abs(a.x - b.x) > max_dx)
-                {
-                    continue;
-                }
-                const double du = std::abs(a.u - b.u);
-                const double dv = std::abs(a.v - b.v);
-                if (du > 0.018 || dv > 0.018)
-                {
-                    continue;
-                }
-                if (template_add_template_point(job, (a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.u + b.u) * 0.5, (a.v + b.v) * 0.5))
-                {
-                    ++job->screen_fill_added;
-                }
-            }
-            const int percent = 46 + static_cast<int>((static_cast<long long>(job->screen_fill_index) * 6LL) / std::max(1, original_count));
-            if (percent != job->progress_percent)
-            {
-                job->progress_percent = percent;
-                write_bridge_progress("template_phase0_screen_fill",
-                                      "phase0 screen fill",
-                                      percent,
-                                      100,
-                                      job_elapsed_ms(),
-                                      "\"points\":" + std::to_string(job->points.size()) +
-                                          ",\"screen_fill_added\":" + std::to_string(job->screen_fill_added));
-            }
-            if (job->screen_fill_index >= original_count - 1 || static_cast<int>(job->points.size()) >= fill_target)
-            {
-                std::sort(job->points.begin(), job->points.end(), [](const auto& a, const auto& b) {
-                    if (a.y == b.y) return a.x < b.x;
-                    return a.y < b.y;
-                });
-                job->source_sorted = true;
-                job->capture_index = 0;
                 job->progress_percent = -1;
                 job->phase = TemplateUvBrushAsyncJob::Phase::CaptureSource;
             }
@@ -10173,14 +5996,6 @@ namespace
                 fail_job("template_phase0_no_template_points", "template phase0 produced no template points");
                 return;
             }
-            constexpr int kTemplateMinDirectPoints = 50000;
-            if (static_cast<int>(job->points.size()) < kTemplateMinDirectPoints)
-            {
-                fail_job("template_direct_points_insufficient",
-                         "template direct HitTest points are below the production quality floor; no screen-fill fallback was used");
-                return;
-            }
-
             Reflection ref{};
             std::string init_failure{};
             if (!ref.init(init_failure))
@@ -10220,8 +6035,7 @@ namespace
             native_front.sampling_backend = "template_points_cached_hit_test";
             native_front.min_front_hits = std::max(64, std::min(2048, static_cast<int>(job->points.size())));
             native_front.target_front_hits = static_cast<int>(job->points.size());
-            native_front.target_unique_atlas_texels = 0;
-            native_front.hard_attempt_budget = job->base_attempts + job->dense_attempts + job->lower_attempts;
+            native_front.hard_attempt_budget = job->base_attempts + job->dense_attempts;
             native_front.samples.reserve(job->points.size());
             for (const auto& point : job->points)
             {
@@ -10230,7 +6044,6 @@ namespace
                 sample.v = clamp01(point.v);
                 sample.screen_nx = clamp01(point.x / static_cast<double>(std::max(1, job->viewport_width)));
                 sample.screen_ny = clamp01(point.y / static_cast<double>(std::max(1, job->viewport_height)));
-                sample.radius = 0.006;
                 sample.metallic = 0.0;
                 sample.roughness = 0.65;
                 native_front.samples.push_back(sample);
@@ -10242,7 +6055,7 @@ namespace
                                   100,
                                   job_elapsed_ms(),
                                   "\"template_points\":" + std::to_string(job->points.size()) +
-                                      ",\"source_path\":\"scene_capture_basecolor_bulk_readback\"");
+                                      ",\"color_source\":\"scene_capture_basecolor_bulk_readback\"");
 
             constexpr int kTemplateCaptureMaxDimension = 4096;
             int capture_request_width = std::max(1, job->viewport_width);
@@ -10257,6 +6070,7 @@ namespace
             const auto capture_started = std::chrono::steady_clock::now();
             const auto capture = sdk_capture_front_colors(ref, ctx, native_front, capture_request_width, capture_request_height);
             const auto capture_elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - capture_started).count();
+            job->template_capture_elapsed_ms = capture_elapsed_ms;
             job->metadata += sdk_capture_metadata(capture);
             job->metadata += ",\"scene_capture_source\":\"BaseColor\"";
             job->metadata += ",\"template_capture_request_width\":" + std::to_string(capture_request_width);
@@ -10267,13 +6081,6 @@ namespace
                 fail_job("template_basecolor_capture_unavailable", "SceneCapture BaseColor bulk capture failed: " + capture.failure);
                 return;
             }
-            if (static_cast<int>(capture.samples.size()) < kTemplateMinDirectPoints)
-            {
-                fail_job("template_capture_points_insufficient",
-                         "SceneCapture BaseColor returned fewer source-colored points than the production quality floor");
-                return;
-            }
-
             job->points.clear();
             job->points.reserve(capture.samples.size());
             for (const auto& sample : capture.samples)
@@ -10290,7 +6097,7 @@ namespace
                 point.roughness = clamp01(std::max(0.35, sample.roughness));
                 point.has_color = true;
                 job->points.push_back(point);
-                ++job->gbuffer_success;
+                ++job->basecolor_samples;
                 job->rgb_min = std::min(job->rgb_min, std::min(point.r, std::min(point.g, point.b)));
                 job->rgb_max = std::max(job->rgb_max, std::max(point.r, std::max(point.g, point.b)));
                 job->rgb_sum_r += point.r;
@@ -10299,8 +6106,10 @@ namespace
                 job->metallic_sum += point.metallic;
                 job->roughness_sum += point.roughness;
             }
-            job->source_path = "scene_capture_basecolor_bulk_readback";
-            job->screen_capture_ready = true;
+            job->color_source = "scene_capture_basecolor_bulk_readback";
+            job->paint_sample_attempts = static_cast<int>(job->points.size());
+            job->paint_sample_success = static_cast<int>(job->points.size());
+            job->paint_sample_failures = 0;
             std::sort(job->points.begin(), job->points.end(), [](const auto& a, const auto& b) {
                 if (a.y == b.y) return a.x < b.x;
                 return a.y < b.y;
@@ -10310,7 +6119,7 @@ namespace
                                   60,
                                   100,
                                   job_elapsed_ms(),
-                                  std::string("\"source_path\":\"scene_capture_basecolor_bulk_readback\"") +
+                                  std::string("\"color_source\":\"scene_capture_basecolor_bulk_readback\"") +
                                       ",\"bulk_readback_used\":" + json_bool(capture.bulk_readback_used) +
                                       ",\"capture_samples\":" + std::to_string(capture.samples.size()) +
                                       ",\"bulk_backend\":\"" + json_escape(capture.bulk_backend) + "\"");
@@ -10327,302 +6136,177 @@ namespace
                 fail_job("template_points_unavailable", "template route produced no direct template points");
                 return;
             }
-            job->paint_tick_budget_ms = 6.0;
-            job->max_paints_per_tick = 4096;
-            job->auto_flush_threshold = std::max(8192, std::min(32768, template_count));
-            const bool enabled = true;
-            const bool disabled = false;
-            safe_copy(reinterpret_cast<void*>(job->component + OffAutoRecordStrokes), &enabled, sizeof(enabled));
-            safe_copy(reinterpret_cast<void*>(job->component + OffAutoFlushStrokes), &disabled, sizeof(disabled));
-            safe_copy(reinterpret_cast<void*>(job->component + OffAutoFlushThreshold), &job->auto_flush_threshold, sizeof(job->auto_flush_threshold));
             const double radius = std::max(0.0012, std::min(0.0030, 0.58 / std::sqrt(static_cast<double>(std::max(1, template_count)))));
             job->brush_radius = radius;
             job->brush.Radius = static_cast<float>(radius);
             job->brush.Spacing = 0.08f;
-            safe_copy(reinterpret_cast<void*>(job->component + OffCurrentBrushSettings), &job->brush, sizeof(job->brush));
-            if (job->clear_recorded_function)
-            {
-                std::uint8_t params[1]{};
-                std::string failure{};
-                job->clear_called = process_event(job->component, job->clear_recorded_function, params, failure);
-            }
-            if (job->begin_stroke_function)
-            {
-                std::uint8_t params[1]{};
-                std::string failure{};
-                job->begin_called = process_event(job->component, job->begin_stroke_function, params, failure);
-            }
-            if (!job->begin_called)
-            {
-                fail_job("template_begin_stroke_failed", "BeginStroke failed for template brush route");
-                return;
-            }
-            write_bridge_progress("template_load_begin",
-                                  "template_load BeginStroke and auto flush configured",
+            job->server_batch_started = std::chrono::steady_clock::now();
+            write_bridge_progress("template_server_batch_begin",
+                                  "template server batch stream prepared",
                                   62,
                                   100,
                                   job_elapsed_ms(),
                                       "\"template_points\":" + std::to_string(job->points.size()) +
-                                      ",\"gbuffer_prefetched\":" + std::to_string(job->gbuffer_success) +
-                                      ",\"gbuffer_streamed\":false" +
-                                      ",\"source_path\":\"" + json_escape(job->source_path) + "\"" +
+                                      ",\"basecolor_samples\":" + std::to_string(job->basecolor_samples) +
+                                      ",\"color_source\":\"" + json_escape(job->color_source) + "\"" +
                                       ",\"albedo_transfer\":\"basecolor_srgb_to_linear_flinearcolor\"" +
                                       ",\"paint_target_channel\":\"Albedo\"" +
                                       ",\"material_channel_overwrite\":false" +
-                                      ",\"lower_rescan_enabled\":false" +
-                                      ",\"auto_flush_during_paint\":false" +
-                                      ",\"delayed_clear_after_done\":false" +
-                                      ",\"paint_tick_budget_ms\":" + std::to_string(job->paint_tick_budget_ms) +
-                                      ",\"max_paints_per_tick\":" + std::to_string(job->max_paints_per_tick) +
+                                      ",\"local_paint_used\":false" +
                                       ",\"brush_radius\":" + std::to_string(job->brush_radius) +
-                                      ",\"auto_flush_threshold\":" + std::to_string(job->auto_flush_threshold));
-            job->paint_index = 0;
-            job->phase = TemplateUvBrushAsyncJob::Phase::PaintBrush;
+                                      ",\"server_rpc\":\"ServerPaintBatch\"" +
+                                      ",\"server_batch_limit\":" + std::to_string(job->server_batch_limit));
+            job->replicate_index = 0;
+            job->phase = TemplateUvBrushAsyncJob::Phase::ReplicateStrokes;
             post_next();
             return;
         }
-        case TemplateUvBrushAsyncJob::Phase::PaintBrush:
+        case TemplateUvBrushAsyncJob::Phase::ReplicateStrokes:
         {
-            const auto paint_tick_start = std::chrono::steady_clock::now();
             const int total_points = static_cast<int>(job->points.size());
-            int painted_this_tick = 0;
-            int visited_this_tick = 0;
-            for (; job->paint_index < total_points; ++job->paint_index)
+            if (job->replicate_index >= total_points)
             {
-                if (visited_this_tick > 0)
+                if (job->server_batch_started.time_since_epoch().count() != 0)
                 {
-                    const auto tick_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - paint_tick_start).count();
-                    if (tick_ms >= job->paint_tick_budget_ms ||
-                        painted_this_tick >= job->max_paints_per_tick ||
-                        visited_this_tick >= job->max_paints_per_tick * 2)
-                    {
-                        break;
-                    }
+                    job->server_batch_elapsed_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - job->server_batch_started).count();
                 }
-                ++visited_this_tick;
-                auto& point = job->points[static_cast<std::size_t>(job->paint_index)];
-                if (!point.has_color)
-                {
-                    ++job->process_failures;
-                    if (job->first_failure.empty())
-                    {
-                        job->first_failure = "template point missing batched source color";
-                    }
-                    continue;
-                }
-                meccha_sdk::RuntimePaintableComponent_PaintAtUVWithBrush paint{};
-                paint.Uv = meccha_sdk::FVector2D{point.u, point.v};
-                paint.ChannelData = sdk_make_channel(point.r,
-                                                     point.g,
-                                                     point.b,
-                                                     point.metallic,
-                                                     point.roughness,
-                                                     meccha_sdk::EPaintChannelApplyMode::Override);
-                paint.BrushSettings = job->brush;
-                paint.Channel = meccha_sdk::EPaintChannel::Albedo;
-                std::string failure{};
-                if (!process_event(job->component, job->paint_uv_function, reinterpret_cast<std::uint8_t*>(&paint), failure))
-                {
-                    ++job->process_failures;
-                    if (job->first_failure.empty())
-                    {
-                        job->first_failure = failure.empty() ? "PaintAtUVWithBrush failed" : failure;
-                    }
-                    continue;
-                }
-                ++job->paint_success;
-                ++painted_this_tick;
+                job->replication_after_explicit_batches = capture_replication_snapshot();
+                job->phase = TemplateUvBrushAsyncJob::Phase::Finish;
+                post_next();
+                return;
             }
-            const int denom = std::max(1, total_points);
-            const int percent = 62 + static_cast<int>((static_cast<long long>(job->paint_index) * 36LL) / denom);
+
+            const int count = std::max(1, std::min(job->server_batch_limit, total_points - job->replicate_index));
+            std::vector<meccha_sdk::FPaintStroke> strokes{};
+            strokes.reserve(static_cast<std::size_t>(count));
+            for (int i = 0; i < count; ++i)
+            {
+                const auto& point = job->points[static_cast<std::size_t>(job->replicate_index + i)];
+                const auto channel = sdk_make_channel(point.r,
+                                                      point.g,
+                                                      point.b,
+                                                      point.metallic,
+                                                      point.roughness,
+                                                      meccha_sdk::EPaintChannelApplyMode::Override);
+                strokes.push_back(sdk_make_uv_stroke(point.u,
+                                                     point.v,
+                                                     channel,
+                                                     job->brush,
+                                                     meccha_sdk::EPaintChannel::Albedo));
+            }
+
+            SdkContext ctx{};
+            ctx.component = job->component;
+            ctx.server_paint_batch_function = job->server_paint_batch_function;
+            std::string failure{};
+            bool sent = false;
+            if (job->server_paint_batch_function)
+            {
+                sent = sdk_call_server_paint_batch(ctx, strokes, 0, strokes.size(), failure);
+                if (sent)
+                {
+                    job->server_batch_rpc = "ServerPaintBatch";
+                }
+            }
+
+            if (!sent)
+            {
+                ++job->server_batch_failures;
+                if (job->first_failure.empty())
+                {
+                    job->first_failure = failure.empty() ? "ServerPaintBatch_failed" : failure;
+                }
+                fail_job("template_explicit_stroke_batch_failed",
+                         "ServerPaintBatch failed: " + job->first_failure);
+                return;
+            }
+
+            job->explicit_stroke_batch_used = true;
+            ++job->server_batch_success;
+            ++job->server_batch_calls;
+            job->server_strokes_sent += count;
+            job->replicate_index += count;
+
+            const int percent = 98 + static_cast<int>((static_cast<long long>(job->replicate_index) * 1LL) / std::max(1, total_points));
             if (percent != job->progress_percent)
             {
                 job->progress_percent = percent;
-                write_bridge_progress("template_load_paint",
-                                      "template_load PaintAtUVWithBrush stream",
+                write_bridge_progress("template_explicit_stroke_batch",
+                                      "template explicit stroke batch stream",
                                       percent,
                                       100,
                                       job_elapsed_ms(),
-                                      "\"paint\":" + std::to_string(job->paint_success) +
-                                          ",\"index\":" + std::to_string(job->paint_index) +
+                                      "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
                                           ",\"points\":" + std::to_string(job->points.size()) +
-                                          ",\"painted_this_tick\":" + std::to_string(painted_this_tick) +
-                                          ",\"commit_pulses\":" + std::to_string(job->commit_pulses));
-            }
-            if (job->paint_index >= static_cast<int>(job->points.size()))
-            {
-                job->phase = TemplateUvBrushAsyncJob::Phase::Finish;
+                                          ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls) +
+                                          ",\"server_batch_rpc\":\"" + json_escape(job->server_batch_rpc) + "\"" +
+                                          ",\"server_batch_limit\":" + std::to_string(job->server_batch_limit));
             }
             post_next();
             return;
         }
         case TemplateUvBrushAsyncJob::Phase::Finish:
         {
-            if (job->end_stroke_function)
-            {
-                std::uint8_t params[1]{};
-                std::string failure{};
-                job->end_called = process_event(job->component, job->end_stroke_function, params, failure);
-            }
-            if (job->flush_recorded_function)
-            {
-                std::uint8_t params[1]{};
-                std::string failure{};
-                job->flush_called = process_event(job->component, job->flush_recorded_function, params, failure);
-            }
-            if (job->send_batch_function)
-            {
-                std::uint8_t params[1]{};
-                std::string failure{};
-                job->send_batch_called = process_event(job->component, job->send_batch_function, params, failure);
-            }
             cleanup_state();
 
-            const double denom = std::max(1, job->gbuffer_success);
+            const double denom = std::max(1, job->basecolor_samples);
+            const double total_elapsed_ms = job_elapsed_ms();
             std::string metadata = job->metadata;
-            auto write_template_artifacts = [&]() -> std::string {
-                const auto to_display_byte = [](double linear) -> std::uint8_t {
-                    return static_cast<std::uint8_t>(std::round(clamp01(sdk_linear_to_srgb_component(linear)) * 255.0));
-                };
-                const int screen_w = std::max(1, job->viewport_width);
-                const int screen_h = std::max(1, job->viewport_height);
-                std::vector<std::uint8_t> screen_rgb(static_cast<std::size_t>(screen_w) * static_cast<std::size_t>(screen_h) * 3u, 8);
-                constexpr int uv_w = 1024;
-                constexpr int uv_h = 1024;
-                std::vector<std::uint8_t> uv_rgb(static_cast<std::size_t>(uv_w) * static_cast<std::size_t>(uv_h) * 3u, 8);
-                double display_sum_r = 0.0;
-                double display_sum_g = 0.0;
-                double display_sum_b = 0.0;
-                double display_min = 1.0;
-                double display_max = 0.0;
-                for (const auto& point : job->points)
-                {
-                    const auto rb = to_display_byte(point.r);
-                    const auto gb = to_display_byte(point.g);
-                    const auto bb = to_display_byte(point.b);
-                    const double dr = static_cast<double>(rb) / 255.0;
-                    const double dg = static_cast<double>(gb) / 255.0;
-                    const double db = static_cast<double>(bb) / 255.0;
-                    display_sum_r += dr;
-                    display_sum_g += dg;
-                    display_sum_b += db;
-                    display_min = std::min(display_min, std::min(dr, std::min(dg, db)));
-                    display_max = std::max(display_max, std::max(dr, std::max(dg, db)));
-
-                    const int sx = std::max(0, std::min(screen_w - 1, static_cast<int>(std::round(point.x))));
-                    const int sy = std::max(0, std::min(screen_h - 1, static_cast<int>(std::round(point.y))));
-                    for (int dy = -1; dy <= 1; ++dy)
-                    {
-                        const int y = sy + dy;
-                        if (y < 0 || y >= screen_h) continue;
-                        for (int dx = -1; dx <= 1; ++dx)
-                        {
-                            const int x = sx + dx;
-                            if (x < 0 || x >= screen_w) continue;
-                            const std::size_t dst = (static_cast<std::size_t>(y) * static_cast<std::size_t>(screen_w) + static_cast<std::size_t>(x)) * 3u;
-                            screen_rgb[dst + 0] = rb;
-                            screen_rgb[dst + 1] = gb;
-                            screen_rgb[dst + 2] = bb;
-                        }
-                    }
-
-                    const int ux = std::max(0, std::min(uv_w - 1, static_cast<int>(std::round(clamp01(point.u) * static_cast<double>(uv_w - 1)))));
-                    const int uy = std::max(0, std::min(uv_h - 1, static_cast<int>(std::round((1.0 - clamp01(point.v)) * static_cast<double>(uv_h - 1)))));
-                    const std::size_t udst = (static_cast<std::size_t>(uy) * static_cast<std::size_t>(uv_w) + static_cast<std::size_t>(ux)) * 3u;
-                    uv_rgb[udst + 0] = rb;
-                    uv_rgb[udst + 1] = gb;
-                    uv_rgb[udst + 2] = bb;
-                }
-
-                const bool screen_written = write_runtime_artifact_bmp_rgb(L"template_source_capture.bmp", screen_w, screen_h, screen_rgb);
-                const bool points_written = write_runtime_artifact_bmp_rgb(L"template_points_rgb.bmp", screen_w, screen_h, screen_rgb);
-                const bool uv_written = write_runtime_artifact_bmp_rgb(L"template_uv_brush_coverage.bmp", uv_w, uv_h, uv_rgb);
-                const double point_denom = std::max(1.0, static_cast<double>(job->points.size()));
-                std::string quality = "{\n";
-                quality += "  \"route\": \"template_brush_paint\",\n";
-                quality += "  \"artifact_purpose\": \"production template point and color diagnostics\",\n";
-                quality += "  \"color_source\": \"scene_capture_basecolor_bulk_readback\",\n";
-                quality += "  \"albedo_transfer\": \"basecolor_srgb_to_linear_flinearcolor\",\n";
-                quality += "  \"point_count\": " + std::to_string(job->points.size()) + ",\n";
-                quality += "  \"colored_points\": " + std::to_string(job->gbuffer_success) + ",\n";
-                quality += "  \"viewport_width\": " + std::to_string(job->viewport_width) + ",\n";
-                quality += "  \"viewport_height\": " + std::to_string(job->viewport_height) + ",\n";
-                quality += "  \"brush_radius\": " + std::to_string(job->brush_radius) + ",\n";
-                quality += "  \"screen_bbox\": [" + std::to_string(job->bbox_min_nx) + ", " + std::to_string(job->bbox_min_ny) + ", " + std::to_string(job->bbox_max_nx) + ", " + std::to_string(job->bbox_max_ny) + "],\n";
-                quality += "  \"linear_rgb_min\": " + std::to_string(job->rgb_min) + ",\n";
-                quality += "  \"linear_rgb_max\": " + std::to_string(job->rgb_max) + ",\n";
-                quality += "  \"linear_rgb_avg\": [" + std::to_string(job->rgb_sum_r / denom) + ", " + std::to_string(job->rgb_sum_g / denom) + ", " + std::to_string(job->rgb_sum_b / denom) + "],\n";
-                quality += "  \"display_srgb_min\": " + std::to_string(display_min) + ",\n";
-                quality += "  \"display_srgb_max\": " + std::to_string(display_max) + ",\n";
-                quality += "  \"display_srgb_avg\": [" + std::to_string(display_sum_r / point_denom) + ", " + std::to_string(display_sum_g / point_denom) + ", " + std::to_string(display_sum_b / point_denom) + "],\n";
-                quality += "  \"gbuffer_calls\": " + std::to_string(job->gbuffer_calls) + ",\n";
-                quality += "  \"gbuffer_failures\": " + std::to_string(job->gbuffer_failures) + ",\n";
-                quality += "  \"gbuffer_sample_elapsed_ms\": " + std::to_string(job->gbuffer_sample_elapsed_ms) + ",\n";
-                quality += "  \"template_source_capture_bmp_written\": " + std::string(screen_written ? "true" : "false") + ",\n";
-                quality += "  \"template_points_rgb_bmp_written\": " + std::string(points_written ? "true" : "false") + ",\n";
-                quality += "  \"template_uv_brush_coverage_bmp_written\": " + std::string(uv_written ? "true" : "false") + "\n";
-                quality += "}\n";
-                const bool quality_written = write_runtime_artifact_text(L"template_quality.json", quality);
-                std::string compare = "{\n";
-                compare += "  \"route\": \"template_brush_paint\",\n";
-                compare += "  \"artifact_purpose\": \"active production color source summary\",\n";
-                compare += "  \"source\": \"SceneCapture2D.BaseColor\",\n";
-                compare += "  \"scene_capture_used\": true,\n";
-                compare += "  \"paint_albedo_input\": \"same linear FLinearColor values\",\n";
-                compare += "  \"display_srgb_avg\": [" + std::to_string(display_sum_r / point_denom) + ", " + std::to_string(display_sum_g / point_denom) + ", " + std::to_string(display_sum_b / point_denom) + "],\n";
-                compare += "  \"linear_rgb_avg\": [" + std::to_string(job->rgb_sum_r / denom) + ", " + std::to_string(job->rgb_sum_g / denom) + ", " + std::to_string(job->rgb_sum_b / denom) + "]\n";
-                compare += "}\n";
-                const bool compare_written = write_runtime_artifact_text(L"template_gbuffer_compare.json", compare);
-                return std::string(",\"template_artifact_dir\":\"%LOCALAPPDATA%\\\\MecchaCamouflage\\\\runtime\"") +
-                       ",\"template_quality_written\":" + json_bool(quality_written) +
-                       ",\"template_gbuffer_compare_written\":" + json_bool(compare_written) +
-                       ",\"template_source_capture_bmp_written\":" + json_bool(screen_written) +
-                       ",\"template_points_rgb_bmp_written\":" + json_bool(points_written) +
-                       ",\"template_uv_brush_coverage_bmp_written\":" + json_bool(uv_written);
-            };
-            metadata += write_template_artifacts();
-            metadata += ",\"source_path\":\"" + json_escape(job->source_path) + "\"";
-            metadata += std::string(",\"screen_capture_attempted\":") + json_bool(job->screen_capture_attempted);
-            metadata += std::string(",\"screen_capture_ready\":") + json_bool(job->screen_capture_ready);
-            metadata += ",\"screen_capture_width\":" + std::to_string(job->screen_capture_width);
-            metadata += ",\"screen_capture_height\":" + std::to_string(job->screen_capture_height);
-            metadata += ",\"screen_capture_origin_x\":" + std::to_string(job->screen_capture_origin_x);
-            metadata += ",\"screen_capture_origin_y\":" + std::to_string(job->screen_capture_origin_y);
-            metadata += std::string(",\"hide_called\":") + json_bool(job->hide_called);
-            metadata += std::string(",\"restore_called\":") + json_bool(job->restore_called);
+            metadata += ",\"template_artifacts_written\":false";
+            metadata += ",\"color_source\":\"" + json_escape(job->color_source) + "\"";
             metadata += ",\"phase0_base_hits\":" + std::to_string(job->base_hits);
             metadata += ",\"phase0_base_attempts\":" + std::to_string(job->base_attempts);
             metadata += ",\"phase0_dense_hits\":" + std::to_string(job->dense_hits);
             metadata += ",\"phase0_dense_attempts\":" + std::to_string(job->dense_attempts);
-            metadata += ",\"phase0_lower_hits\":" + std::to_string(job->lower_hits);
-            metadata += ",\"phase0_lower_attempts\":" + std::to_string(job->lower_attempts);
-            metadata += ",\"phase0_uv_expand_added\":" + std::to_string(job->uv_expand_added);
-            metadata += ",\"phase0_screen_fill_added\":" + std::to_string(job->screen_fill_added);
+            metadata += ",\"dense_candidate_count\":" + std::to_string(job->candidate_count);
+            metadata += ",\"silhouette_area_px\":" + std::to_string(job->silhouette_area_px);
+            metadata += ",\"sampler_probe_attempts\":" + std::to_string(job->sampler_probe_attempts);
+            metadata += ",\"sampler_probe_misses\":" + std::to_string(job->sampler_probe_misses);
+            metadata += ",\"runtime_hit_test_attempts\":" + std::to_string(job->runtime_hit_test_attempts);
+            metadata += ",\"runtime_hit_test_hits\":" + std::to_string(job->runtime_hit_test_hits);
+            metadata += ",\"runtime_hit_test_failures\":" + std::to_string(job->runtime_hit_test_failures);
             metadata += ",\"template_points\":" + std::to_string(job->points.size());
+            metadata += ",\"template_color_sample_hard_cap\":" + std::to_string(job->point_target);
+            metadata += std::string(",\"template_dense_early_stopped\":false");
+            metadata += ",\"paint_samples\":" + std::to_string(job->paint_sample_success);
+            metadata += ",\"paint_sample_attempts\":" + std::to_string(job->paint_sample_attempts);
+            metadata += ",\"paint_sample_success\":" + std::to_string(job->paint_sample_success);
+            metadata += ",\"paint_sample_failures\":" + std::to_string(job->paint_sample_failures);
             metadata += ",\"template_dedupe_skipped\":" + std::to_string(job->dedupe_skipped);
             metadata += ",\"template_brush_radius\":" + std::to_string(job->brush_radius);
-            metadata += ",\"template_paint_tick_budget_ms\":" + std::to_string(job->paint_tick_budget_ms);
-            metadata += ",\"template_max_paints_per_tick\":" + std::to_string(job->max_paints_per_tick);
-            metadata += ",\"template_auto_flush_threshold\":" + std::to_string(job->auto_flush_threshold);
-            metadata += ",\"gbuffer_calls\":" + std::to_string(job->gbuffer_calls);
-            metadata += ",\"gbuffer_success\":" + std::to_string(job->gbuffer_success);
-            metadata += ",\"gbuffer_failures\":" + std::to_string(job->gbuffer_failures);
-            metadata += ",\"gbuffer_sample_elapsed_ms\":" + std::to_string(job->gbuffer_sample_elapsed_ms);
-            metadata += ",\"paint_uv_success\":" + std::to_string(job->paint_success);
-            metadata += ",\"paint_process_failures\":" + std::to_string(job->process_failures);
+            metadata += ",\"template_point_elapsed_ms\":" + std::to_string(job->template_point_elapsed_ms);
+            metadata += ",\"capture_elapsed_ms\":" + std::to_string(job->template_capture_elapsed_ms);
+            metadata += ",\"server_batch_elapsed_ms\":" + std::to_string(job->server_batch_elapsed_ms);
+            metadata += ",\"total_elapsed_ms\":" + std::to_string(total_elapsed_ms);
+            metadata += ",\"local_paint_used\":false";
+            metadata += ",\"local_paint_success\":0";
+            metadata += ",\"basecolor_samples\":" + std::to_string(job->basecolor_samples);
+            metadata += ",\"paint_uv_success\":0";
+            metadata += ",\"paint_process_failures\":0";
             metadata += ",\"template_commit_pulses\":" + std::to_string(job->commit_pulses);
-            metadata += std::string(",\"clear_recorded_strokes_called\":") + json_bool(job->clear_called);
-            metadata += std::string(",\"begin_stroke_called\":") + json_bool(job->begin_called);
-            metadata += std::string(",\"end_stroke_called\":") + json_bool(job->end_called);
-            metadata += std::string(",\"flush_recorded_strokes_to_server_called\":") + json_bool(job->flush_called);
-            metadata += std::string(",\"send_stroke_batch_to_server_called\":") + json_bool(job->send_batch_called);
-            metadata += ",\"gbuffer_rgb_min\":" + std::to_string(job->rgb_min);
-            metadata += ",\"gbuffer_rgb_max\":" + std::to_string(job->rgb_max);
-            metadata += ",\"gbuffer_rgb_avg_r\":" + std::to_string(job->rgb_sum_r / denom);
-            metadata += ",\"gbuffer_rgb_avg_g\":" + std::to_string(job->rgb_sum_g / denom);
-            metadata += ",\"gbuffer_rgb_avg_b\":" + std::to_string(job->rgb_sum_b / denom);
-            metadata += ",\"gbuffer_metallic_avg\":" + std::to_string(job->metallic_sum / denom);
-            metadata += ",\"gbuffer_roughness_avg\":" + std::to_string(job->roughness_sum / denom);
+            metadata += ",\"clear_recorded_strokes_called\":false";
+            metadata += ",\"begin_stroke_called\":false";
+            metadata += ",\"end_stroke_called\":false";
+            metadata += ",\"flush_recorded_strokes_to_server_called\":false";
+            metadata += ",\"send_stroke_batch_to_server_called\":false";
+            metadata += std::string(",\"explicit_stroke_batch_used\":") + json_bool(job->explicit_stroke_batch_used);
+            metadata += ",\"server_paint_batch_used\":true";
+            metadata += ",\"server_batch_rpc\":\"" + json_escape(job->server_batch_rpc) + "\"";
+            metadata += ",\"server_batch_limit\":" + std::to_string(job->server_batch_limit);
+            metadata += ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls);
+            metadata += ",\"server_batch_success\":" + std::to_string(job->server_batch_success);
+            metadata += ",\"server_batch_failures\":" + std::to_string(job->server_batch_failures);
+            metadata += ",\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent);
+            metadata += ",\"recorded_stroke_replication_diagnostics\":false";
+            metadata += sdk_replication_snapshot_metadata("rep_after_explicit_batches", job->replication_after_explicit_batches);
+            metadata += ",\"basecolor_rgb_min\":" + std::to_string(job->rgb_min);
+            metadata += ",\"basecolor_rgb_max\":" + std::to_string(job->rgb_max);
+            metadata += ",\"basecolor_rgb_avg_r\":" + std::to_string(job->rgb_sum_r / denom);
+            metadata += ",\"basecolor_rgb_avg_g\":" + std::to_string(job->rgb_sum_g / denom);
+            metadata += ",\"basecolor_rgb_avg_b\":" + std::to_string(job->rgb_sum_b / denom);
+            metadata += ",\"basecolor_metallic_avg\":" + std::to_string(job->metallic_sum / denom);
+            metadata += ",\"basecolor_roughness_avg\":" + std::to_string(job->roughness_sum / denom);
             metadata += std::string(",\"first_failure\":\"") + json_escape(job->first_failure) + "\"";
             metadata += ",\"bridge_events\":[\"template_phase0_begin\",\"template_points_done\",\"template_load_done\"]";
 
@@ -10631,16 +6315,19 @@ namespace
                                   100,
                                   100,
                                   job_elapsed_ms(),
-                                  "\"paint\":" + std::to_string(job->paint_success) +
-                                      ",\"gbuffer\":" + std::to_string(job->gbuffer_success) +
+                                  "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
+                                      ",\"basecolor_samples\":" + std::to_string(job->basecolor_samples) +
                                       ",\"points\":" + std::to_string(job->points.size()));
-            const bool ok = job->paint_success > 0 && job->end_called && (job->flush_called || job->send_batch_called);
+            const bool explicit_replication_ok = job->explicit_stroke_batch_used &&
+                                                 job->server_strokes_sent > 0 &&
+                                                 job->server_batch_failures == 0;
+            const bool ok = explicit_replication_ok;
             complete_template_uv_brush_job(job,
                                            response_json(ok,
                                                          ok ? "template_brush_paint_done" : "template_commit_failed",
-                                                         job->paint_success,
+                                                         job->server_strokes_sent,
                                                          ok ? 0 : 1,
-                                                         ok ? "template brush paint completed" : "template brush paint did not commit",
+                                                         ok ? "template server batch paint dispatched" : "template server batch paint did not replicate",
                                                          metadata));
             {
                 std::lock_guard<std::mutex> lock(g_template_uv_brush_mutex);
@@ -10657,115 +6344,19 @@ namespace
 
     auto sdk_paint_full_route_native_direct(const std::string& request) -> std::string
     {
-        const auto start = std::chrono::steady_clock::now();
-        auto elapsed_now_ms = [&]() {
-            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-        };
-        Reflection* progress_ref = nullptr;
-        const SdkContext* progress_ctx = nullptr;
-        auto emit_progress = [&](const std::string& stage,
-                                 const std::string& message,
-                                 int step,
-                                 int total_steps,
-                                 double elapsed_ms,
-                                 const std::string& extra = "") {
-            write_bridge_progress(stage, message, step, total_steps, elapsed_ms, extra);
-        };
         const bool is_probe = request.find("\"type\":\"sdk_probe\"") != std::string::npos;
         const bool is_deep_probe = request.find("\"type\":\"sdk_deep_probe\"") != std::string::npos ||
                                    request.find("\"native_apply_mode\":\"sdk_deep_probe_only\"") != std::string::npos;
-        const bool legacy_diagnostic_import = false;
-        const bool texture_sync_probe = false;
-        const bool static_hybrid_probe = false;
-        const bool template_uv_brush_probe = request.find("\"native_apply_mode\":\"template_brush_paint\"") != std::string::npos ||
-                                             request.find("\"route\":\"f10_template_brush_paint\"") != std::string::npos;
-        const bool color_transfer_probe = false;
-        const bool front_texture_import = texture_sync_probe || static_hybrid_probe;
-        const bool strict_38923_front_texture_import = texture_sync_probe;
-        const bool diagnostic_import = texture_sync_probe || static_hybrid_probe;
-        const bool disabled_full_stream = false;
-        const bool disabled_paint_stream = false;
-        const bool disabled_sample_stream = false;
-        const bool disabled_metallic_stream = false;
-        const bool disabled_mesh_probe_only = false;
-        const bool disabled_mesh_texture_stream = false;
-        const bool disabled_mesh_route = false;
-        const bool front_metallic_texture_route = disabled_metallic_stream;
-        const bool front_paint_route = false;
-        const std::string route_name = template_uv_brush_probe ? "template_brush_paint" : "unsupported_route";
-        if (!is_probe && !is_deep_probe && !texture_sync_probe && !static_hybrid_probe && !template_uv_brush_probe)
+        if (!is_probe && !is_deep_probe)
         {
             return response_json(false,
                                  "unsupported_route",
                                  0,
                                  1,
                                  "unsupported native apply mode; only template_brush_paint is available",
-                                 std::string("\"route\":\"") + json_escape(route_name) + "\"" +
-                                     ",\"supported_native_apply_modes\":[\"template_brush_paint\"]");
+                                 "\"supported_native_apply_modes\":[\"template_brush_paint\"]");
         }
-        static volatile LONG paint_busy = 0;
-        static volatile LONG dump_busy = 0;
-        struct BusyGuard
-        {
-            volatile LONG* flag{nullptr};
-            bool active{false};
-            ~BusyGuard()
-            {
-                if (active && flag)
-                {
-                    InterlockedExchange(flag, 0);
-                }
-            }
-        } busy_guard{&paint_busy, false};
-        struct DumpGuard
-        {
-            volatile LONG* flag{nullptr};
-            bool active{false};
-            ~DumpGuard()
-            {
-                if (active && flag)
-                {
-                    InterlockedExchange(flag, 0);
-                }
-            }
-        } dump_guard{&dump_busy, false};
-        if (is_deep_probe)
-        {
-            if (paint_busy != 0)
-            {
-                return response_json(false,
-                                     "sdk_deep_probe_deferred",
-                                     0,
-                                     1,
-                                     "SDK deep probe deferred because paint is in progress",
-                                     "\"dump_deferred\":true,\"dump_deferred_reason\":\"paint_in_progress\"");
-            }
-            if (InterlockedCompareExchange(&dump_busy, 1, 0) != 0)
-            {
-                return response_json(false,
-                                     "sdk_deep_probe_deferred",
-                                     0,
-                                     1,
-                                     "SDK deep probe deferred because another dump is in progress",
-                                     "\"dump_deferred\":true,\"dump_deferred_reason\":\"dump_in_progress\"");
-            }
-            g_dump_cancel_requested.store(false);
-            dump_guard.active = true;
-        }
-        if (!is_probe && !is_deep_probe)
-        {
-            if (dump_busy != 0)
-            {
-                g_dump_cancel_requested.store(true);
-            }
-            clear_bridge_progress();
-            emit_progress("paint_started", "native paint request accepted", 0, 8, 0.0);
-            if (InterlockedCompareExchange(&paint_busy, 1, 0) != 0)
-            {
-                return response_json(false, "paint_ignored_busy", 0, 1, "paint request ignored because another paint is in progress");
-            }
-            busy_guard.active = true;
-        }
+
         Reflection ref{};
         std::string failure{};
         if (!ref.init(failure))
@@ -10773,1662 +6364,38 @@ namespace
             return response_json(false, "sdk_unavailable", 0, 1, failure);
         }
         const auto ctx = sdk_resolve_context(ref);
-        progress_ref = &ref;
-        progress_ctx = &ctx;
         std::string metadata = sdk_context_metadata(ref, ctx);
+        metadata += std::string(",\"route\":\"") + (is_deep_probe ? "sdk_deep_probe" : "sdk_probe") + "\"";
+        metadata += ",\"probe_read_only\":true";
+        metadata += ",\"texture_import_used\":false";
+        metadata += ",\"local_paint_used\":false";
+        metadata += ",\"paint_at_uv_with_brush_used\":false";
+        metadata += ",\"paint_at_screen_position_used\":false";
+        metadata += ",\"server_paint_batch_used\":false";
         if (!ctx.ok)
         {
-            const auto stage = is_probe ? ctx.stage : std::string("sdk_context_unavailable");
-            return response_json(false, stage.c_str(), 0, 1, ctx.message, metadata);
-        }
-        if (!front_texture_import && !static_hybrid_probe && !template_uv_brush_probe && !is_probe && !is_deep_probe && !sdk_has_replicated_api(ctx))
-        {
-            return response_json(false,
-                                 "replicated_api_unavailable",
-                                 0,
-                                 1,
-                                 "ServerPaintBatch replicated paint RPC is unavailable",
-                                 metadata + ",\"bridge_events\":[\"replicated_api_unavailable\"]");
-        }
-        if (template_uv_brush_probe)
-        {
-            return response_json(false,
-                                 "template_requires_async_dispatch",
-                                 0,
-                                 1,
-                                 "template brush route must run through the game-thread async dispatcher",
-                                 metadata + ",\"route\":\"" + json_escape(route_name) + "\",\"async_dispatch_required\":true");
-        }
-        if (is_deep_probe)
-        {
-            write_bridge_progress("mesh_snapshot_started", "probing SDK mesh/component snapshot inputs", 0, 2, 0.0);
-            const auto mesh = sdk_find_front_mesh(ref, ctx);
-            const auto query = sdk_find_screen_space_brush_query(ref, ctx);
-            const auto viewport = sdk_get_viewport_info(ref, ctx);
-            const auto deproject_function = ref.find_function(ctx.controller, "DeprojectScreenPositionToWorld");
-            const auto query_function = query ? ref.find_function(query, "QueryFromWorldRay") : 0;
-            const auto hit_test_function = ref.find_function(ctx.component, "HitTestAtScreenPosition");
-            const auto get_skeletal_mesh_asset = mesh ? ref.find_function(mesh, "GetSkeletalMeshAsset") : 0;
-            const auto get_skeletal_mesh = mesh ? ref.find_function(mesh, "GetSkeletalMesh") : 0;
-            const auto get_static_mesh = mesh ? ref.find_function(mesh, "GetStaticMesh") : 0;
-            const auto get_mesh_paint_uv_index = mesh ? ref.find_function(mesh, "GetMeshPaintTextureCoordinateIndex") : 0;
-            auto property_offset_for_object = [&](std::uintptr_t object, const char* name) -> int {
-                for (auto cls = ref.class_ptr(object); cls; cls = safe_read<std::uintptr_t>(cls + OffSuperStruct))
-                {
-                    const auto prop = ref.find_property(cls, name);
-                    if (prop)
-                    {
-                        return prop_offset(prop);
-                    }
-                }
-                return -1;
-            };
-            const auto component_to_world_offset = property_offset_for_object(mesh, "ComponentToWorld");
-            const auto bounds_offset = property_offset_for_object(mesh, "Bounds");
-            const auto skeletal_mesh_property_offset = property_offset_for_object(mesh, "SkeletalMesh");
-            const auto static_mesh_property_offset = property_offset_for_object(mesh, "StaticMesh");
-            const bool mesh_component_available = mesh && live_uobject(mesh);
-            const bool mesh_asset_function_available = get_skeletal_mesh_asset || get_skeletal_mesh || get_static_mesh;
-            const auto skeletal_mesh_from_function = get_skeletal_mesh_asset ? call_no_params_return_object(ref, mesh, "GetSkeletalMeshAsset") : 0;
-            const auto skeletal_mesh_from_property = skeletal_mesh_property_offset >= 0
-                ? safe_read<std::uintptr_t>(mesh + static_cast<std::uintptr_t>(skeletal_mesh_property_offset))
-                : 0;
-            const auto selected_mesh_asset = live_uobject(skeletal_mesh_from_function)
-                ? skeletal_mesh_from_function
-                : (live_uobject(skeletal_mesh_from_property) ? skeletal_mesh_from_property : 0);
-            const bool mesh_asset_available = selected_mesh_asset && live_uobject(selected_mesh_asset);
-            const auto render_data_offset = selected_mesh_asset ? property_offset_for_object(selected_mesh_asset, "RenderData") : -1;
-            const auto imported_model_offset = selected_mesh_asset ? property_offset_for_object(selected_mesh_asset, "ImportedModel") : -1;
-            const auto lod_info_offset = selected_mesh_asset ? property_offset_for_object(selected_mesh_asset, "LODInfo") : -1;
-            const auto materials_offset = selected_mesh_asset ? property_offset_for_object(selected_mesh_asset, "Materials") : -1;
-            const auto skeleton_offset = selected_mesh_asset ? property_offset_for_object(selected_mesh_asset, "Skeleton") : -1;
-            const bool mesh_render_data_available = render_data_offset >= 0;
-            const bool mesh_snapshot_ready = false;
-            g_mesh_snapshot_ready.store(mesh_snapshot_ready);
-            std::string deep = metadata;
-            deep += ",\"deep_probe_version\":2";
-            deep += ",\"deep_probe_paint_mutation\":false";
-            deep += ",\"deep_probe_import_mutation\":false";
-            deep += ",\"deep_probe_sidecar\":\"meccha-xenos-bridge.dll.deep_probe.json\"";
-            deep += ",\"deep_probe_runtime_artifact\":\"sdk_deep_probe.json\"";
-            deep += ",\"viewport_width\":" + std::to_string(viewport.width);
-            deep += ",\"viewport_height\":" + std::to_string(viewport.height);
-            deep += std::string(",\"mesh_component_available\":") + json_bool(mesh_component_available);
-            deep += std::string(",\"mesh_component\":\"") + hex_address(mesh) + "\"";
-            deep += std::string(",\"mesh_component_class\":\"") + json_escape(ref.class_name(mesh)) + "\"";
-            deep += ",\"mesh_component_to_world_offset\":" + std::to_string(component_to_world_offset);
-            deep += ",\"mesh_bounds_offset\":" + std::to_string(bounds_offset);
-            deep += ",\"mesh_skeletal_mesh_property_offset\":" + std::to_string(skeletal_mesh_property_offset);
-            deep += ",\"mesh_static_mesh_property_offset\":" + std::to_string(static_mesh_property_offset);
-            deep += std::string(",\"mesh_asset_available\":") + json_bool(mesh_asset_available);
-            deep += std::string(",\"mesh_asset\":\"") + hex_address(selected_mesh_asset) + "\"";
-            deep += std::string(",\"mesh_asset_class\":\"") + json_escape(ref.class_name(selected_mesh_asset)) + "\"";
-            deep += std::string(",\"mesh_asset_from_function\":\"") + hex_address(skeletal_mesh_from_function) + "\"";
-            deep += std::string(",\"mesh_asset_from_property\":\"") + hex_address(skeletal_mesh_from_property) + "\"";
-            deep += ",\"mesh_asset_render_data_offset\":" + std::to_string(render_data_offset);
-            deep += ",\"mesh_asset_imported_model_offset\":" + std::to_string(imported_model_offset);
-            deep += ",\"mesh_asset_lod_info_offset\":" + std::to_string(lod_info_offset);
-            deep += ",\"mesh_asset_materials_offset\":" + std::to_string(materials_offset);
-            deep += ",\"mesh_asset_skeleton_offset\":" + std::to_string(skeleton_offset);
-            deep += std::string(",\"function_get_skeletal_mesh_asset_available\":") + json_bool(get_skeletal_mesh_asset != 0);
-            deep += std::string(",\"function_get_skeletal_mesh_available\":") + json_bool(get_skeletal_mesh != 0);
-            deep += std::string(",\"function_get_static_mesh_available\":") + json_bool(get_static_mesh != 0);
-            deep += std::string(",\"function_get_mesh_paint_uv_index_available\":") + json_bool(get_mesh_paint_uv_index != 0);
-            deep += std::string(",\"function_deproject_available\":") + json_bool(deproject_function != 0);
-            deep += std::string(",\"function_deproject_schema\":\"") + json_escape(function_param_schema(ref, deproject_function)) + "\"";
-            deep += std::string(",\"function_hit_test_at_screen_position_available\":") + json_bool(hit_test_function != 0);
-            deep += std::string(",\"function_hit_test_at_screen_position_schema\":\"") + json_escape(function_param_schema(ref, hit_test_function)) + "\"";
-            deep += std::string(",\"runtime_paint_cached_triangle_front_candidate\":") + json_bool(hit_test_function != 0 && mesh_component_available);
-            deep += ",\"runtime_paint_cached_triangle_back_candidate\":false";
-            deep += ",\"runtime_paint_cached_triangle_back_blocker\":\"HitTestAtScreenPosition uses current PlayerController screen projection and returns FScreenSpacePaintResult without FaceIndex\"";
-            deep += ",\"brush_query_face_index_available\":true";
-            deep += ",\"side_back_generation_game_thread_bound\":true";
-            deep += ",\"side_back_generation_stable_strategy\":\"bounded_screen_space_brush_query_until_exact_mesh_render_data_layout\"";
-            deep += std::string(",\"screen_space_brush_query_available\":") + json_bool(query != 0);
-            deep += std::string(",\"screen_space_brush_query\":\"") + hex_address(query) + "\"";
-            deep += std::string(",\"screen_space_brush_query_class\":\"") + json_escape(ref.class_name(query)) + "\"";
-            deep += std::string(",\"function_query_from_world_ray_available\":") + json_bool(query_function != 0);
-            deep += std::string(",\"function_query_from_world_ray_schema\":\"") + json_escape(function_param_schema(ref, query_function)) + "\"";
-            deep += std::string(",\"function_export_schema\":\"") + json_escape(function_param_schema(ref, ctx.export_function)) + "\"";
-            deep += std::string(",\"function_import_schema\":\"") + json_escape(function_param_schema(ref, ctx.import_function)) + "\"";
-            deep += std::string(",\"function_server_paint_batch_schema\":\"") + json_escape(function_param_schema(ref, ctx.server_paint_batch_function)) + "\"";
-            deep += std::string(",\"function_paint_at_uv_with_brush_schema\":\"") + json_escape(function_param_schema(ref, ctx.paint_at_uv_with_brush_function)) + "\"";
-            deep += ",\"mesh_snapshot_probe_implemented\":false";
-            deep += std::string(",\"mesh_snapshot_ready\":") + json_bool(mesh_snapshot_ready);
-            deep += ",\"mesh_snapshot_runtime_artifact\":\"mesh_snapshot.json\"";
-            deep += ",\"mesh_snapshot_v2_runtime_artifact\":\"mesh_snapshot_v2.json\"";
-            deep += ",\"cpu_raycast_validation_runtime_artifact\":\"cpu_raycast_validation.json\"";
-            deep += ",\"raycast_profile_runtime_artifact\":\"raycast_profile.json\"";
-            deep += ",\"uv_hit_heatmap_runtime_artifact\":\"uv_hit_heatmap.pgm\"";
-            deep += ",\"atlas_preview_runtime_artifact\":\"atlas_preview.ppm\"";
-            deep += std::string(",\"exact_layout_source\":\"") + meccha_mesh_layout::LayoutSource + "\"";
-            deep += std::string(",\"exact_layout_profile\":\"") + meccha_mesh_layout::LayoutProfile + "\"";
-            deep += std::string(",\"exact_layout_version\":\"") + meccha_mesh_layout::LayoutVersion + "\"";
-            deep += std::string(",\"generated_cppsdk_available\":") + json_bool(meccha_mesh_layout::GeneratedCppSdkAvailable);
-            deep += std::string(",\"generated_cppsdk_path\":\"") + json_escape(meccha_mesh_layout::GeneratedCppSdkPath) + "\"";
-            deep += std::string(",\"generated_sdk_version\":\"") + json_escape(meccha_mesh_layout::GeneratedSdkVersion) + "\"";
-            deep += std::string(",\"runtime_paint_sdk_available\":") + json_bool(meccha_mesh_layout::RuntimePaintSdkAvailable);
-            deep += std::string(",\"screen_space_brush_query_sdk_available\":") + json_bool(meccha_mesh_layout::ScreenSpaceBrushQuerySdkAvailable);
-            deep += std::string(",\"exact_layout_available\":") + json_bool(meccha_mesh_layout::ExactRenderDataLayoutAvailable);
-            deep += std::string(",\"sdk_layout_stage\":\"") + meccha_mesh_layout::FailureStage + "\"";
-            deep += std::string(",\"sdk_layout_failure_reason\":\"") + meccha_mesh_layout::FailureReason + "\"";
-            deep += std::string(",\"mesh_render_data_available\":") + json_bool(mesh_render_data_available);
-            deep += ",\"mesh_vertex_buffer_available\":false";
-            deep += ",\"mesh_index_buffer_available\":false";
-            deep += ",\"mesh_uv_buffer_available\":false";
-            deep += ",\"skinned_position_source_available\":false";
-            deep += std::string(",\"mesh_raycast_candidate\":") + json_bool(mesh_component_available && mesh_asset_function_available);
-            deep += std::string(",\"mesh_raycast_blocker\":\"") + (mesh_asset_available ? "vertex_index_uv_decode_not_implemented" : "mesh_component_or_asset_function_unavailable") + "\"";
-            deep += ",\"bridge_events\":[\"sdk_deep_probe\"]";
-            const std::string deep_payload = std::string("{\"success\":true,\"stage\":\"sdk_deep_probe\",\"metadata\":{\"bridge\":\"meccha-xenos-bridge\",") + deep + "}}\n";
-            std::string mesh_snapshot = "{\"success\":false,\"stage\":\"mesh_snapshot_unavailable\",\"metadata\":{";
-            mesh_snapshot += std::string("\"mesh_component_available\":") + json_bool(mesh_component_available) + ",";
-            mesh_snapshot += std::string("\"mesh_component\":\"") + hex_address(mesh) + "\",";
-            mesh_snapshot += std::string("\"mesh_component_class\":\"") + json_escape(ref.class_name(mesh)) + "\",";
-            mesh_snapshot += "\"mesh_component_properties\":" + property_list_json(ref, mesh, 96) + ",";
-            mesh_snapshot += "\"mesh_component_functions\":" + function_list_json(ref, mesh, 96) + ",";
-            mesh_snapshot += "\"mesh_component_array_headers\":" + array_header_scan_json(mesh, 0x1000, 96) + ",";
-            mesh_snapshot += "\"mesh_component_pointer_scan\":" + pointer_scan_json(mesh, 0x1000, 128) + ",";
-            mesh_snapshot += "\"mesh_component_pointer_target_arrays\":" + pointer_target_array_scan_json(mesh, 0x1000, 0x600, 64, 24) + ",";
-            mesh_snapshot += "\"mesh_component_to_world_offset\":" + std::to_string(component_to_world_offset) + ",";
-            mesh_snapshot += "\"mesh_bounds_offset\":" + std::to_string(bounds_offset) + ",";
-            mesh_snapshot += "\"mesh_skeletal_mesh_property_offset\":" + std::to_string(skeletal_mesh_property_offset) + ",";
-            mesh_snapshot += "\"mesh_static_mesh_property_offset\":" + std::to_string(static_mesh_property_offset) + ",";
-            mesh_snapshot += std::string("\"mesh_asset_available\":") + json_bool(mesh_asset_available) + ",";
-            mesh_snapshot += std::string("\"mesh_asset\":\"") + hex_address(selected_mesh_asset) + "\",";
-            mesh_snapshot += std::string("\"mesh_asset_class\":\"") + json_escape(ref.class_name(selected_mesh_asset)) + "\",";
-            mesh_snapshot += std::string("\"mesh_asset_from_function\":\"") + hex_address(skeletal_mesh_from_function) + "\",";
-            mesh_snapshot += std::string("\"mesh_asset_from_property\":\"") + hex_address(skeletal_mesh_from_property) + "\",";
-            mesh_snapshot += "\"mesh_asset_properties\":" + property_list_json(ref, selected_mesh_asset, 128) + ",";
-            mesh_snapshot += "\"mesh_asset_functions\":" + function_list_json(ref, selected_mesh_asset, 128) + ",";
-            mesh_snapshot += "\"mesh_asset_array_headers\":" + array_header_scan_json(selected_mesh_asset, 0x1800, 128) + ",";
-            mesh_snapshot += "\"mesh_asset_pointer_scan\":" + pointer_scan_json(selected_mesh_asset, 0x1800, 160) + ",";
-            mesh_snapshot += "\"mesh_asset_pointer_target_arrays\":" + pointer_target_array_scan_json(selected_mesh_asset, 0x1800, 0x900, 128, 32) + ",";
-            mesh_snapshot += "\"mesh_asset_render_data_offset\":" + std::to_string(render_data_offset) + ",";
-            mesh_snapshot += "\"mesh_asset_imported_model_offset\":" + std::to_string(imported_model_offset) + ",";
-            mesh_snapshot += "\"mesh_asset_lod_info_offset\":" + std::to_string(lod_info_offset) + ",";
-            mesh_snapshot += "\"mesh_asset_materials_offset\":" + std::to_string(materials_offset) + ",";
-            mesh_snapshot += "\"mesh_asset_skeleton_offset\":" + std::to_string(skeleton_offset) + ",";
-            mesh_snapshot += std::string("\"function_get_skeletal_mesh_asset_available\":") + json_bool(get_skeletal_mesh_asset != 0) + ",";
-            mesh_snapshot += std::string("\"function_get_skeletal_mesh_available\":") + json_bool(get_skeletal_mesh != 0) + ",";
-            mesh_snapshot += std::string("\"function_get_static_mesh_available\":") + json_bool(get_static_mesh != 0) + ",";
-            mesh_snapshot += std::string("\"function_get_mesh_paint_uv_index_available\":") + json_bool(get_mesh_paint_uv_index != 0) + ",";
-            mesh_snapshot += std::string("\"mesh_render_data_available\":") + json_bool(mesh_render_data_available) + ",";
-            mesh_snapshot += "\"mesh_vertex_buffer_available\":false,";
-            mesh_snapshot += "\"mesh_index_buffer_available\":false,";
-            mesh_snapshot += "\"mesh_uv_buffer_available\":false,";
-            mesh_snapshot += std::string("\"mesh_raycast_candidate\":") + json_bool(mesh_component_available && mesh_asset_function_available) + ",";
-            mesh_snapshot += std::string("\"mesh_raycast_blocker\":\"") + (mesh_asset_available ? "vertex_index_uv_decode_not_implemented" : "mesh_component_or_asset_function_unavailable") + "\"";
-            mesh_snapshot += "}}\n";
-            std::string mesh_buffer_candidates = "{\"success\":true,\"stage\":\"mesh_buffer_candidates_dumped\",\"metadata\":{";
-            mesh_buffer_candidates += std::string("\"mesh_component\":\"") + hex_address(mesh) + "\",";
-            mesh_buffer_candidates += std::string("\"mesh_component_class\":\"") + json_escape(ref.class_name(mesh)) + "\",";
-            mesh_buffer_candidates += std::string("\"mesh_asset\":\"") + hex_address(selected_mesh_asset) + "\",";
-            mesh_buffer_candidates += std::string("\"mesh_asset_class\":\"") + json_escape(ref.class_name(selected_mesh_asset)) + "\",";
-            mesh_buffer_candidates += "\"mesh_component_candidates\":" + mesh_buffer_candidates_json(ref, mesh, 0x1000, 0x600, 40) + ",";
-            mesh_buffer_candidates += "\"mesh_asset_candidates\":" + mesh_buffer_candidates_json(ref, selected_mesh_asset, 0x1800, 0x900, 80);
-            mesh_buffer_candidates += "}}\n";
-            std::string mesh_snapshot_v2 = "{\"success\":false,\"stage\":\"";
-            mesh_snapshot_v2 += meccha_mesh_layout::FailureStage;
-            mesh_snapshot_v2 += "\",\"metadata\":{";
-            mesh_snapshot_v2 += "\"schema_version\":2,";
-            mesh_snapshot_v2 += std::string("\"generated_cppsdk_available\":") + json_bool(meccha_mesh_layout::GeneratedCppSdkAvailable) + ",";
-            mesh_snapshot_v2 += std::string("\"generated_cppsdk_path\":\"") + json_escape(meccha_mesh_layout::GeneratedCppSdkPath) + "\",";
-            mesh_snapshot_v2 += std::string("\"generated_sdk_version\":\"") + json_escape(meccha_mesh_layout::GeneratedSdkVersion) + "\",";
-            mesh_snapshot_v2 += std::string("\"runtime_paint_sdk_available\":") + json_bool(meccha_mesh_layout::RuntimePaintSdkAvailable) + ",";
-            mesh_snapshot_v2 += std::string("\"screen_space_brush_query_sdk_available\":") + json_bool(meccha_mesh_layout::ScreenSpaceBrushQuerySdkAvailable) + ",";
-            mesh_snapshot_v2 += std::string("\"exact_layout_source\":\"") + meccha_mesh_layout::LayoutSource + "\",";
-            mesh_snapshot_v2 += std::string("\"exact_layout_profile\":\"") + meccha_mesh_layout::LayoutProfile + "\",";
-            mesh_snapshot_v2 += std::string("\"exact_layout_version\":\"") + meccha_mesh_layout::LayoutVersion + "\",";
-            mesh_snapshot_v2 += std::string("\"exact_layout_available\":") + json_bool(meccha_mesh_layout::ExactRenderDataLayoutAvailable) + ",";
-            mesh_snapshot_v2 += std::string("\"layout_failure_reason\":\"") + meccha_mesh_layout::FailureReason + "\",";
-            mesh_snapshot_v2 += "\"memory_scan_fallback_used\":false,";
-            mesh_snapshot_v2 += "\"screen_space_brush_query_generation_used\":false,";
-            mesh_snapshot_v2 += "\"mesh_component_available\":" + std::string(mesh_component_available ? "true" : "false") + ",";
-            mesh_snapshot_v2 += std::string("\"mesh_component\":\"") + hex_address(mesh) + "\",";
-            mesh_snapshot_v2 += std::string("\"mesh_component_class\":\"") + json_escape(ref.class_name(mesh)) + "\",";
-            mesh_snapshot_v2 += "\"mesh_asset_available\":" + std::string(mesh_asset_available ? "true" : "false") + ",";
-            mesh_snapshot_v2 += std::string("\"mesh_asset\":\"") + hex_address(selected_mesh_asset) + "\",";
-            mesh_snapshot_v2 += std::string("\"mesh_asset_class\":\"") + json_escape(ref.class_name(selected_mesh_asset)) + "\",";
-            mesh_snapshot_v2 += "\"mesh_variant\":\"unknown_until_exact_layout\",";
-            mesh_snapshot_v2 += "\"lod_index\":0,";
-            mesh_snapshot_v2 += "\"paint_uv_channel\":0,";
-            mesh_snapshot_v2 += "\"vertices\":0,";
-            mesh_snapshot_v2 += "\"indices\":0,";
-            mesh_snapshot_v2 += "\"triangles\":0,";
-            mesh_snapshot_v2 += "\"sections\":0,";
-            mesh_snapshot_v2 += "\"bones\":0,";
-            mesh_snapshot_v2 += "\"uv_channels\":0,";
-            mesh_snapshot_v2 += "\"skin_weight_available\":false,";
-            mesh_snapshot_v2 += "\"component_transform_available\":false,";
-            mesh_snapshot_v2 += "\"bone_transform_available\":false,";
-            mesh_snapshot_v2 += "\"mesh_raycast_route_ready\":false";
-            mesh_snapshot_v2 += "}}\n";
-            std::string cpu_validation = "{\"success\":false,\"stage\":\"mesh_snapshot_failed\",\"metadata\":{";
-            cpu_validation += "\"schema_version\":1,\"cpu_validation_executed\":false,\"reason\":\"mesh_snapshot_v2_not_ready\",";
-            cpu_validation += "\"cpu_vs_query_uv_delta_avg\":null,\"cpu_vs_query_uv_delta_p95\":null,\"cpu_vs_query_uv_delta_max\":null,";
-            cpu_validation += "\"cpu_vs_query_world_delta_avg\":null,\"cpu_vs_query_world_delta_p95\":null,\"cpu_vs_query_world_delta_max\":null";
-            cpu_validation += "}}\n";
-            std::string raycast_profile = "{\"success\":false,\"stage\":\"mesh_snapshot_failed\",\"metadata\":{";
-            raycast_profile += "\"worker_threads\":0,\"bvh_ms\":0,\"raycast_ms\":0,\"atlas_ms\":0,";
-            raycast_profile += "\"raycast_hits\":0,\"misses\":0,\"front_hits\":0,\"back_hits\":0";
-            raycast_profile += "}}\n";
-            const std::string uv_heatmap = std::string("P5\n1 1\n255\n") + std::string(1, '\0');
-            const std::string atlas_preview = std::string("P6\n1 1\n255\n") + std::string(3, '\0');
-            const bool wrote_sidecar = write_bridge_sidecar_text(
-                L".deep_probe.json",
-                deep_payload);
-            const bool wrote_runtime_probe = write_runtime_artifact_text(L"sdk_deep_probe.json", deep_payload);
-            const bool wrote_mesh_snapshot = write_runtime_artifact_text(L"mesh_snapshot.json", mesh_snapshot);
-            const bool wrote_mesh_buffer_candidates = write_runtime_artifact_text(L"mesh_buffer_candidates.json", mesh_buffer_candidates);
-            const bool wrote_mesh_snapshot_v2 = write_runtime_artifact_text(L"mesh_snapshot_v2.json", mesh_snapshot_v2);
-            const bool wrote_cpu_validation = write_runtime_artifact_text(L"cpu_raycast_validation.json", cpu_validation);
-            const bool wrote_raycast_profile = write_runtime_artifact_text(L"raycast_profile.json", raycast_profile);
-            const bool wrote_uv_heatmap = write_runtime_artifact_text(L"uv_hit_heatmap.pgm", uv_heatmap);
-            const bool wrote_atlas_preview = write_runtime_artifact_text(L"atlas_preview.ppm", atlas_preview);
-            deep += std::string(",\"deep_probe_sidecar_written\":") + json_bool(wrote_sidecar);
-            deep += std::string(",\"sdk_deep_probe_runtime_written\":") + json_bool(wrote_runtime_probe);
-            deep += std::string(",\"mesh_snapshot_runtime_written\":") + json_bool(wrote_mesh_snapshot);
-            deep += std::string(",\"mesh_buffer_candidates_runtime_written\":") + json_bool(wrote_mesh_buffer_candidates);
-            deep += std::string(",\"mesh_snapshot_v2_runtime_written\":") + json_bool(wrote_mesh_snapshot_v2);
-            deep += std::string(",\"cpu_raycast_validation_runtime_written\":") + json_bool(wrote_cpu_validation);
-            deep += std::string(",\"raycast_profile_runtime_written\":") + json_bool(wrote_raycast_profile);
-            deep += std::string(",\"uv_hit_heatmap_runtime_written\":") + json_bool(wrote_uv_heatmap);
-            deep += std::string(",\"atlas_preview_runtime_written\":") + json_bool(wrote_atlas_preview);
-            deep += ",\"mesh_buffer_candidates_runtime_artifact\":\"mesh_buffer_candidates.json\"";
-            write_bridge_progress("mesh_snapshot_done", mesh_snapshot_ready ? "mesh snapshot is ready" : "mesh snapshot render data unavailable", 2, 2, 1.0,
-                                  "\"mesh_snapshot_ready\":" + std::string(mesh_snapshot_ready ? "true" : "false"));
-            return response_json(true, "sdk_deep_probe", 0, 0, "SDK deep probe completed without paint/import mutation", deep);
+            return response_json(false, ctx.stage.c_str(), 0, 1, ctx.message, metadata);
         }
 
-        metadata += ",\"render_target_albedo\":\"" + hex_address(sdk_get_render_target(ctx, 0)) + "\"" +
-                    ",\"route\":\"" + route_name + "\"" +
-                    ",\"replication\":\"component_server_paint_batch\"" +
-                    ",\"replicated_paint_used\":" + json_bool(!front_texture_import && !static_hybrid_probe) +
-                    ",\"front_paint_stream_used\":" + json_bool(disabled_paint_stream || disabled_sample_stream || disabled_metallic_stream) +
-                    ",\"disabled_paint_stream_used\":" + json_bool(disabled_paint_stream) +
-                    ",\"disabled_sample_stream_used\":" + json_bool(disabled_sample_stream) +
-                    ",\"front_texture_import_used\":" + json_bool(front_texture_import) +
-                    ",\"front_texture_source_expected\":\"" + std::string(strict_38923_front_texture_import ? "bulk_calibrated_direct_texture" :
-                                                                           (front_texture_import ? "sampled_pixel_front_atlas_legacy_explicit_only" : "not_applicable")) + "\"" +
-                    ",\"front_texture_parity_target\":\"38923cc_assemble_direct_texture\"" +
-                    ",\"bulk_readback_used\":false" +
-                    ",\"capture_transform_backend\":\"project_world_to_screen_scaled\"" +
-                    ",\"image_bulk_calibration_ok\":false" +
-                    ",\"texture_source_verified\":false" +
-                    ",\"bulk_readback_failure\":\"pending_capture\"" +
-                    ",\"temporary_diagnostic_only\":" + json_bool(texture_sync_probe || static_hybrid_probe) +
-                    ",\"diagnostic_import_channels\":" + std::string(front_texture_import ? "[\"albedo\"]" : "[]") +
-                    ",\"texture_sync_probe\":" + json_bool(texture_sync_probe) +
-                    ",\"static_hybrid_front_side_probe\":" + json_bool(static_hybrid_probe) +
-                    ",\"static_hybrid_artifact_only\":false" +
-                    ",\"static_hybrid_target_views\":\"front_dominant_plus_side_-60_-45_-30_-15_15_30_45_60\"" +
-                    ",\"static_hybrid_back_skipped\":true" +
-                    ",\"static_hybrid_apply_skipped\":false" +
-                    ",\"color_transfer_probe\":" + json_bool(color_transfer_probe) +
-                    ",\"multiplayer_sync_unverified\":" + json_bool(texture_sync_probe || static_hybrid_probe) +
-                    ",\"front_payload_placement_used\":false" +
-                    ",\"front_payload_color_used\":false" +
-                    ",\"front_only\":" + json_bool(front_paint_route && !front_texture_import) +
-                    ",\"side_back_skipped\":" + json_bool(front_paint_route && !front_texture_import) +
-                    ",\"front_texture_back_skipped\":false" +
-                    ",\"front_texture_material_channels_overlaid\":" + json_bool(front_texture_import) +
-                    ",\"metallic_base_used\":" + json_bool(front_metallic_texture_route && !front_texture_import) +
-                    ",\"metallic_base_skipped\":" + json_bool(!front_metallic_texture_route || front_texture_import) +
-                    ",\"metallic_base_skip_reason\":\"" + std::string(front_texture_import ? "skipped_for_38923_texture_parity" : "not_applicable") + "\"" +
-                    ",\"target_channel\":\"Albedo\"";
-
-        if (!is_probe && !is_deep_probe && disabled_mesh_route && !g_mesh_snapshot_ready.load())
-        {
-            const char* cpu_stage = meccha_mesh_layout::ExactRenderDataLayoutAvailable ? "mesh_snapshot_failed" : meccha_mesh_layout::FailureStage;
-            emit_progress(cpu_stage, "CPU mesh snapshot is unavailable; exact render data layout is not ready", 1, 8, elapsed_now_ms());
-            metadata += ",\"mesh_snapshot_ready\":false" +
-                        std::string(",\"mesh_raycast_route_ready\":false") +
-                        std::string(",\"generated_cppsdk_available\":") + json_bool(meccha_mesh_layout::GeneratedCppSdkAvailable) +
-                        std::string(",\"generated_cppsdk_path\":\"") + json_escape(meccha_mesh_layout::GeneratedCppSdkPath) + "\"" +
-                        std::string(",\"generated_sdk_version\":\"") + json_escape(meccha_mesh_layout::GeneratedSdkVersion) + "\"" +
-                        std::string(",\"runtime_paint_sdk_available\":") + json_bool(meccha_mesh_layout::RuntimePaintSdkAvailable) +
-                        std::string(",\"screen_space_brush_query_sdk_available\":") + json_bool(meccha_mesh_layout::ScreenSpaceBrushQuerySdkAvailable) +
-                        std::string(",\"exact_layout_source\":\"") + meccha_mesh_layout::LayoutSource + "\"" +
-                        std::string(",\"exact_layout_profile\":\"") + meccha_mesh_layout::LayoutProfile + "\"" +
-                        std::string(",\"exact_layout_version\":\"") + meccha_mesh_layout::LayoutVersion + "\"" +
-                        std::string(",\"exact_layout_available\":") + json_bool(meccha_mesh_layout::ExactRenderDataLayoutAvailable) +
-                        std::string(",\"layout_failure_reason\":\"") + meccha_mesh_layout::FailureReason + "\"" +
-                        std::string(",\"disabled_mesh_probe_only\":") + json_bool(disabled_mesh_probe_only) +
-                        std::string(",\"mesh_texture_paint_stream\":") + json_bool(disabled_mesh_texture_stream) +
-                        ",\"screen_space_brush_query_fallback_used\":false" +
-                        ",\"front_sampling_ue_query_skipped\":true" +
-                        ",\"runtime_artifact_dir\":\"%LOCALAPPDATA%\\\\MecchaCamouflage\\\\runtime\"" +
-                        std::string(",\"bridge_events\":[\"") + cpu_stage + "\"]";
-            return response_json(false,
-                                 cpu_stage,
-                                 0,
-                                 1,
-                                 "CPU mesh snapshot is unavailable; cpu_mesh route requires exact Dumper7 render data layout",
-                                 metadata);
-        }
-
-        auto before0 = sdk_export_channel_bytes(ref, ctx, 0);
-        auto before1 = sdk_export_channel_bytes(ref, ctx, 1);
-        auto before2 = sdk_export_channel_bytes(ref, ctx, 2);
-        const auto pre_metallic_albedo = before0;
-        const auto pre_metallic_metallic = before1;
-        const auto pre_metallic_roughness = before2;
-        metadata += sdk_channel_metadata("before_albedo", before0);
-        metadata += sdk_channel_metadata("before_metallic", before1);
-        metadata += sdk_channel_metadata("before_roughness", before2);
-
-        if (!before0.ok)
-        {
-            return response_json(false,
-                                 "export_failed",
-                                 0,
-                                 1,
-                                 "SDK albedo export failed: " + before0.failure,
-                                 metadata);
-        }
-        if (is_probe)
-        {
-            return response_json(true,
-                                 "sdk_probe",
-                                 0,
-                                 0,
-                                 "SDK probe ok; replicated paint API ready",
-                                 metadata + ",\"bridge_events\":[\"replicated_api_ready\"]");
-        }
-
-        meccha_sdk::EPaintChannel atlas_target_channel = meccha_sdk::EPaintChannel::Albedo;
-        bool atlas_use_world_position = false;
-        std::string paint_api_probe_selected = "";
-        if (front_texture_import)
-        {
-            metadata += std::string(",\"metallic_base_apply_backend\":\"skipped_38923_texture_parity\"") +
-                        ",\"metallic_base_requested\":0" +
-                        ",\"metallic_base_server_sent\":0" +
-                        ",\"metallic_base_server_failed\":0" +
-                        ",\"metallic_base_batch_calls\":0" +
-                        ",\"metallic_base_single_calls\":0" +
-                        ",\"metallic_base_client_mirror_sent\":0" +
-                        ",\"metallic_base_client_mirror_failed\":0" +
-                        ",\"metallic_base_server_rpc\":\"none\"" +
-                        ",\"metallic_base_client_mirror_rpc\":\"none\"" +
-                        ",\"metallic_base_import_albedo_ok\":false" +
-                        ",\"metallic_base_import_metallic_ok\":false" +
-                        ",\"metallic_base_import_roughness_ok\":false" +
-                        ",\"metallic_base_import_albedo_failure\":\"skipped\"" +
-                        ",\"metallic_base_import_metallic_failure\":\"skipped\"" +
-                        ",\"metallic_base_import_roughness_failure\":\"skipped\"" +
-                        sdk_channel_metadata("after_metallic_albedo", before0) +
-                        sdk_channel_metadata("after_metallic_metallic", before1) +
-                        sdk_channel_metadata("after_metallic_roughness", before2) +
-                        ",\"metallic_base_hash_changed\":false" +
-                        ",\"metallic_base_visible\":false" +
-                        ",\"metallic_base_observed\":false" +
-                        ",\"metallic_base_channel0_observed\":false" +
-                        ",\"metallic_base_channel1_observed\":false" +
-                        ",\"metallic_base_channel2_observed\":false" +
-                        ",\"metallic_base_settle_checks\":0" +
-                        ",\"metallic_base_settled_before_front\":true" +
-                        ",\"metallic_base_changed_during_settle\":false" +
-                        ",\"paint_api_probe_skipped\":true";
-            paint_api_probe_selected = "skipped_texture_sync_strict_probe_not_paint_route";
-            atlas_target_channel = meccha_sdk::EPaintChannel::Albedo;
-            atlas_use_world_position = false;
-        }
-        else if (front_metallic_texture_route)
-        {
-            SdkReplicatedStats metallic_stats{};
-            auto metallic_plan = sdk_build_metallic_base_plan(ctx, before0);
-            const auto& metallic_strokes = metallic_plan.strokes;
-            emit_progress("metallic_base_prepared", "prepared full-body metallic white UV grid", 1, 9, elapsed_now_ms(),
-                          "\"stroke_count\":" + std::to_string(metallic_strokes.size()) +
-                          ",\"grid\":" + std::to_string(metallic_plan.grid) +
-                          ",\"brush_radius\":" + std::to_string(metallic_plan.brush_radius));
-            emit_progress("metallic_base_apply_tick", "dispatching metallic ServerPaintBatch and PaintAtUVWithBrush echo", 1, 9, elapsed_now_ms(),
-                          "\"stroke_count\":" + std::to_string(metallic_strokes.size()));
-            const bool server_ok = sdk_dispatch_replicated_strokes(ctx, metallic_strokes, metallic_stats);
-            const bool local_echo_ok = sdk_apply_local_echo_strokes(ctx, metallic_strokes, metallic_stats);
-            if (!server_ok || !local_echo_ok)
-            {
-                metadata += sdk_stats_metadata("metallic_base", metallic_stats) +
-                            ",\"metallic_base_grid\":" + std::to_string(metallic_plan.grid) +
-                            ",\"metallic_base_texture_width\":" + std::to_string(metallic_plan.texture_width) +
-                            ",\"metallic_base_texture_height\":" + std::to_string(metallic_plan.texture_height) +
-                            ",\"metallic_base_brush_radius\":" + std::to_string(metallic_plan.brush_radius) +
-                            ",\"metallic_base_brush_footprint_texels\":" + std::to_string(metallic_plan.brush_footprint_texels) +
-                            ",\"metallic_base_visible\":false" +
-                            ",\"bridge_events\":[\"replicated_api_ready\",\"metallic_base_prepared\",\"metallic_base_apply_tick\",\"metallic_base_not_visible\"]";
-                return response_json(false,
-                                     "metallic_base_not_visible",
-                                     metallic_stats.server_sent,
-                                     std::max(1, metallic_stats.server_failed + metallic_stats.client_mirror_failed),
-                                     "metallic base did not reach required replicated+local visible path: " + metallic_stats.first_failure,
-                                     metadata);
-            }
-            Sleep(120);
-            auto after_metallic0 = sdk_export_channel_bytes(ref, ctx, 0);
-            auto after_metallic1 = sdk_export_channel_bytes(ref, ctx, 1);
-            auto after_metallic2 = sdk_export_channel_bytes(ref, ctx, 2);
-            const bool metallic_base_visible = metallic_stats.server_sent > 0 && metallic_stats.client_mirror_sent > 0;
-            const bool metallic_base_observed = metallic_base_visible &&
-                                                after_metallic0.ok &&
-                                                after_metallic1.ok &&
-                                                after_metallic2.ok;
-            metadata += sdk_stats_metadata("metallic_base", metallic_stats) +
-                        sdk_channel_metadata("after_metallic_albedo", after_metallic0) +
-                        sdk_channel_metadata("after_metallic_metallic", after_metallic1) +
-                        sdk_channel_metadata("after_metallic_roughness", after_metallic2) +
-                        ",\"metallic_base_grid\":" + std::to_string(metallic_plan.grid) +
-                        ",\"metallic_base_texture_width\":" + std::to_string(metallic_plan.texture_width) +
-                        ",\"metallic_base_texture_height\":" + std::to_string(metallic_plan.texture_height) +
-                        ",\"metallic_base_brush_radius\":" + std::to_string(metallic_plan.brush_radius) +
-                        ",\"metallic_base_brush_footprint_texels\":" + std::to_string(metallic_plan.brush_footprint_texels) +
-                        ",\"metallic_base_hash_changed\":" + json_bool((after_metallic0.ok && after_metallic0.hash != before0.hash) ||
-                                                                        (after_metallic1.ok && after_metallic1.hash != before1.hash) ||
-                                                                        (after_metallic2.ok && after_metallic2.hash != before2.hash)) +
-                        ",\"metallic_base_visible\":" + json_bool(metallic_base_visible) +
-                        ",\"metallic_base_observed\":" + json_bool(metallic_base_observed) +
-                        ",\"metallic_base_channel0_observed\":" + json_bool(after_metallic0.ok) +
-                        ",\"metallic_base_channel1_observed\":" + json_bool(after_metallic1.ok) +
-                        ",\"metallic_base_channel2_observed\":" + json_bool(after_metallic2.ok);
-            if (!metallic_base_observed)
-            {
-                metadata += ",\"bridge_events\":[\"replicated_api_ready\",\"metallic_base_prepared\",\"metallic_base_apply_tick\",\"metallic_base_not_visible\"]";
-                return response_json(false,
-                                     "metallic_base_not_visible",
-                                     metallic_stats.server_sent,
-                                     1,
-                                     "metallic base dispatch completed but required visible local echo/export observation failed",
-                                     metadata);
-            }
-            if (after_metallic0.ok)
-            {
-                before0 = after_metallic0;
-            }
-            if (after_metallic1.ok)
-            {
-                before1 = after_metallic1;
-            }
-            if (after_metallic2.ok)
-            {
-                before2 = after_metallic2;
-            }
-            bool metallic_base_settled = false;
-            bool metallic_base_changed_during_settle = false;
-            int metallic_base_settle_checks = 0;
-            auto settled_metallic0 = before0;
-            auto settled_metallic1 = before1;
-            auto settled_metallic2 = before2;
-            for (int settle_index = 0; settle_index < 8; ++settle_index)
-            {
-                Sleep(250);
-                auto check0 = sdk_export_channel_bytes(ref, ctx, 0);
-                auto check1 = sdk_export_channel_bytes(ref, ctx, 1);
-                auto check2 = sdk_export_channel_bytes(ref, ctx, 2);
-                ++metallic_base_settle_checks;
-                const bool same_as_previous = check0.ok && check1.ok && check2.ok &&
-                                              settled_metallic0.ok && settled_metallic1.ok && settled_metallic2.ok &&
-                                              check0.hash == settled_metallic0.hash &&
-                                              check1.hash == settled_metallic1.hash &&
-                                              check2.hash == settled_metallic2.hash;
-                if (check0.ok && check1.ok && check2.ok)
-                {
-                    metallic_base_changed_during_settle = metallic_base_changed_during_settle ||
-                                                         check0.hash != settled_metallic0.hash ||
-                                                         check1.hash != settled_metallic1.hash ||
-                                                         check2.hash != settled_metallic2.hash;
-                    settled_metallic0 = check0;
-                    settled_metallic1 = check1;
-                    settled_metallic2 = check2;
-                }
-                if (same_as_previous)
-                {
-                    metallic_base_settled = true;
-                    break;
-                }
-            }
-            if (settled_metallic0.ok)
-            {
-                before0 = settled_metallic0;
-            }
-            if (settled_metallic1.ok)
-            {
-                before1 = settled_metallic1;
-            }
-            if (settled_metallic2.ok)
-            {
-                before2 = settled_metallic2;
-            }
-            metadata += sdk_channel_metadata("settled_metallic_albedo", settled_metallic0) +
-                        sdk_channel_metadata("settled_metallic_metallic", settled_metallic1) +
-                        sdk_channel_metadata("settled_metallic_roughness", settled_metallic2) +
-                        ",\"metallic_base_settle_checks\":" + std::to_string(metallic_base_settle_checks) +
-                        ",\"metallic_base_settled_before_front\":" + json_bool(metallic_base_settled) +
-                        ",\"metallic_base_changed_during_settle\":" + json_bool(metallic_base_changed_during_settle);
-            emit_progress("metallic_base_visible", "metallic base visible path completed", 2, 9, elapsed_now_ms(),
-                          "\"server_sent\":" + std::to_string(metallic_stats.server_sent) +
-                          ",\"local_echo_strokes\":" + std::to_string(metallic_stats.client_mirror_sent));
-            emit_progress("metallic_base_done", "metallic base replicated+local echo completed", 2, 9, elapsed_now_ms(),
-                          "\"server_sent\":" + std::to_string(metallic_stats.server_sent) +
-                          ",\"local_echo_strokes\":" + std::to_string(metallic_stats.client_mirror_sent));
-            paint_api_probe_selected = "skipped_disabled_metallic_stream";
-            atlas_target_channel = meccha_sdk::EPaintChannel::Albedo;
-            atlas_use_world_position = false;
-            metadata += ",\"paint_api_probe_skipped\":true";
-        }
-        if (disabled_full_stream)
-        {
-            struct PaintApiProbeAttempt
-            {
-                const char* name;
-                meccha_sdk::EPaintChannel target_channel;
-                bool use_world_position;
-                double r;
-                double g;
-                double b;
-            };
-            const PaintApiProbeAttempt attempts[]{
-                {"uv_albedo", meccha_sdk::EPaintChannel::Albedo, false, 1.0, 0.0, 1.0},
-                {"world_albedo", meccha_sdk::EPaintChannel::Albedo, true, 0.0, 1.0, 1.0},
-                {"world_amr", meccha_sdk::EPaintChannel::AlbedoMetallicRoughness, true, 1.0, 1.0, 0.0},
-            };
-            bool any_probe_sent = false;
-            int probe_server_sent = 0;
-            int probe_server_failed = 0;
-            for (const auto& attempt : attempts)
-            {
-                SdkReplicatedStats probe_stats{};
-                auto probe_channel = sdk_make_channel(attempt.r,
-                                                      attempt.g,
-                                                      attempt.b,
-                                                      0.0,
-                                                      0.65,
-                                                      meccha_sdk::EPaintChannelApplyMode::Override);
-                auto probe_brush = sdk_copy_current_brush(ctx, 0.006);
-                std::vector<meccha_sdk::FPaintStroke> probe_strokes{};
-                if (attempt.use_world_position)
-                {
-                    probe_strokes.push_back(sdk_make_stroke(0.5,
-                                                            0.5,
-                                                            probe_channel,
-                                                            probe_brush,
-                                                            attempt.target_channel,
-                                                            ctx.body_world_position));
-                }
-                else
-                {
-                    probe_strokes.push_back(sdk_make_uv_stroke(0.5,
-                                                               0.5,
-                                                               probe_channel,
-                                                               probe_brush,
-                                                               attempt.target_channel));
-                }
-                const bool probe_sent = sdk_dispatch_replicated_strokes(ctx, probe_strokes, probe_stats);
-                Sleep(160);
-                auto probe_after0 = sdk_export_channel_bytes(ref, ctx, 0);
-                const bool probe_hash_changed = probe_after0.ok && probe_after0.hash != before0.hash;
-                any_probe_sent = any_probe_sent || probe_sent;
-                probe_server_sent += probe_stats.server_sent;
-                probe_server_failed += probe_stats.server_failed;
-                const std::string probe_prefix = std::string("paint_api_probe_") + attempt.name;
-                metadata += sdk_stats_metadata(probe_prefix.c_str(), probe_stats);
-                metadata += ",\"" + probe_prefix + "_sent\":" + json_bool(probe_sent) +
-                            ",\"" + probe_prefix + "_hash_changed\":" + json_bool(probe_hash_changed) +
-                            ",\"" + probe_prefix + "_after_hash\":\"" + std::to_string(probe_after0.hash) + "\"";
-                if (probe_sent && probe_hash_changed)
-                {
-                    paint_api_probe_selected = attempt.name;
-                    atlas_target_channel = attempt.target_channel;
-                    atlas_use_world_position = attempt.use_world_position;
-                    before0 = probe_after0;
-                    break;
-                }
-            }
-            metadata += std::string(",\"paint_api_probe_sent\":") + json_bool(any_probe_sent) +
-                        ",\"paint_api_probe_hash_changed\":" + json_bool(!paint_api_probe_selected.empty()) +
-                        ",\"paint_api_probe_selected\":\"" + json_escape(paint_api_probe_selected) + "\"" +
-                        ",\"paint_api_probe_server_sent\":" + std::to_string(probe_server_sent) +
-                        ",\"paint_api_probe_server_failed\":" + std::to_string(probe_server_failed) +
-                        ",\"atlas_use_world_position\":" + json_bool(atlas_use_world_position) +
-                        ",\"atlas_target_channel\":\"" + std::string(atlas_target_channel == meccha_sdk::EPaintChannel::Albedo ? "Albedo" : "AlbedoMetallicRoughness") + "\"";
-            if (!any_probe_sent)
-            {
-                emit_progress("paint_api_probe_failed", "all ServerPaintBatch probe dispatches failed", 1, 8, elapsed_now_ms());
-                metadata += ",\"bridge_events\":[\"replicated_api_ready\",\"paint_api_probe_failed\"]";
-                return response_json(false,
-                                     "paint_api_probe_failed",
-                                     probe_server_sent,
-                                     std::max(1, probe_server_failed),
-                                     "all ServerPaintBatch probe dispatches failed",
-                                     metadata);
-            }
-            if (paint_api_probe_selected.empty())
-            {
-                paint_api_probe_selected = "visual_unverified_world_albedo";
-                atlas_target_channel = meccha_sdk::EPaintChannel::Albedo;
-                atlas_use_world_position = true;
-                metadata += std::string(",\"paint_api_probe_observation_mismatch\":true") +
-                            ",\"paint_api_probe_note\":\"ServerPaintBatch probes were dispatched but ExportChannelToBytes did not observe albedo hash changes; continuing with world-position albedo stream because visual probe may still draw\"";
-                emit_progress("paint_api_probe_unverified", "ServerPaintBatch probes sent; export hash unchanged; continuing with visual-unverified stream", 1, 8, elapsed_now_ms());
-            }
-            metadata += std::string(",\"paint_api_probe_selected_final\":\"") + json_escape(paint_api_probe_selected) + "\"" +
-                        ",\"atlas_use_world_position_final\":" + json_bool(atlas_use_world_position) +
-                        ",\"atlas_target_channel_final\":\"" + std::string(atlas_target_channel == meccha_sdk::EPaintChannel::Albedo ? "Albedo" : "AlbedoMetallicRoughness") + "\"";
-            emit_progress("paint_api_probe_done", "ServerPaintBatch probe route selected", 1, 8, elapsed_now_ms(),
-                                  "\"paint_api_probe_selected\":\"" + json_escape(paint_api_probe_selected) + "\"");
-        }
-
-        SdkNativeFrontSampleResult native_front{};
-        SdkFrontCaptureProbe front_capture{};
-        SdkReplicatedStats atlas_stats{};
-        const std::string sampling_started_stage = static_hybrid_probe ? "hybrid_front_sampling_started" : (front_paint_route ? "front_sampling_started" : "atlas_sampling_started");
-        const std::string sampling_done_stage = static_hybrid_probe ? "hybrid_front_sampling_done" : (front_paint_route ? "front_sampling_done" : "atlas_sampling_done");
-        const std::string capture_started_stage = static_hybrid_probe ? "hybrid_front_capture_started" : (front_paint_route ? "front_capture_started" : "atlas_capture_started");
-        const std::string capture_done_stage = static_hybrid_probe ? "hybrid_front_capture_done" : (front_paint_route ? "front_capture_done" : "atlas_capture_done");
-        const std::string atlas_assembled_stage = static_hybrid_probe ? "hybrid_atlas_assembled" : (front_paint_route ? "front_atlas_assembled" : "atlas_assembled");
-        const std::string strokes_generated_stage = front_paint_route ? "front_strokes_generated" : "atlas_strokes_generated";
-        const std::string stroke_budget_stage = front_paint_route ? "front_stroke_budget_exceeded" : "atlas_stroke_budget_exceeded";
-        std::string bridge_events = static_hybrid_probe
-                                        ? "\"bridge_events\":[\"static_hybrid_probe_ready\""
-                                        : (front_texture_import
-                                        ? "\"bridge_events\":[\"texture_import_api_ready\""
-                                        : "\"bridge_events\":[\"replicated_api_ready\"");
-        if (disabled_metallic_stream)
-        {
-            bridge_events += ",\"metallic_base_prepared\",\"metallic_base_apply_tick\",\"metallic_base_visible\",\"metallic_base_done\"";
-        }
-        else if (disabled_full_stream)
-        {
-            bridge_events += ",\"paint_api_probe_done\"";
-        }
-        bridge_events += ",\"" + sampling_started_stage + "\"";
-        if (!kEnableNativeSceneCaptureForF10)
-        {
-            emit_progress(front_paint_route ? "front_capture_unavailable" : "atlas_capture_unavailable", "native capture backend is disabled", 1, 8, elapsed_now_ms());
-            metadata += std::string(",\"front_capture_backend_enabled\":false") +
-                        ",\"front_capture_failure\":\"front_capture_backend_disabled_after_d3d12_crash\"" +
-                        ",\"stroke_count\":0" +
-                        "," + bridge_events + ",\"atlas_capture_unavailable\"]";
-            return response_json(false,
-                                 "atlas_capture_unavailable",
-                                 0,
-                                 1,
-                                 "native SceneCapture2D/CreateRenderTarget2D backend disabled; no paint was dispatched",
-                                 metadata);
-        }
-        emit_progress(sampling_started_stage, "collecting native front surface samples", front_paint_route ? 3 : 2, front_paint_route ? 9 : 8, elapsed_now_ms());
-        native_front = sdk_collect_native_front_samples(ref, ctx, {});
-        const auto front_bbox_width_px = std::max(0.0, (native_front.bbox_max_nx - native_front.bbox_min_nx) * static_cast<double>(native_front.viewport_width));
-        const auto front_bbox_height_px = std::max(0.0, (native_front.bbox_max_ny - native_front.bbox_min_ny) * static_cast<double>(native_front.viewport_height));
-        const auto front_bbox_area_px = front_bbox_width_px * front_bbox_height_px;
-        metadata += sdk_native_front_metadata(native_front) +
-                    ",\"front_bbox\":\"" + std::to_string(native_front.bbox_min_nx) + "," + std::to_string(native_front.bbox_min_ny) +
-                    "-" + std::to_string(native_front.bbox_max_nx) + "," + std::to_string(native_front.bbox_max_ny) + "\"" +
-                    ",\"front_bbox_width_px\":" + std::to_string(front_bbox_width_px) +
-                    ",\"front_bbox_height_px\":" + std::to_string(front_bbox_height_px) +
-                    ",\"front_bbox_area_px\":" + std::to_string(front_bbox_area_px) +
-                    ",\"viewport\":\"" + std::to_string(native_front.viewport_width) + "x" + std::to_string(native_front.viewport_height) + "\"" +
-                    ",\"capture_fov_hint\":\"deproject_horizontal\"";
-        if (native_front.failure == "front_sampling_timeout_before_bridge_timeout")
-        {
-            emit_progress("front_sampling_timeout_before_bridge_timeout", "front sampling hit native time budget", front_paint_route ? 3 : 2, front_paint_route ? 9 : 8, elapsed_now_ms(),
-                          "\"front_hits\":" + std::to_string(native_front.samples.size()) +
-                              ",\"deproject_calls\":" + std::to_string(native_front.deproject_calls) +
-                              ",\"hit_test_calls\":" + std::to_string(native_front.hit_test_calls) +
-                              ",\"sampling_backend\":\"" + json_escape(native_front.sampling_backend) + "\"");
-            metadata += std::string(",\"stroke_count\":0") +
-                        "," + bridge_events + ",\"front_sampling_timeout_before_bridge_timeout\"]";
-            return response_json(false,
-                                 "front_sampling_timeout_before_bridge_timeout",
-                                 0,
-                                 1,
-                                 "front sampling exceeded native time budget before bridge timeout; no import/paint was dispatched",
-                                 metadata);
-        }
-        if (static_cast<int>(native_front.samples.size()) < native_front.min_front_hits)
-        {
-            emit_progress("atlas_sampling_insufficient", "not enough valid surface hits", front_paint_route ? 3 : 2, front_paint_route ? 9 : 8, elapsed_now_ms(),
-                                  "\"front_hits\":" + std::to_string(native_front.samples.size()));
-            metadata += std::string(",\"stroke_count\":0") +
-                        "," + bridge_events + ",\"atlas_sampling_insufficient\"]";
-            return response_json(false,
-                                 "atlas_sampling_insufficient",
-                                 0,
-                                 1,
-                                 "native surface samples are insufficient; no paint was dispatched",
-                                 metadata);
-        }
-
-        bridge_events += ",\"" + sampling_done_stage + "\",\"" + capture_started_stage + "\"";
-        emit_progress(sampling_done_stage, "native front surface sampling completed", front_paint_route ? 4 : 3, front_paint_route ? 9 : 8, elapsed_now_ms(),
-                              "\"front_hits\":" + std::to_string(native_front.samples.size()));
-        front_capture = sdk_probe_front_capture_backend(ref, ctx, native_front);
-        emit_progress(capture_started_stage, "capturing hidden/background colors", front_paint_route ? 5 : 4, front_paint_route ? 9 : 8, elapsed_now_ms(),
-                              "\"front_hits\":" + std::to_string(native_front.samples.size()));
-        metadata += sdk_front_capture_metadata(front_capture);
-        auto captured_front = sdk_capture_front_colors(ref, ctx, native_front, before0.width, before0.height);
-        metadata += sdk_capture_metadata(captured_front) +
-                    ",\"front_capture_resolution_source\":\"" + json_escape(captured_front.capture_resolution_source) + "\"" +
-                    ",\"front_capture_target_width\":" + std::to_string(before0.width) +
-                    ",\"front_capture_target_height\":" + std::to_string(before0.height);
-        if (!captured_front.ok)
-        {
-            const std::string failure_stage = captured_front.failure == "front_texture_bulk_calibration_unavailable"
-                                                  ? "front_texture_bulk_calibration_unavailable"
-                                                  : (front_paint_route ? "front_capture_unavailable" : "atlas_capture_unavailable");
-            emit_progress(failure_stage, "front capture/readback failed", front_paint_route ? 5 : 4, front_paint_route ? 9 : 8, elapsed_now_ms());
-            metadata += std::string(",\"stroke_count\":0") +
-                        "," + bridge_events + ",\"" + failure_stage + "\"]";
-            return response_json(false,
-                                 failure_stage.c_str(),
-                                 0,
-                                 1,
-                                 "front capture/readback failed; no paint was dispatched: " + captured_front.failure,
-                                 metadata);
-        }
-        bridge_events += ",\"" + capture_done_stage + "\"";
-        emit_progress(capture_done_stage, "front capture/readback completed", front_paint_route ? 6 : 5, front_paint_route ? 9 : 8, elapsed_now_ms(),
-                              "\"front_hits\":" + std::to_string(captured_front.samples.size()));
-
-        if (disabled_sample_stream)
-        {
-            constexpr int sample_stroke_cap = 120000;
-            std::vector<meccha_sdk::FPaintStroke> sample_strokes{};
-            sample_strokes.reserve(captured_front.samples.size());
-            for (const auto& sample : captured_front.samples)
-            {
-                if (static_cast<int>(sample_strokes.size()) >= sample_stroke_cap)
-                {
-                    break;
-                }
-                auto brush = sdk_copy_current_brush(ctx, std::max(0.0015, std::min(0.0060, sample.radius)));
-                const auto channel = sdk_make_channel(clamp01(sample.r),
-                                                      clamp01(sample.g),
-                                                      clamp01(sample.b),
-                                                      0.0,
-                                                      0.65,
-                                                      meccha_sdk::EPaintChannelApplyMode::Override);
-                sample_strokes.push_back(sdk_make_uv_stroke(clamp01(sample.u),
-                                                            clamp01(sample.v),
-                                                            channel,
-                                                            brush,
-                                                            meccha_sdk::EPaintChannel::Albedo));
-            }
-            metadata += std::string(",\"front_sample_paint_source\":\"bulk_capture_front_samples_no_texture_atlas\"") +
-                        ",\"front_sample_paint_target_channel\":\"Albedo\"" +
-                        ",\"front_sample_paint_metallic_overwrite\":false" +
-                        ",\"front_sample_paint_roughness_overwrite\":false" +
-                        ",\"front_sample_paint_texture_import_used\":false" +
-                        ",\"front_sample_paint_atlas_assembly_used\":false" +
-                        ",\"front_sample_paint_requested_strokes\":" + std::to_string(sample_strokes.size()) +
-                        ",\"front_sample_paint_stroke_cap\":" + std::to_string(sample_stroke_cap);
-            if (sample_strokes.empty() || static_cast<int>(captured_front.samples.size()) > sample_stroke_cap)
-            {
-                const char* failure_stage = sample_strokes.empty() ? "front_sample_paint_no_strokes" : "front_sample_paint_budget_exceeded";
-                emit_progress(failure_stage, "front sample paint stream cannot dispatch", 8, 9, elapsed_now_ms(),
-                              "\"sample_strokes\":" + std::to_string(sample_strokes.size()) +
-                                  ",\"stroke_cap\":" + std::to_string(sample_stroke_cap));
-                metadata += "," + bridge_events + ",\"" + failure_stage + "\"]";
-                return response_json(false,
-                                     failure_stage,
-                                     0,
-                                     1,
-                                     "front sample paint stream did not dispatch; no texture/import fallback was used",
-                                     metadata);
-            }
-
-            SdkReplicatedStats sample_stats{};
-            bridge_events += ",\"front_sample_strokes_generated\",\"replicated_stream_started\"";
-            emit_progress("front_sample_strokes_generated", "front sample paint strokes generated", 8, 9, elapsed_now_ms(),
-                          "\"stroke_count\":" + std::to_string(sample_strokes.size()));
-            emit_progress("replicated_stream_started", "dispatching front sample ServerPaintBatch stream", 8, 9, elapsed_now_ms(),
-                          "\"stroke_count\":" + std::to_string(sample_strokes.size()));
-
-            const int raw_batch_limit = safe_read<int>(ctx.component + meccha_sdk::FieldOffsets::RuntimePaintable_MaxReplicatedPaintStrokesPerTick, 24);
-            const int batch_limit = std::max(1, std::min(raw_batch_limit > 0 ? raw_batch_limit : 24, 256));
-            const int server_batches_total = static_cast<int>((sample_strokes.size() + static_cast<std::size_t>(batch_limit) - 1) / static_cast<std::size_t>(batch_limit));
-            int last_stream_percent = -1;
-            const auto stream_started = std::chrono::steady_clock::now();
-            auto stream_progress = [&](const SdkReplicatedStats& stats, int server_sent, int total) -> bool {
-                const int percent = total > 0 ? std::max(0, std::min(100, static_cast<int>((static_cast<long long>(server_sent) * 100LL) / total))) : 100;
-                if (percent != last_stream_percent)
-                {
-                    last_stream_percent = percent;
-                    const auto elapsed_ms = elapsed_now_ms();
-                    const auto stream_elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - stream_started).count();
-                    const double eta_ms = percent > 0 ? std::max(0.0, (stream_elapsed_ms / (static_cast<double>(percent) / 100.0)) - stream_elapsed_ms) : 0.0;
-                    emit_progress("replicated_stream_progress",
-                                  "dispatching front sample ServerPaintBatch stream",
-                                  percent,
-                                  100,
-                                  elapsed_ms,
-                                  "\"server_batches\":" + std::to_string(server_batches_total) +
-                                      ",\"server_batch_index\":" + std::to_string(stats.batch_calls) +
-                                      ",\"server_sent\":" + std::to_string(server_sent) +
-                                      ",\"stroke_count\":" + std::to_string(total) +
-                                      ",\"eta_ms\":" + std::to_string(eta_ms));
-                }
-                return elapsed_now_ms() < 210000.0;
-            };
-            if (!sdk_dispatch_replicated_strokes_with_progress(ctx, sample_strokes, sample_stats, stream_progress))
-            {
-                const std::string failure_stage = sample_stats.first_failure == "server_stream_timeout_before_bridge_timeout" ?
-                    "server_stream_timeout_before_bridge_timeout" :
-                    "server_batch_failed";
-                emit_progress(failure_stage, "front sample ServerPaintBatch stream failed", 8, 9, elapsed_now_ms(),
-                              "\"server_sent\":" + std::to_string(sample_stats.server_sent) +
-                                  ",\"server_failed\":" + std::to_string(sample_stats.server_failed));
-                metadata += sdk_stats_metadata("front_sample_paint", sample_stats) +
-                            "," + bridge_events + ",\"" + failure_stage + "\"]";
-                return response_json(false,
-                                     failure_stage.c_str(),
-                                     sample_stats.server_sent,
-                                     std::max(1, sample_stats.server_failed),
-                                     "front sample paint ServerPaintBatch failed: " + sample_stats.first_failure,
-                                     metadata);
-            }
-
-            bridge_events += ",\"replicated_stream_done\"";
-            emit_progress("replicated_stream_done", "front sample ServerPaintBatch stream dispatched", 9, 9, elapsed_now_ms(),
-                          "\"server_sent\":" + std::to_string(sample_stats.server_sent));
-            Sleep(100);
-            auto after0 = sdk_export_channel_bytes(ref, ctx, 0);
-            const bool hash_changed = after0.ok && after0.hash != before0.hash;
-            const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-            metadata += sdk_stats_metadata("front_sample_paint", sample_stats) +
-                        sdk_channel_metadata("after_albedo", after0) +
-                        ",\"hash_before\":\"" + std::to_string(before0.hash) + "\"" +
-                        ",\"hash_after\":\"" + std::to_string(after0.hash) + "\"" +
-                        ",\"hash_changed\":" + json_bool(hash_changed) +
-                        ",\"server_rpc\":\"ServerPaintBatch\"" +
-                        ",\"server_batches\":" + std::to_string(sample_stats.batch_calls) +
-                        ",\"server_sent\":" + std::to_string(sample_stats.server_sent) +
-                        ",\"server_failed\":" + std::to_string(sample_stats.server_failed) +
-                        ",\"elapsed_ms\":" + std::to_string(elapsed);
-            metadata += "," + bridge_events + ",\"paint_done\"]";
-            return response_json(true,
-                                 "paint_done",
-                                 sample_stats.server_sent,
-                                 0,
-                                 "front sample paint stream dispatched without texture import",
-                                 metadata);
-        }
-
-        if (front_texture_import)
-        {
-            int material_samples = 0;
-            int material_valid = 0;
-            int mirror_suspect = 0;
-            double metallic_min = 1.0;
-            double metallic_max = 0.0;
-            double metallic_sum = 0.0;
-            double source_metallic_min = 1.0;
-            double source_metallic_max = 0.0;
-            double source_metallic_sum = 0.0;
-            double roughness_min = 1.0;
-            double roughness_max = 0.0;
-            double roughness_sum = 0.0;
-            for (auto& sample : captured_front.samples)
-            {
-                ++material_samples;
-                const auto source_metallic_value = clamp01(sample.metallic);
-                const auto metallic_value = sample.metallic;
-                const auto roughness_value = sample.roughness;
-                ++material_valid;
-                if (metallic_value >= 0.95 && roughness_value <= 0.05)
-                {
-                    ++mirror_suspect;
-                }
-                source_metallic_min = std::min(source_metallic_min, source_metallic_value);
-                source_metallic_max = std::max(source_metallic_max, source_metallic_value);
-                source_metallic_sum += source_metallic_value;
-                metallic_min = std::min(metallic_min, metallic_value);
-                metallic_max = std::max(metallic_max, metallic_value);
-                metallic_sum += metallic_value;
-                roughness_min = std::min(roughness_min, roughness_value);
-                roughness_max = std::max(roughness_max, roughness_value);
-                roughness_sum += roughness_value;
-            }
-            const auto denom = static_cast<double>(std::max(1, material_samples));
-            metadata += std::string(",\"front_albedo_source\":\"bulk_calibrated_srgb_raw_exact\"") +
-                        ",\"front_material_source\":\"preserve_existing_channels_no_material_import\"" +
-                        ",\"front_material_trace_evidence_ported\":false" +
-                        ",\"front_material_compensation_passes\":0" +
-                        ",\"front_material_compensation_backend\":\"disabled_until_trace_evidence_ported\"" +
-                        ",\"front_material_channels_imported\":false" +
-                        ",\"front_color_sanitize_used\":false" +
-                        ",\"front_color_lift_used\":false" +
-                        ",\"front_color_raw_srgb_preserved\":true" +
-                        ",\"front_material_metallic_override\":\"none\"" +
-                        ",\"front_material_samples\":" + std::to_string(material_samples) +
-                        ",\"front_material_valid\":" + std::to_string(material_valid) +
-                        ",\"front_material_mirror_suspect\":" + json_bool(material_samples > 0 && mirror_suspect * 4 >= material_samples * 3) +
-                        ",\"front_material_mirror_suspect_samples\":" + std::to_string(mirror_suspect) +
-                        ",\"front_source_metallic_min\":" + std::to_string(material_samples > 0 ? source_metallic_min : 0.0) +
-                        ",\"front_source_metallic_avg\":" + std::to_string(source_metallic_sum / denom) +
-                        ",\"front_source_metallic_max\":" + std::to_string(material_samples > 0 ? source_metallic_max : 0.0) +
-                        ",\"front_metallic_min\":" + std::to_string(material_samples > 0 ? metallic_min : 0.0) +
-                        ",\"front_metallic_avg\":" + std::to_string(metallic_sum / denom) +
-                        ",\"front_metallic_max\":" + std::to_string(material_samples > 0 ? metallic_max : 0.0) +
-                        ",\"front_roughness_min\":" + std::to_string(material_samples > 0 ? roughness_min : 0.0) +
-                        ",\"front_roughness_avg\":" + std::to_string(roughness_sum / denom) +
-                        ",\"front_roughness_max\":" + std::to_string(material_samples > 0 ? roughness_max : 0.0);
-        }
-
-        SdkAtlasSideBackResult side_back{};
-        std::vector<FrontSample> atlas_samples = captured_front.samples;
-        const bool mirror_side_back_for_texture = false;
-        const bool collect_side_back_for_texture = false;
-        const bool collect_static_hybrid_side = static_hybrid_probe;
-        if (mirror_side_back_for_texture)
-        {
-            side_back = sdk_build_front_uv_mirror_side_back_samples(captured_front.samples, before0.width, before0.height);
-            metadata += sdk_side_back_metadata(side_back) +
-                        ",\"side_back_query_skipped\":true";
-            bridge_events += ",\"atlas_side_back_done\"";
-            emit_progress("atlas_side_back_done", "side/back UV mirror extension completed", 6, 8, elapsed_now_ms(),
-                                  "\"side_back_hits\":" + std::to_string(side_back.samples.size()) +
-                                      ",\"side_back_backend\":\"front_uv_mirror_fast\"");
-            atlas_samples.insert(atlas_samples.end(), side_back.samples.begin(), side_back.samples.end());
-        }
-        else if (collect_side_back_for_texture)
-        {
-            side_back = sdk_collect_atlas_side_back_samples(ref, ctx, native_front, captured_front.samples, before0.width, before0.height);
-            constexpr bool kEnableUnsafeFrontTextureReuseForBack = false;
-            if (kEnableUnsafeFrontTextureReuseForBack && texture_sync_probe && side_back.back_hits == 0)
-            {
-                auto front_reuse = sdk_build_front_uv_mirror_side_back_samples(captured_front.samples, before0.width, before0.height);
-                side_back.front_reuse_used = !front_reuse.samples.empty();
-                side_back.front_reuse_samples = static_cast<int>(front_reuse.samples.size());
-                for (auto& sample : front_reuse.samples)
-                {
-                    sample.atlas_priority = std::max(sample.atlas_priority, sample.floor_like ? 9 : 8);
-                    sample.atlas_radius = std::max(sample.atlas_radius, 4);
-                    sample.atlas_weight = std::max(sample.atlas_weight, sample.floor_like ? 58.0 : 50.0);
-                    side_back.samples.push_back(sample);
-                }
-                side_back.back_hits += side_back.front_reuse_samples;
-                if (side_back.front_reuse_used && (side_back.failure == "side_back_unavailable" ||
-                                                   side_back.failure == "side_back_query_no_hit" ||
-                                                   side_back.failure == "side_back_time_budget_exhausted_no_samples" ||
-                                                   side_back.failure == "side_back_attempt_budget_exhausted_no_samples"))
-                {
-                    side_back.failure = "ok_front_texture_reuse_for_back";
-                }
-            }
-            metadata += sdk_side_back_metadata(side_back) +
-                        ",\"side_back_query_skipped\":false";
-            constexpr int min_side_back_hits = 64;
-            if (!diagnostic_import && static_cast<int>(side_back.samples.size()) < min_side_back_hits)
-            {
-                emit_progress("atlas_side_back_insufficient", "side/back samples are insufficient", 5, 8, elapsed_now_ms(),
-                                      "\"side_back_hits\":" + std::to_string(side_back.samples.size()));
-                metadata += ",\"front_hits\":" + std::to_string(captured_front.samples.size()) +
-                            ",\"stroke_count\":0" +
-                            "," + bridge_events + ",\"atlas_side_back_insufficient\"]";
-                return response_json(false,
-                                     "atlas_side_back_insufficient",
-                                     0,
-                                     1,
-                                     "side/back samples are insufficient; no paint was dispatched",
-                                     metadata);
-            }
-            bridge_events += ",\"atlas_side_back_done\"";
-            emit_progress("atlas_side_back_done", "side/back sample extension completed", 6, 8, elapsed_now_ms(),
-                                  "\"side_back_hits\":" + std::to_string(side_back.samples.size()) +
-                                      ",\"side_back_backend\":\"screen_space_brush_query_virtual_views_dense_small_splat\"");
-            atlas_samples.insert(atlas_samples.end(), side_back.samples.begin(), side_back.samples.end());
-        }
-        else if (collect_static_hybrid_side)
-        {
-            side_back = sdk_collect_atlas_side_back_samples(ref, ctx, native_front, captured_front.samples, before0.width, before0.height, true);
-            metadata += sdk_side_back_metadata(side_back) +
-                        ",\"static_hybrid_side_only\":true" +
-                        ",\"static_hybrid_back_skipped\":true" +
-                        ",\"static_hybrid_side_color_source\":\"front_nearest_proxy_until_inverse_matte_capture\"";
-            bridge_events += ",\"hybrid_side_sampling_done\"";
-            emit_progress("hybrid_side_sampling_done", "static hybrid side samples collected", 6, 8, elapsed_now_ms(),
-                              "\"front_hits\":" + std::to_string(captured_front.samples.size()) +
-                                  ",\"side_hits\":" + std::to_string(side_back.side_hits) +
-                                  ",\"back_hits\":0" +
-                                  ",\"side_attempts\":" + std::to_string(side_back.attempts));
-            atlas_samples.insert(atlas_samples.end(), side_back.samples.begin(), side_back.samples.end());
-        }
-        else
-        {
-            metadata += std::string(",\"side_back_attempts\":0,\"side_back_success\":0,\"side_back_owner_hits\":0,\"side_back_uv_hits\":0") +
-                        ",\"side_hits\":0,\"back_hits\":0,\"side_back_duplicate_texels\":0,\"side_back_nearest_sources\":0" +
-                        ",\"side_back_failure\":\"" + std::string(color_transfer_probe ? "skipped_color_transfer_probe" :
-                                                                  (front_texture_import ? "skipped_front_texture_route" : "skipped_front_only_route")) + "\"";
-        }
-
-        auto make_filled_channel = [](const ChannelBuffer& source, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-            auto bytes = source.bytes;
-            if (bytes.empty())
-            {
-                return bytes;
-            }
-            if (source.bytes_per_pixel >= 4 || bytes.size() % 4 == 0)
-            {
-                for (std::size_t offset = 0; offset + 3 < bytes.size(); offset += 4)
-                {
-                    bytes[offset + 0] = r;
-                    bytes[offset + 1] = g;
-                    bytes[offset + 2] = b;
-                    bytes[offset + 3] = 255;
-                }
-            }
-            else
-            {
-                std::fill(bytes.begin(), bytes.end(), r);
-            }
-            return bytes;
-        };
-        ChannelBuffer atlas_base_albedo = before0;
-        ChannelBuffer atlas_base_metallic = before1;
-        ChannelBuffer atlas_base_roughness = before2;
-        if (front_texture_import)
-        {
-            atlas_base_albedo = pre_metallic_albedo;
-            atlas_base_metallic = pre_metallic_metallic;
-            atlas_base_roughness = pre_metallic_roughness;
-        }
-        if (color_transfer_probe)
-        {
-            atlas_base_albedo.bytes = make_filled_channel(atlas_base_albedo, 255, 0, 255);
-        }
-        auto atlas = sdk_assemble_texture_atlas(atlas_base_albedo, atlas_base_metallic, atlas_base_roughness, atlas_samples);
-        metadata += sdk_atlas_metadata(atlas) +
-                    sdk_write_atlas_debug_artifacts(atlas) +
-                    ",\"atlas_base_source\":\"" + std::string(color_transfer_probe ? "magenta_unpainted_sentinel_color_transfer_probe" :
-                                                              (front_texture_import ? "pre_metallic_exported_channels_preserve_unpainted_texture_diagnostic" : "current_channels")) + "\"" +
-                    ",\"color_probe_unpainted_sentinel\":\"" + std::string(color_transfer_probe ? "magenta_ff00ff" : "none") + "\"" +
-                    ",\"front_texture_back_metallic_white\":false" +
-                    ",\"front_texture_side_back_texture_skipped\":" + json_bool(front_texture_import && !texture_sync_probe) +
-                    ",\"front_texture_unpainted_source\":\"" + std::string(front_texture_import ? "pre_metallic_exported_channels" : "current_channels") + "\"" +
-                    ",\"front_texture_white_base_used\":false" +
-                    ",\"atlas_base_hash\":\"" + std::to_string(atlas_base_albedo.hash) + "\"" +
-                    ",\"atlas_base_metallic_hash\":\"" + std::to_string(atlas_base_metallic.hash) + "\"" +
-                    ",\"atlas_base_roughness_hash\":\"" + std::to_string(atlas_base_roughness.hash) + "\"" +
-                    ",\"front_hits\":" + std::to_string(captured_front.samples.size()) +
-                    ",\"unique_atlas_texels\":" + std::to_string(atlas.stats.direct_texels) +
-                    ",\"target_unique_atlas_texels\":500000" +
-                    ",\"precision_profile\":\"max_texture_probe\"" +
-                    ",\"side_back_hits\":" + std::to_string(side_back.samples.size());
-        if (static_hybrid_probe)
-        {
-            metadata += sdk_write_static_hybrid_artifacts(atlas, static_cast<int>(captured_front.samples.size()), side_back) +
-                        ",\"static_hybrid_output\":\"visual_texture_sync_probe\"" +
-                        ",\"static_hybrid_import_used\":true" +
-                        ",\"static_hybrid_texture_sync_used\":true" +
-                        ",\"static_hybrid_paint_used\":false" +
-                        ",\"static_hybrid_mesh_chart_available\":false" +
-                        ",\"static_hybrid_mesh_chart_failure\":\"mesh_chart_unavailable\"" +
-                        ",\"static_hybrid_back_applied\":false";
-            bridge_events += ",\"hybrid_artifacts_done\"";
-            emit_progress("hybrid_artifacts_done", "static hybrid front/side artifacts generated", 8, 8, elapsed_now_ms(),
-                          "\"front_hits\":" + std::to_string(captured_front.samples.size()) +
-                              ",\"side_hits\":" + std::to_string(side_back.side_hits) +
-                              ",\"direct_texels\":" + std::to_string(atlas.stats.direct_texels));
-        }
-        if (strict_38923_front_texture_import && atlas.stats.direct_texels < 500000)
-        {
-            emit_progress("front_texture_quality_warning", "front texture direct coverage is below 38923 parity floor; diagnostic import will continue", front_metallic_texture_route ? 7 : 6, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                          "\"direct_texels\":" + std::to_string(atlas.stats.direct_texels) +
-                              ",\"min_direct_texels\":500000");
-            metadata += std::string(",\"front_texture_direct_coverage_below_parity\":true") +
-                        ",\"front_texture_min_direct_texels\":500000";
-        }
-        if (!atlas.ok || atlas.stats.direct_texels < 2048)
-        {
-            emit_progress("atlas_quality_failed", "atlas assembly quality failed", front_metallic_texture_route ? 7 : 6, front_metallic_texture_route ? 9 : 8, elapsed_now_ms());
-            metadata += std::string(",\"stroke_count\":0") +
-                        "," + bridge_events + ",\"atlas_quality_failed\"]";
-            return response_json(false,
-                                 "atlas_quality_failed",
-                                 0,
-                                 1,
-                                 "atlas assembly quality failed: " + atlas.failure,
-                                 metadata);
-        }
-        bridge_events += ",\"" + atlas_assembled_stage + "\"";
-        emit_progress(atlas_assembled_stage, "front CPU atlas assembled", front_metallic_texture_route ? 7 : 7, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                              "\"direct_texels\":" + std::to_string(atlas.stats.direct_texels) +
-                                  ",\"target_unique_atlas_texels\":500000");
-
-        if (diagnostic_import)
-        {
-            const std::string import_started_stage = front_texture_import ? "front_texture_import_started" : "diagnostic_import_started";
-            const std::string import_done_stage = front_texture_import ? "front_texture_import_done" : "diagnostic_import_done";
-            const std::string import_failed_stage = front_texture_import ? "front_texture_import_failed" : "diagnostic_import_failed";
-            const std::string import_not_observed_stage = front_texture_import ? "front_texture_import_not_observed" : "diagnostic_import_not_observed";
-            const bool texture_sync_api_available = ctx.relay_texture_sync_to_server_function != 0 ||
-                                                    ctx.request_full_texture_sync_function != 0 ||
-                                                    ctx.server_request_texture_sync_function != 0 ||
-                                                    ctx.server_relay_texture_sync_function != 0;
-            if (texture_sync_probe && !texture_sync_api_available)
-            {
-                emit_progress("texture_sync_api_unavailable", "no runtime texture sync RPC is available; local import skipped", 8, 9, elapsed_now_ms());
-                metadata += std::string(",\"texture_sync_relay_available\":") + json_bool(ctx.relay_texture_sync_to_server_function != 0) +
-                            ",\"texture_sync_request_full_available\":" + json_bool(ctx.request_full_texture_sync_function != 0) +
-                            ",\"texture_sync_server_request_available\":" + json_bool(ctx.server_request_texture_sync_function != 0) +
-                            ",\"texture_sync_server_relay_available\":" + json_bool(ctx.server_relay_texture_sync_function != 0) +
-                            "," + bridge_events + ",\"texture_sync_api_unavailable\"]";
-                return response_json(false,
-                                     "texture_sync_api_unavailable",
-                                     0,
-                                     1,
-                                     "runtime texture sync API is unavailable; local texture import was skipped",
-                                     metadata);
-            }
-            bridge_events += ",\"" + import_started_stage + "\"";
-            emit_progress(import_started_stage, "importing texture only for strict sync probe", front_metallic_texture_route ? 8 : 7, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                          "\"front_hits\":" + std::to_string(captured_front.samples.size()));
-            std::string import_failure0{};
-            std::string import_failure1{};
-            std::string import_failure2{};
-            enum class SdkAlbedoTransfer
-            {
-                IdentitySrgb,
-                SrgbToLinear,
-                IdentitySrgbNoCompensation,
-            };
-            auto transfer_label = [](SdkAlbedoTransfer transfer) -> const char* {
-                switch (transfer)
-                {
-                case SdkAlbedoTransfer::IdentitySrgb: return "identity_srgb";
-                case SdkAlbedoTransfer::SrgbToLinear: return "srgb_to_linear";
-                case SdkAlbedoTransfer::IdentitySrgbNoCompensation: return "identity_srgb_no_compensation";
-                }
-                return "unknown";
-            };
-            auto make_albedo_import_bytes = [&](SdkAlbedoTransfer transfer) {
-                auto bytes = atlas.albedo;
-                if (transfer == SdkAlbedoTransfer::SrgbToLinear)
-                {
-                    auto srgb_to_linear_byte = [](std::uint8_t value) -> std::uint8_t {
-                        const double srgb = static_cast<double>(value) / 255.0;
-                        const double linear = srgb <= 0.04045
-                                                  ? srgb / 12.92
-                                                  : std::pow((srgb + 0.055) / 1.055, 2.4);
-                        return static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, std::round(linear * 255.0))));
-                    };
-                    for (std::size_t offset = 0; offset + 3 < bytes.size(); offset += 4)
-                    {
-                        bytes[offset + 0] = srgb_to_linear_byte(bytes[offset + 0]);
-                        bytes[offset + 1] = srgb_to_linear_byte(bytes[offset + 1]);
-                        bytes[offset + 2] = srgb_to_linear_byte(bytes[offset + 2]);
-                    }
-                }
-                return bytes;
-            };
-            auto write_albedo_ppm = [&](const wchar_t* filename, const std::vector<std::uint8_t>& bytes) -> bool {
-                const int width = atlas.stats.width;
-                const int height = atlas.stats.height;
-                const std::size_t pixels = width > 0 && height > 0
-                    ? static_cast<std::size_t>(width) * static_cast<std::size_t>(height)
-                    : 0U;
-                if (pixels == 0 || bytes.size() < pixels * 4U)
-                {
-                    return false;
-                }
-                std::string ppm = "P6\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
-                ppm.reserve(ppm.size() + pixels * 3U);
-                for (std::size_t index = 0; index < pixels; ++index)
-                {
-                    const auto offset = index * 4U;
-                    ppm.push_back(static_cast<char>(bytes[offset + 0]));
-                    ppm.push_back(static_cast<char>(bytes[offset + 1]));
-                    ppm.push_back(static_cast<char>(bytes[offset + 2]));
-                }
-                return write_runtime_artifact_binary(filename, ppm);
-            };
-            const auto albedo_import_bytes = front_texture_import ? make_albedo_import_bytes(SdkAlbedoTransfer::SrgbToLinear) : atlas.albedo;
-            const auto albedo_import_hash = hash_bytes(albedo_import_bytes);
-            const bool import_material_channels = texture_sync_probe || static_hybrid_probe;
-            auto metallic_import_bytes = atlas.metallic;
-            auto roughness_import_bytes = atlas.roughness;
-            if (static_hybrid_probe)
-            {
-                metallic_import_bytes = make_filled_channel(atlas_base_metallic, 0, 0, 0);
-                roughness_import_bytes = make_filled_channel(atlas_base_roughness, 235, 235, 235);
-            }
-            const auto metallic_import_hash = hash_bytes(metallic_import_bytes);
-            const auto roughness_import_hash = hash_bytes(roughness_import_bytes);
-            metadata += std::string(",\"front_texture_albedo_import_byte_order\":\"") +
-                        "rgba_identity" + "\"" +
-                        ",\"front_texture_albedo_import_transfer\":\"" + std::string(front_texture_import ? "srgb_to_linear_for_runtime_material" : "identity") + "\"" +
-                        ",\"atlas_import_albedo_hash\":\"" + std::to_string(albedo_import_hash) + "\"" +
-                        ",\"atlas_import_metallic_hash\":\"" + std::to_string(metallic_import_hash) + "\"" +
-                        ",\"atlas_import_roughness_hash\":\"" + std::to_string(roughness_import_hash) + "\"" +
-                        ",\"atlas_preview_albedo_hash\":\"" + std::to_string(atlas.hash) + "\"" +
-                        ",\"front_texture_import_material_channels\":" + json_bool(import_material_channels) +
-                        ",\"front_texture_material_channel_mode\":\"" + std::string(static_hybrid_probe ? "static_hybrid_metallic_0_roughness_092" : "preserve_existing") + "\"" +
-                        ",\"static_hybrid_material_metallic\":" + std::string(static_hybrid_probe ? "0.0" : "null") +
-                        ",\"static_hybrid_material_roughness\":" + std::string(static_hybrid_probe ? "0.92" : "null");
-            const bool import0_ok = sdk_import_channel_bytes(ctx, 0, albedo_import_bytes, import_failure0);
-            const bool import1_ok = front_texture_import && import_material_channels ? sdk_import_channel_bytes(ctx, 1, metallic_import_bytes, import_failure1) : true;
-            const bool import2_ok = front_texture_import && import_material_channels ? sdk_import_channel_bytes(ctx, 2, roughness_import_bytes, import_failure2) : true;
-            Sleep(100);
-            auto after0 = sdk_export_channel_bytes(ref, ctx, 0);
-            auto after1 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 1) : before1;
-            auto after2 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 2) : before2;
-            const bool hash_changed = (after0.ok && after0.hash != before0.hash) ||
-                                      (front_texture_import && import_material_channels && after1.ok && after1.hash != before1.hash) ||
-                                      (front_texture_import && import_material_channels && after2.ok && after2.hash != before2.hash);
-            const bool import_observed = import0_ok && after0.ok && after0.hash == albedo_import_hash &&
-                                         (!front_texture_import ||
-                                          (import_material_channels
-                                               ? (import1_ok && import2_ok &&
-                                                  after1.ok && after1.hash == metallic_import_hash &&
-                                                  after2.ok && after2.hash == roughness_import_hash)
-                                               : (after1.ok && after2.ok))) &&
-                                         hash_changed;
-            Sleep(1500);
-            auto after_settle0 = sdk_export_channel_bytes(ref, ctx, 0);
-            auto after_settle1 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 1) : after1;
-            auto after_settle2 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 2) : after2;
-            const bool import_still_observed_after_settle = import_observed &&
-                                                            after_settle0.ok && after_settle0.hash == albedo_import_hash &&
-                                                            (!front_texture_import ||
-                                                             (import_material_channels
-                                                                  ? (after_settle1.ok && after_settle1.hash == metallic_import_hash &&
-                                                                     after_settle2.ok && after_settle2.hash == roughness_import_hash)
-                                                                  : (after_settle1.ok && after_settle2.ok)));
-            const bool import_overwritten_after_settle = import_observed &&
-                                                         (after_settle0.ok && after_settle0.hash != albedo_import_hash ||
-                                                          (front_texture_import && import_material_channels && after_settle1.ok && after_settle1.hash != metallic_import_hash) ||
-                                                          (front_texture_import && import_material_channels && after_settle2.ok && after_settle2.hash != roughness_import_hash));
-            std::string final_import_failure0{};
-            std::string final_import_failure1{};
-            std::string final_import_failure2{};
-            const bool final_import0_ok = front_texture_import
-                                              ? sdk_import_channel_bytes(ctx, 0, albedo_import_bytes, final_import_failure0)
-                                              : true;
-            const bool final_import1_ok = front_texture_import && import_material_channels
-                                              ? sdk_import_channel_bytes(ctx, 1, metallic_import_bytes, final_import_failure1)
-                                              : true;
-            const bool final_import2_ok = front_texture_import && import_material_channels
-                                              ? sdk_import_channel_bytes(ctx, 2, roughness_import_bytes, final_import_failure2)
-                                              : true;
-            const bool final_import_ok = final_import0_ok && final_import1_ok && final_import2_ok;
-            Sleep(front_texture_import ? 120 : 0);
-            auto after_final_import0 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 0) : after_settle0;
-            auto after_final_import1 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 1) : after_settle1;
-            auto after_final_import2 = front_texture_import ? sdk_export_channel_bytes(ref, ctx, 2) : after_settle2;
-            const bool final_import_observed = final_import_ok &&
-                                               after_final_import0.ok && after_final_import0.hash == albedo_import_hash &&
-                                               (!front_texture_import ||
-                                                (import_material_channels
-                                                     ? (after_final_import1.ok && after_final_import1.hash == metallic_import_hash &&
-                                                        after_final_import2.ok && after_final_import2.hash == roughness_import_hash)
-                                                     : (after_final_import1.ok && after_final_import2.ok)));
-            bool texture_sync_attempted = false;
-            bool texture_sync_relay_ok = false;
-            bool texture_sync_request_full_ok = false;
-            bool texture_sync_server_request_ok = false;
-            bool texture_sync_server_relay_ok = false;
-            std::string texture_sync_relay_failure{"not_run"};
-            std::string texture_sync_request_full_failure{"not_run"};
-            std::string texture_sync_server_request_failure{"not_run"};
-            std::string texture_sync_server_relay_failure{"not_run"};
-            std::string texture_sync_success_candidate{};
-            ChannelBuffer after_texture_sync0{};
-            ChannelBuffer after_texture_sync1{};
-            ChannelBuffer after_texture_sync2{};
-            if (texture_sync_probe && final_import_observed)
-            {
-                texture_sync_attempted = true;
-                bridge_events += ",\"front_texture_import_done_local_only\"";
-                emit_progress("front_texture_import_done_local_only",
-                              "front texture import observed locally before sync",
-                              front_metallic_texture_route ? 9 : 8,
-                              front_metallic_texture_route ? 9 : 8,
-                              elapsed_now_ms(),
-                              "\"pre_sync_albedo_hash\":\"" + std::to_string(after_final_import0.hash) + "\"");
-                bridge_events += ",\"texture_sync_started\"";
-                emit_progress("texture_sync_started", "dispatching runtime texture sync RPC candidates", front_metallic_texture_route ? 9 : 8, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                              "\"front_hits\":" + std::to_string(captured_front.samples.size()));
-                texture_sync_relay_ok = sdk_call_relay_texture_sync_rpc(ctx,
-                                                                        ctx.relay_texture_sync_to_server_function,
-                                                                        "RelayTextureSyncToServer_unavailable",
-                                                                        texture_sync_relay_failure);
-                if (texture_sync_relay_ok && texture_sync_success_candidate.empty())
-                {
-                    texture_sync_success_candidate = "RelayTextureSyncToServer";
-                }
-                texture_sync_request_full_ok = sdk_call_component_no_param_rpc(ctx,
-                                                                              ctx.request_full_texture_sync_function,
-                                                                              "RequestFullTextureSync_unavailable",
-                                                                              texture_sync_request_full_failure);
-                if (texture_sync_request_full_ok && texture_sync_success_candidate.empty())
-                {
-                    texture_sync_success_candidate = "RequestFullTextureSync";
-                }
-                texture_sync_server_request_ok = sdk_call_component_no_param_rpc(ctx,
-                                                                                ctx.server_request_texture_sync_function,
-                                                                                "ServerRequestTextureSync_unavailable",
-                                                                                texture_sync_server_request_failure);
-                if (texture_sync_server_request_ok && texture_sync_success_candidate.empty())
-                {
-                    texture_sync_success_candidate = "ServerRequestTextureSync";
-                }
-                texture_sync_server_relay_ok = sdk_call_relay_texture_sync_rpc(ctx,
-                                                                              ctx.server_relay_texture_sync_function,
-                                                                              "ServerRelayTextureSync_unavailable",
-                                                                              texture_sync_server_relay_failure);
-                if (texture_sync_server_relay_ok && texture_sync_success_candidate.empty())
-                {
-                    texture_sync_success_candidate = "ServerRelayTextureSync";
-                }
-                Sleep(250);
-                after_texture_sync0 = sdk_export_channel_bytes(ref, ctx, 0);
-                after_texture_sync1 = sdk_export_channel_bytes(ref, ctx, 1);
-                after_texture_sync2 = sdk_export_channel_bytes(ref, ctx, 2);
-                bridge_events += ",\"" + std::string(texture_sync_success_candidate.empty() ? "texture_sync_failed" : "texture_sync_done") + "\"";
-                emit_progress(texture_sync_success_candidate.empty() ? "texture_sync_failed" : "texture_sync_done",
-                              texture_sync_success_candidate.empty() ? "runtime texture sync RPC candidates failed" : "runtime texture sync RPC dispatched",
-                              front_metallic_texture_route ? 9 : 8,
-                              front_metallic_texture_route ? 9 : 8,
-                              elapsed_now_ms(),
-                              "\"texture_sync_success_candidate\":\"" + json_escape(texture_sync_success_candidate) + "\"");
-            }
-            const bool front_texture_quality_ok = front_texture_import &&
-                                                  captured_front.bulk_readback_used &&
-                                                  captured_front.image_bulk_calibration_ok &&
-                                                  captured_front.texture_source == "bulk_calibrated_direct_texture";
-            const std::string front_texture_quality_failure = front_texture_quality_ok
-                                                                  ? std::string("")
-                                                                  : std::string("bulk_calibrated_direct_texture_not_observed");
-            const auto pre_sync_albedo_stats = sdk_channel_rgb_stats(after_final_import0);
-            const auto post_sync_albedo_stats = sdk_channel_rgb_stats(after_texture_sync0);
-            const bool texture_sync_hash_changed = texture_sync_probe && after_texture_sync0.ok &&
-                                                   (after_texture_sync0.hash != after_final_import0.hash ||
-                                                    after_texture_sync1.hash != after_final_import1.hash ||
-                                                    after_texture_sync2.hash != after_final_import2.hash);
-            const bool texture_sync_color_shift_suspected = texture_sync_probe && post_sync_albedo_stats.ok && pre_sync_albedo_stats.ok &&
-                                                            (texture_sync_hash_changed ||
-                                                             std::abs(post_sync_albedo_stats.avg - pre_sync_albedo_stats.avg) > 0.01 ||
-                                                             std::abs(post_sync_albedo_stats.min - pre_sync_albedo_stats.min) > 0.01 ||
-                                                             std::abs(post_sync_albedo_stats.max - pre_sync_albedo_stats.max) > 0.01);
-            const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-            metadata += sdk_channel_metadata("after_albedo", after0) +
-                        sdk_channel_metadata("after_metallic", after1) +
-                        sdk_channel_metadata("after_roughness", after2) +
-                        sdk_channel_metadata("after_import_settle_albedo", after_settle0) +
-                        sdk_channel_metadata("after_import_settle_metallic", after_settle1) +
-                        sdk_channel_metadata("after_import_settle_roughness", after_settle2) +
-                        sdk_channel_metadata("after_final_import_albedo", after_final_import0) +
-                        sdk_channel_metadata("after_final_import_metallic", after_final_import1) +
-                        sdk_channel_metadata("after_final_import_roughness", after_final_import2) +
-                        sdk_channel_rgb_stats_metadata("pre_sync_albedo", after_final_import0) +
-                        sdk_channel_rgb_stats_metadata("pre_sync_metallic", after_final_import1) +
-                        sdk_channel_rgb_stats_metadata("pre_sync_roughness", after_final_import2) +
-                        ",\"atlas_hash\":\"" + std::to_string(atlas.hash) + "\"" +
-                        ",\"atlas_metallic_hash\":\"" + std::to_string(atlas.metallic_hash) + "\"" +
-                        ",\"atlas_roughness_hash\":\"" + std::to_string(atlas.roughness_hash) + "\"" +
-                        ",\"before_albedo_hash\":\"" + std::to_string(before0.hash) + "\"" +
-                        ",\"before_metallic_hash\":\"" + std::to_string(before1.hash) + "\"" +
-                        ",\"before_roughness_hash\":\"" + std::to_string(before2.hash) + "\"" +
-                        ",\"after_albedo_hash\":\"" + std::to_string(after0.hash) + "\"" +
-                        ",\"after_metallic_hash\":\"" + std::to_string(after1.hash) + "\"" +
-                        ",\"after_roughness_hash\":\"" + std::to_string(after2.hash) + "\"" +
-                        ",\"after_import_settle_albedo_hash\":\"" + std::to_string(after_settle0.hash) + "\"" +
-                        ",\"after_import_settle_metallic_hash\":\"" + std::to_string(after_settle1.hash) + "\"" +
-                        ",\"after_import_settle_roughness_hash\":\"" + std::to_string(after_settle2.hash) + "\"" +
-                        ",\"after_final_import_albedo_hash\":\"" + std::to_string(after_final_import0.hash) + "\"" +
-                        ",\"after_final_import_metallic_hash\":\"" + std::to_string(after_final_import1.hash) + "\"" +
-                        ",\"after_final_import_roughness_hash\":\"" + std::to_string(after_final_import2.hash) + "\"" +
-                        ",\"pre_sync_albedo_hash\":\"" + std::to_string(after_final_import0.hash) + "\"" +
-                        ",\"pre_sync_metallic_hash\":\"" + std::to_string(after_final_import1.hash) + "\"" +
-                        ",\"pre_sync_roughness_hash\":\"" + std::to_string(after_final_import2.hash) + "\"" +
-                        ",\"hash_changed\":" + json_bool(hash_changed) +
-                        ",\"diagnostic_import_ok\":" + json_bool(import0_ok && import1_ok && import2_ok) +
-                        ",\"diagnostic_import_albedo_ok\":" + json_bool(import0_ok) +
-                        ",\"diagnostic_import_metallic_ok\":" + json_bool(import1_ok) +
-                        ",\"diagnostic_import_roughness_ok\":" + json_bool(import2_ok) +
-                        ",\"diagnostic_import_failure\":\"" + json_escape(import_failure0) + "\"" +
-                        ",\"diagnostic_import_albedo_failure\":\"" + json_escape(import_failure0) + "\"" +
-                        ",\"diagnostic_import_metallic_failure\":\"" + json_escape(import_failure1) + "\"" +
-                        ",\"diagnostic_import_roughness_failure\":\"" + json_escape(import_failure2) + "\"" +
-                        ",\"diagnostic_import_observed\":" + json_bool(import_observed) +
-                        ",\"diagnostic_import_still_observed_after_settle\":" + json_bool(import_still_observed_after_settle) +
-                        ",\"diagnostic_import_overwritten_after_settle\":" + json_bool(import_overwritten_after_settle) +
-                        ",\"front_texture_reimport_after_settle\":" + json_bool(front_texture_import) +
-                        ",\"front_texture_final_import_ok\":" + json_bool(final_import_ok) +
-                        ",\"front_texture_final_import_failure\":\"" + json_escape(final_import_failure0.empty() ? (final_import_failure1.empty() ? final_import_failure2 : final_import_failure1) : final_import_failure0) + "\"" +
-                        ",\"front_texture_final_import_albedo_ok\":" + json_bool(final_import0_ok) +
-                        ",\"front_texture_final_import_metallic_ok\":" + json_bool(final_import1_ok) +
-                        ",\"front_texture_final_import_roughness_ok\":" + json_bool(final_import2_ok) +
-                        ",\"front_texture_final_import_observed\":" + json_bool(final_import_observed) +
-                        ",\"front_texture_quality_ok\":" + json_bool(front_texture_quality_ok) +
-                        ",\"front_texture_quality_failure\":\"" + json_escape(front_texture_quality_failure) + "\"" +
-                        sdk_channel_metadata("after_texture_sync_albedo", after_texture_sync0) +
-                        sdk_channel_metadata("after_texture_sync_metallic", after_texture_sync1) +
-                        sdk_channel_metadata("after_texture_sync_roughness", after_texture_sync2) +
-                        sdk_channel_rgb_stats_metadata("post_sync_albedo", after_texture_sync0) +
-                        sdk_channel_rgb_stats_metadata("post_sync_metallic", after_texture_sync1) +
-                        sdk_channel_rgb_stats_metadata("post_sync_roughness", after_texture_sync2) +
-                        ",\"texture_sync_strict_probe\":" + json_bool(texture_sync_probe) +
-                        ",\"texture_sync_attempted\":" + json_bool(texture_sync_attempted) +
-                        ",\"texture_sync_relay_available\":" + json_bool(ctx.relay_texture_sync_to_server_function != 0) +
-                        ",\"texture_sync_request_full_available\":" + json_bool(ctx.request_full_texture_sync_function != 0) +
-                        ",\"texture_sync_server_request_available\":" + json_bool(ctx.server_request_texture_sync_function != 0) +
-                        ",\"texture_sync_server_relay_available\":" + json_bool(ctx.server_relay_texture_sync_function != 0) +
-                        ",\"texture_sync_multicast_available\":" + json_bool(ctx.multicast_sync_channel_data_function != 0) +
-                        ",\"texture_sync_compressed_multicast_available\":" + json_bool(ctx.multicast_sync_compressed_channel_data_function != 0) +
-                        ",\"texture_sync_relay_ok\":" + json_bool(texture_sync_relay_ok) +
-                        ",\"texture_sync_request_full_ok\":" + json_bool(texture_sync_request_full_ok) +
-                        ",\"texture_sync_server_request_ok\":" + json_bool(texture_sync_server_request_ok) +
-                        ",\"texture_sync_server_relay_ok\":" + json_bool(texture_sync_server_relay_ok) +
-                        ",\"texture_sync_relay_failure\":\"" + json_escape(texture_sync_relay_failure) + "\"" +
-                        ",\"texture_sync_request_full_failure\":\"" + json_escape(texture_sync_request_full_failure) + "\"" +
-                        ",\"texture_sync_server_request_failure\":\"" + json_escape(texture_sync_server_request_failure) + "\"" +
-                        ",\"texture_sync_server_relay_failure\":\"" + json_escape(texture_sync_server_relay_failure) + "\"" +
-                        ",\"texture_sync_success_candidate\":\"" + json_escape(texture_sync_success_candidate) + "\"" +
-                        ",\"texture_sync_after_albedo_hash\":\"" + std::to_string(after_texture_sync0.hash) + "\"" +
-                        ",\"texture_sync_after_metallic_hash\":\"" + std::to_string(after_texture_sync1.hash) + "\"" +
-                        ",\"texture_sync_after_roughness_hash\":\"" + std::to_string(after_texture_sync2.hash) + "\"" +
-                        ",\"post_sync_albedo_hash\":\"" + std::to_string(after_texture_sync0.hash) + "\"" +
-                        ",\"post_sync_metallic_hash\":\"" + std::to_string(after_texture_sync1.hash) + "\"" +
-                        ",\"post_sync_roughness_hash\":\"" + std::to_string(after_texture_sync2.hash) + "\"" +
-                        ",\"texture_sync_hash_changed\":" + json_bool(texture_sync_hash_changed) +
-                        ",\"texture_sync_color_shift_suspected\":" + json_bool(texture_sync_color_shift_suspected) +
-                        ",\"multiplayer_sync_unverified\":" + json_bool(texture_sync_probe) +
-                        ",\"front_paint_stream_skipped\":" + json_bool(front_texture_import) +
-                        ",\"server_rpc\":\"" + std::string(texture_sync_success_candidate.empty() ? "none" : texture_sync_success_candidate) + "\"" +
-                        ",\"server_batches\":0" +
-                        ",\"server_sent\":" + std::to_string(texture_sync_success_candidate.empty() ? 0 : 1) +
-                        ",\"server_failed\":" + std::to_string(texture_sync_probe && texture_sync_success_candidate.empty() ? 1 : 0) +
-                        ",\"stroke_count\":0" +
-                        ",\"elapsed_ms\":" + std::to_string(elapsed);
-
-            if (!(import0_ok && import1_ok && import2_ok))
-            {
-                metadata += "," + bridge_events + ",\"" + import_failed_stage + "\"]";
-                return response_json(false,
-                                     import_failed_stage.c_str(),
-                                     0,
-                                     1,
-                                     "diagnostic texture channel import failed",
-                                     metadata);
-            }
-            if (!import_observed)
-            {
-                metadata += "," + bridge_events + ",\"" + import_not_observed_stage + "\"]";
-                return response_json(false,
-                                     import_not_observed_stage.c_str(),
-                                     0,
-                                     1,
-                                     "diagnostic texture import was not observed by export/hash verification",
-                                     metadata);
-            }
-            if (!import_still_observed_after_settle)
-            {
-                metadata += "," + bridge_events + ",\"" + import_done_stage + "\",\"front_texture_import_overwritten_after_settle\"]";
-                return response_json(false,
-                                     "front_texture_import_overwritten_after_settle",
-                                     1,
-                                     1,
-                                     "front texture import was observed immediately, but was not stable after settle",
-                                     metadata);
-            }
-            if (!final_import_observed)
-            {
-                metadata += "," + bridge_events + ",\"" + import_done_stage + "\",\"front_texture_final_import_not_observed\"]";
-                return response_json(false,
-                                     "front_texture_final_import_not_observed",
-                                     1,
-                                     1,
-                                     "front texture final import was not observed on all channels",
-                                     metadata);
-            }
-
-            emit_progress(import_done_stage, front_texture_import ? "front texture channel import observed" : "front albedo texture import observed", front_metallic_texture_route ? 9 : 8, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                          "\"front_hits\":" + std::to_string(captured_front.samples.size()));
-            if (front_texture_import && !front_texture_quality_ok)
-            {
-                metadata += "," + bridge_events + ",\"" + import_done_stage + "\",\"front_texture_quality_failed\"]";
-                return response_json(false,
-                                     "front_texture_quality_failed",
-                                     1,
-                                     1,
-                                     "front texture import observed, but texture source is sampled_pixel_front_atlas and does not meet 38923 direct-texture parity",
-                                     metadata);
-            }
-            if (texture_sync_probe && texture_sync_success_candidate.empty())
-            {
-                metadata += "," + bridge_events + ",\"" + import_done_stage + "\",\"texture_sync_failed\"]";
-                return response_json(false,
-                                     "texture_sync_failed",
-                                     1,
-                                     1,
-                                     "front texture import observed, but no runtime texture sync RPC candidate dispatched",
-                                     metadata);
-            }
-            metadata += "," + bridge_events + ",\"" + import_done_stage + "\"]";
-            return response_json(true,
-                                 texture_sync_probe ? "texture_sync_strict_probe_done" : import_done_stage.c_str(),
-                                 1,
-                                 0,
-                                 texture_sync_probe ? "texture sync strict probe dispatched; remote unverified" :
-                                                      (front_texture_import ? "front texture import observed on albedo/metallic/roughness" : "temporary diagnostic albedo import observed"),
-                                 metadata);
-        }
-
-        const int stroke_cap = disabled_paint_stream ? 450000 : (front_paint_route ? 120000 : 600000);
-        auto stroke_plan = sdk_build_atlas_strokes(ctx, atlas, atlas_target_channel, atlas_use_world_position, stroke_cap);
-        metadata += sdk_atlas_stroke_metadata(stroke_plan);
-        if (stroke_plan.cap_exceeded || stroke_plan.strokes.empty() || static_cast<int>(stroke_plan.strokes.size()) > stroke_plan.stroke_cap)
-        {
-            emit_progress(stroke_budget_stage, "stroke count exceeded cap; no paint dispatched", front_metallic_texture_route ? 8 : 7, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                                  "\"stroke_count\":" + std::to_string(stroke_plan.strokes.size()) +
-                                  ",\"stroke_cap\":" + std::to_string(stroke_plan.stroke_cap));
-            metadata += "," + bridge_events + ",\"" + stroke_budget_stage + "\"]";
-            return response_json(false,
-                                 stroke_budget_stage.c_str(),
-                                 0,
-                                 1,
-                                 "atlas stroke generation exceeded the hard cap; no paint was dispatched",
-                                 metadata);
-        }
-        bridge_events += ",\"" + strokes_generated_stage + "\",\"replicated_stream_started\"";
-        emit_progress(strokes_generated_stage, "front atlas strokes generated", front_metallic_texture_route ? 8 : 7, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                              "\"stroke_count\":" + std::to_string(stroke_plan.strokes.size()));
-        emit_progress("replicated_stream_started", "dispatching ServerPaintBatch stroke stream", front_metallic_texture_route ? 8 : 7, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                              "\"stroke_count\":" + std::to_string(stroke_plan.strokes.size()));
-
-        const int raw_batch_limit = safe_read<int>(ctx.component + meccha_sdk::FieldOffsets::RuntimePaintable_MaxReplicatedPaintStrokesPerTick, 24);
-        const int batch_limit = std::max(1, std::min(raw_batch_limit > 0 ? raw_batch_limit : 24, 256));
-        const int server_batches_total = static_cast<int>((stroke_plan.strokes.size() + static_cast<std::size_t>(batch_limit) - 1) / static_cast<std::size_t>(batch_limit));
-        int last_stream_percent = -1;
-        const auto stream_started = std::chrono::steady_clock::now();
-        auto stream_progress = [&](const SdkReplicatedStats& stats, int server_sent, int total) -> bool {
-            const int percent = total > 0 ? std::max(0, std::min(100, static_cast<int>((static_cast<long long>(server_sent) * 100LL) / total))) : 100;
-            if (percent != last_stream_percent)
-            {
-                last_stream_percent = percent;
-                const auto elapsed_ms = elapsed_now_ms();
-                const auto stream_elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - stream_started).count();
-                const double eta_ms = percent > 0 ? std::max(0.0, (stream_elapsed_ms / (static_cast<double>(percent) / 100.0)) - stream_elapsed_ms) : 0.0;
-                emit_progress("replicated_stream_progress",
-                              "dispatching ServerPaintBatch stroke stream",
-                              percent,
-                              100,
-                              elapsed_ms,
-                              "\"server_batches\":" + std::to_string(server_batches_total) +
-                                  ",\"server_batch_index\":" + std::to_string(stats.batch_calls) +
-                                  ",\"server_sent\":" + std::to_string(server_sent) +
-                                  ",\"stroke_count\":" + std::to_string(total) +
-                                  ",\"eta_ms\":" + std::to_string(eta_ms));
-            }
-            return elapsed_now_ms() < 210000.0;
-        };
-
-        const int atlas_stream_batch_override = disabled_paint_stream ? 256 : 0;
-        const int atlas_stream_sleep_ms = disabled_paint_stream ? 0 : 16;
-        metadata += ",\"server_stream_batch_override\":" + std::to_string(atlas_stream_batch_override) +
-                    ",\"server_stream_sleep_ms\":" + std::to_string(atlas_stream_sleep_ms);
-        if (!sdk_dispatch_replicated_strokes_with_progress(ctx,
-                                                           stroke_plan.strokes,
-                                                           atlas_stats,
-                                                           stream_progress,
-                                                           atlas_stream_batch_override,
-                                                           atlas_stream_sleep_ms))
-        {
-            const std::string failure_stage = atlas_stats.first_failure == "server_stream_timeout_before_bridge_timeout" ?
-                "server_stream_timeout_before_bridge_timeout" :
-                "server_batch_failed";
-            emit_progress(failure_stage, "ServerPaintBatch stream failed", front_metallic_texture_route ? 8 : 7, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                                  "\"server_sent\":" + std::to_string(atlas_stats.server_sent) +
-                                  ",\"server_failed\":" + std::to_string(atlas_stats.server_failed));
-            metadata += sdk_stats_metadata("atlas_paint", atlas_stats) +
-                        "," + bridge_events + ",\"" + failure_stage + "\"]";
-            return response_json(false,
-                                 failure_stage.c_str(),
-                                 atlas_stats.server_sent,
-                                 std::max(1, atlas_stats.server_failed),
-                                 "atlas paint ServerPaintBatch failed: " + atlas_stats.first_failure,
-                                 metadata);
-        }
-        bridge_events += ",\"replicated_stream_done\"";
-        emit_progress("replicated_stream_done", "ServerPaintBatch stream dispatched", front_metallic_texture_route ? 9 : 8, front_metallic_texture_route ? 9 : 8, elapsed_now_ms(),
-                              "\"server_sent\":" + std::to_string(atlas_stats.server_sent));
-        Sleep(100);
-
-        auto after0 = sdk_export_channel_bytes(ref, ctx, 0);
-        const bool hash_changed = after0.ok && after0.hash != before0.hash;
-        const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-        metadata += sdk_stats_metadata("atlas_paint", atlas_stats) +
-                    sdk_channel_metadata("after_albedo", after0) +
-                    ",\"hash_before\":\"" + std::to_string(before0.hash) + "\"" +
-                    ",\"hash_after\":\"" + std::to_string(after0.hash) + "\"" +
-                    ",\"hash_changed\":" + json_bool(hash_changed) +
-                    ",\"server_rpc\":\"ServerPaintBatch\"" +
-                    ",\"server_batches\":" + std::to_string(atlas_stats.batch_calls) +
-                    ",\"server_sent\":" + std::to_string(atlas_stats.server_sent) +
-                    ",\"server_failed\":" + std::to_string(atlas_stats.server_failed) +
-                    ",\"elapsed_ms\":" + std::to_string(elapsed);
-
-        if (!hash_changed && !front_metallic_texture_route)
-        {
-            metadata += "," + bridge_events + ",\"hash_unchanged\"]";
-            return response_json(false,
-                                 "hash_unchanged",
-                                 atlas_stats.server_sent,
-                                 1,
-                                 "atlas paint server RPC dispatched, but albedo hash did not change",
-                                 metadata);
-        }
-
-        metadata += "," + bridge_events + ",\"paint_done\"]";
+        const auto viewport = sdk_get_viewport_info(ref, ctx);
+        const auto mesh_candidates = sdk_collect_front_mesh_candidates(ref, ctx);
+        const auto hit_test_function = ref.find_function(ctx.component, "HitTestAtScreenPosition");
+        metadata += std::string(",\"viewport_available\":") + json_bool(viewport.width > 0 && viewport.height > 0);
+        metadata += ",\"viewport_width\":" + std::to_string(viewport.width);
+        metadata += ",\"viewport_height\":" + std::to_string(viewport.height);
+        metadata += ",\"front_mesh_candidate_count\":" + std::to_string(mesh_candidates.size());
+        metadata += ",\"front_mesh_candidates\":" + sdk_front_mesh_candidates_json(ref, mesh_candidates);
+        metadata += std::string(",\"front_mesh_available\":") + json_bool(!mesh_candidates.empty());
+        metadata += std::string(",\"function_hit_test_at_screen_position_available\":") + json_bool(hit_test_function != 0);
+        metadata += std::string(",\"function_server_paint_batch_available_for_production\":") + json_bool(ctx.server_paint_batch_function != 0);
         return response_json(true,
-                             "paint_done",
-                             atlas_stats.server_sent,
+                             is_deep_probe ? "sdk_deep_probe" : "sdk_probe",
                              0,
-                             front_metallic_texture_route ? "front texture paint stream dispatched after metallic base" : "texture-atlas sourced replicated paint applied",
+                             0,
+                             "SDK context probe completed without paint mutation",
                              metadata);
     }
+
 
     auto paint_full_route_native_direct(const std::string& request) -> std::string
     {
@@ -12543,7 +6510,9 @@ namespace
                    "\"sdk\":\"chameleonEsp_dumper7_1_7_0_min\","
                    "\"paint_full_route\":\"template_brush_paint\","
                    "\"texture_import_used\":false,"
-                   "\"replication\":\"recorded_stroke_flush\","
+                   "\"local_paint_used\":false,"
+                   "\"paint_at_uv_with_brush_used\":false,"
+                   "\"replication\":\"server_paint_batch\","
                    "\"multiplayer_replicated\":true}}\n";
         }
         if (line.find("\"type\":\"shutdown\"") != std::string::npos)

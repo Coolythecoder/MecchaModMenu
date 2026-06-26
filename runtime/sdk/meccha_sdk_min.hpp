@@ -20,10 +20,8 @@ namespace meccha_sdk
         constexpr std::uintptr_t UPlayer_PlayerController = 0x0030;
         constexpr std::uintptr_t Controller_ControlRotation = 0x0320;
         constexpr std::uintptr_t PlayerController_PlayerCameraManager = 0x0360;
-        constexpr std::uintptr_t BP_PlayerController_RuntimePaintRelay = 0x0770;
         constexpr std::uintptr_t BP_FirstPersonCharacter_RuntimePaintable = 0x0B68;
         constexpr std::uintptr_t RuntimePaintable_CurrentBrushSettings = 0x0170;
-        constexpr std::uintptr_t RuntimePaintable_MaxReplicatedPaintStrokesPerTick = 0x01BC;
         constexpr std::uintptr_t SceneCapture2D_CaptureComponent2D = 0x02B8;
         constexpr std::uintptr_t SceneCaptureComponent_CaptureSource = 0x0241;
         constexpr std::uintptr_t SceneCaptureComponent_CaptureFlags = 0x0242;
@@ -95,7 +93,6 @@ namespace meccha_sdk
         Roughness = 2,
         Height = 3,
         All = 4,
-        AlbedoMetallicRoughness = 5,
         Max = 6,
     };
 
@@ -130,31 +127,6 @@ namespace meccha_sdk
         T* Data{nullptr};
         std::int32_t Num{0};
         std::int32_t Max{0};
-    };
-
-    struct RuntimePaintableComponent_ExportChannelToBytes
-    {
-        EPaintChannel Channel{EPaintChannel::Albedo};
-        std::uint8_t Pad_1[0x7]{};
-        TArray<std::uint8_t> OutData{};
-        bool ReturnValue{false};
-        std::uint8_t Pad_19[0x7]{};
-    };
-
-    struct RuntimePaintableComponent_ImportChannelFromBytes
-    {
-        EPaintChannel Channel{EPaintChannel::Albedo};
-        std::uint8_t Pad_1[0x7]{};
-        TArray<std::uint8_t> Data{};
-        bool ReturnValue{false};
-        std::uint8_t Pad_19[0x7]{};
-    };
-
-    struct RuntimePaintableComponent_GetRenderTarget
-    {
-        EPaintChannel Channel{EPaintChannel::Albedo};
-        std::uint8_t Pad_1[0x7]{};
-        void* ReturnValue{nullptr};
     };
 
     struct FVector2D
@@ -206,21 +178,6 @@ namespace meccha_sdk
         std::uint8_t R{0};
         std::uint8_t A{255};
     };
-
-    struct ColorPicker_SampleViewportGBuffer
-    {
-        void* WorldContextObject{nullptr};
-        FVector2D ScreenPosition{};
-        FLinearColor OutBaseColor{};
-        float OutMetallic{0.0f};
-        float OutRoughness{0.0f};
-        void* OptionalMetallicRoughnessMaterial{nullptr};
-        bool ReturnValue{false};
-        std::uint8_t Pad_39[0x7]{};
-    };
-    static_assert(sizeof(ColorPicker_SampleViewportGBuffer) == 0x40, "SampleViewportGBuffer params layout mismatch");
-    static_assert(offsetof(ColorPicker_SampleViewportGBuffer, OutBaseColor) == 0x18, "SampleViewportGBuffer OutBaseColor offset mismatch");
-    static_assert(offsetof(ColorPicker_SampleViewportGBuffer, ReturnValue) == 0x38, "SampleViewportGBuffer ReturnValue offset mismatch");
 
     struct FQuat
     {
@@ -278,21 +235,6 @@ namespace meccha_sdk
         std::uint8_t Pad_1D[0x3]{};
     };
 
-    struct RuntimePaintableComponent_PaintAtScreenPosition
-    {
-        void* MeshComponent{nullptr};
-        FVector2D ScreenPosition{};
-        void* PlayerController{nullptr};
-        FPaintChannelData ChannelData{};
-        EPaintChannel Channel{EPaintChannel::AlbedoMetallicRoughness};
-        bool bUseCachedTriangles{true};
-        std::uint8_t Pad_42[0x6]{};
-        FScreenSpacePaintResult ReturnValue{};
-    };
-    static_assert(sizeof(RuntimePaintableComponent_PaintAtScreenPosition) == 0x90, "PaintAtScreenPosition params layout mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_PaintAtScreenPosition, ChannelData) == 0x20, "PaintAtScreenPosition ChannelData offset mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_PaintAtScreenPosition, ReturnValue) == 0x48, "PaintAtScreenPosition ReturnValue offset mismatch");
-
     struct FPaintStroke
     {
         FVector2D Uv{};
@@ -307,7 +249,7 @@ namespace meccha_sdk
         FVector SkeletalTriangleBarycentric{};
         FRuntimeBrushSettings BrushSettings{};
         FPaintChannelData ChannelData{};
-        EPaintChannel TargetChannel{EPaintChannel::AlbedoMetallicRoughness};
+        EPaintChannel TargetChannel{EPaintChannel::Albedo};
         std::uint8_t Pad_B1[0x3]{};
         float EffectiveBrushWorldRadius{0.02f};
         std::int32_t EffectiveSubdivisionLevel{0};
@@ -327,68 +269,6 @@ namespace meccha_sdk
     struct RuntimePaintableComponent_ServerPaintBatch
     {
         FPaintStrokeBatch Batch{};
-    };
-
-    struct RuntimePaintableComponent_ServerSendStrokeBatch
-    {
-        FPaintStrokeBatch Batch{};
-    };
-
-    struct RuntimePaintableComponent_ServerSendPaint
-    {
-        FPaintStroke Stroke{};
-    };
-
-    struct RuntimePaintableComponent_ServerPaint
-    {
-        FPaintStroke Stroke{};
-    };
-
-    struct RuntimePaintableComponent_PaintAtUVWithBrush
-    {
-        FVector2D Uv{};
-        FPaintChannelData ChannelData{};
-        FRuntimeBrushSettings BrushSettings{};
-        EPaintChannel Channel{EPaintChannel::AlbedoMetallicRoughness};
-        std::uint8_t Pad_59[0x7]{};
-    };
-
-    struct RuntimePaintRelayComponent_RelayPaintToServer
-    {
-        void* PaintComponent{nullptr};
-        FPaintStroke Stroke{};
-    };
-
-    struct RuntimePaintRelayComponent_RelayStrokeBatchToServer
-    {
-        void* PaintComponent{nullptr};
-        FPaintStrokeBatch Batch{};
-    };
-
-    struct RuntimePaintRelayComponent_RelayTextureSyncToServer
-    {
-        void* PaintComponent{nullptr};
-    };
-
-    struct RuntimePaintRelayComponent_ServerRelayTextureSync
-    {
-        void* PaintComponent{nullptr};
-    };
-
-    struct RuntimePaintableComponent_MulticastSyncChannelData
-    {
-        EPaintChannel Channel{EPaintChannel::Albedo};
-        std::uint8_t Pad_1[0x7]{};
-        TArray<std::uint8_t> Data{};
-    };
-
-    struct RuntimePaintableComponent_MulticastSyncCompressedChannelData
-    {
-        EPaintChannel Channel{EPaintChannel::Albedo};
-        std::uint8_t Pad_1[0x7]{};
-        TArray<std::uint8_t> CompressedData{};
-        std::int32_t UncompressedSize{0};
-        std::uint8_t Pad_1C[0x4]{};
     };
 
     struct Controller_K2_GetPawn
@@ -488,29 +368,7 @@ namespace meccha_sdk
     static_assert(offsetof(FPaintStroke, ChannelData) == 0x90, "PaintStroke ChannelData offset mismatch");
     static_assert(offsetof(FPaintStroke, TargetChannel) == 0xB0, "PaintStroke TargetChannel offset mismatch");
     static_assert(sizeof(FPaintStrokeBatch) == 0x10, "PaintStrokeBatch layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_ExportChannelToBytes) == 0x20, "ExportChannelToBytes params layout mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_ExportChannelToBytes, OutData) == 0x08, "Export OutData offset mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_ExportChannelToBytes, ReturnValue) == 0x18, "Export ReturnValue offset mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_ImportChannelFromBytes) == 0x20, "ImportChannelFromBytes params layout mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_ImportChannelFromBytes, Data) == 0x08, "Import Data offset mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_ImportChannelFromBytes, ReturnValue) == 0x18, "Import ReturnValue offset mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_GetRenderTarget) == 0x10, "GetRenderTarget params layout mismatch");
     static_assert(sizeof(RuntimePaintableComponent_ServerPaintBatch) == 0x10, "ServerPaintBatch params layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_ServerSendStrokeBatch) == 0x10, "ServerSendStrokeBatch params layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_ServerSendPaint) == 0xE0, "ServerSendPaint params layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_ServerPaint) == 0xE0, "ServerPaint params layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_PaintAtUVWithBrush) == 0x60, "PaintAtUVWithBrush params layout mismatch");
-    static_assert(sizeof(RuntimePaintRelayComponent_RelayPaintToServer) == 0xE8, "RelayPaintToServer params layout mismatch");
-    static_assert(sizeof(RuntimePaintRelayComponent_RelayStrokeBatchToServer) == 0x18, "RelayStrokeBatchToServer params layout mismatch");
-    static_assert(offsetof(RuntimePaintRelayComponent_RelayPaintToServer, Stroke) == 0x08, "RelayPaintToServer Stroke offset mismatch");
-    static_assert(offsetof(RuntimePaintRelayComponent_RelayStrokeBatchToServer, Batch) == 0x08, "RelayStrokeBatchToServer Batch offset mismatch");
-    static_assert(sizeof(RuntimePaintRelayComponent_RelayTextureSyncToServer) == 0x08, "RelayTextureSyncToServer params layout mismatch");
-    static_assert(sizeof(RuntimePaintRelayComponent_ServerRelayTextureSync) == 0x08, "ServerRelayTextureSync params layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_MulticastSyncChannelData) == 0x18, "MulticastSyncChannelData params layout mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_MulticastSyncChannelData, Data) == 0x08, "MulticastSyncChannelData Data offset mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_MulticastSyncCompressedChannelData) == 0x20, "MulticastSyncCompressedChannelData params layout mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_MulticastSyncCompressedChannelData, CompressedData) == 0x08, "MulticastSyncCompressedChannelData CompressedData offset mismatch");
-    static_assert(offsetof(RuntimePaintableComponent_MulticastSyncCompressedChannelData, UncompressedSize) == 0x18, "MulticastSyncCompressedChannelData UncompressedSize offset mismatch");
     static_assert(sizeof(Actor_K2_GetActorLocation) == 0x18, "K2_GetActorLocation params layout mismatch");
     static_assert(sizeof(KismetRenderingLibrary_CreateRenderTarget2D) == 0x30, "CreateRenderTarget2D params layout mismatch");
     static_assert(offsetof(KismetRenderingLibrary_CreateRenderTarget2D, Format) == 0x10, "CreateRenderTarget2D Format offset mismatch");

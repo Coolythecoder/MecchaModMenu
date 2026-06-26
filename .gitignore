@@ -12,6 +12,7 @@
 *.log
 *.trace
 *.tmp
+*.part
 
 # Runtime/game artifacts
 /Chameleon/
