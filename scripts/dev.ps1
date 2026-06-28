@@ -4,6 +4,7 @@ param(
     [string[]]$RuntimeArgs,
     [string]$RuntimeArgString = "",
     [string]$NativeApplyMode = "template_brush_paint",
+    [switch]$EnableResearchArtifacts,
     [switch]$DryRun
 )
 
@@ -94,5 +95,9 @@ if (-not $RuntimeArgs -or $RuntimeArgs.Count -eq 0) {
 
 Write-Host "Using runtime exe: $ExePath"
 Write-Host "Runtime args: $($RuntimeArgs -join ' ')"
+if ($EnableResearchArtifacts) {
+    $env:MECCHA_RESEARCH_ARTIFACTS = "1"
+    Write-Host "Research artifacts: enabled"
+}
 if ($DryRun) { return }
 Invoke-ForegroundRuntime -ExePath $ExePath -Arguments $RuntimeArgs

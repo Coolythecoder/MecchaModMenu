@@ -13,6 +13,7 @@
 *.trace
 *.tmp
 *.part
+*.so
 
 # Runtime/game artifacts
 /Chameleon/
@@ -23,6 +24,14 @@
 *.ucas
 *.utoc
 *.sig
+*.usmap
+
+# Research tool artifacts
+/tools/**/bin/
+/tools/**/obj/
+/third_party/UnrealMappingsDumper/**/x64/
+/third_party/UnrealMappingsDumper/**/Debug/
+/third_party/UnrealMappingsDumper/**/Release/
 
 # IDE / OS noise
 /.vs/

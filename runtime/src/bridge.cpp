@@ -434,6 +434,8 @@ namespace
         return 0;
     }
 
+    auto early_hex_address(std::uintptr_t value) -> std::string;
+
     struct FNameResolver
     {
         std::uintptr_t pool{0};
@@ -595,7 +597,7 @@ namespace
             {
                 return {};
             }
-            auto out = names.resolve(safe_read<std::uint32_t>(object + OffName));
+            auto out = object_name_raw(object);
             const auto slash = out.find_last_of("/.");
             if (slash != std::string::npos)
             {
@@ -604,6 +606,49 @@ namespace
             if (out.rfind("Default__", 0) == 0)
             {
                 out = out.substr(9);
+            }
+            return out;
+        }
+
+        auto object_name_raw(std::uintptr_t object) -> std::string
+        {
+            if (!object)
+            {
+                return {};
+            }
+            return names.resolve(safe_read<std::uint32_t>(object + OffName));
+        }
+
+        auto object_path(std::uintptr_t object) -> std::string
+        {
+            std::vector<std::string> parts{};
+            for (int depth = 0; live_uobject(object) && depth < 32; ++depth)
+            {
+                auto name = object_name_raw(object);
+                if (name.empty())
+                {
+                    name = early_hex_address(object);
+                }
+                parts.push_back(name);
+                object = safe_read<std::uintptr_t>(object + OffOuter);
+            }
+            if (parts.empty())
+            {
+                return {};
+            }
+            std::reverse(parts.begin(), parts.end());
+            std::string out{};
+            for (const auto& part : parts)
+            {
+                if (part.empty())
+                {
+                    continue;
+                }
+                if (!out.empty())
+                {
+                    out += '.';
+                }
+                out += part;
             }
             return out;
         }
@@ -3110,6 +3155,7 @@ namespace
     struct SdkFrontMeshCandidate
     {
         std::uintptr_t mesh{0};
+        std::uintptr_t asset{0};
         std::string source{};
     };
 
@@ -3133,7 +3179,15 @@ namespace
                     return;
                 }
             }
-            out.push_back({mesh, source ? source : "unknown"});
+            const auto asset = read_object_property_by_names(ref,
+                                                             mesh,
+                                                             {"SkinnedAsset",
+                                                              "SkeletalMesh",
+                                                              "StaticMesh",
+                                                              "Mesh",
+                                                              "MeshAsset",
+                                                              "SkeletalMeshAsset"});
+            out.push_back({mesh, asset, source ? source : "unknown"});
         };
 
         add_candidate(call_no_params_return_object(ref, ctx.component, "GetInitializedPaintMesh"),
@@ -3184,7 +3238,13 @@ namespace
             first = false;
             out += "{\"mesh\":\"" + hex_address(candidate.mesh) + "\"";
             out += ",\"source\":\"" + json_escape(candidate.source) + "\"";
-            out += ",\"class\":\"" + json_escape(ref.class_name(candidate.mesh)) + "\"}";
+            out += ",\"name\":\"" + json_escape(ref.object_name(candidate.mesh)) + "\"";
+            out += ",\"class\":\"" + json_escape(ref.class_name(candidate.mesh)) + "\"";
+            out += ",\"path\":\"" + json_escape(ref.object_path(candidate.mesh)) + "\"";
+            out += ",\"asset\":\"" + hex_address(candidate.asset) + "\"";
+            out += ",\"asset_name\":\"" + json_escape(ref.object_name(candidate.asset)) + "\"";
+            out += ",\"asset_class\":\"" + json_escape(ref.class_name(candidate.asset)) + "\"";
+            out += ",\"asset_path\":\"" + json_escape(ref.object_path(candidate.asset)) + "\"}";
         }
         out += "]";
         return out;
@@ -5408,6 +5468,7 @@ namespace
         int server_strokes_sent{0};
         int server_batch_limit{0};
         int server_batch_delay_ms{0};
+        int front_samples_artifact_count{0};
         int commit_pulses{0};
         int progress_percent{-1};
         double template_point_elapsed_ms{0.0};
@@ -5429,6 +5490,8 @@ namespace
         double bbox_max_nx{0.0};
         double bbox_max_ny{0.0};
         bool source_sorted{false};
+        bool research_artifacts{false};
+        bool front_samples_artifact_written{false};
         sdk::FRuntimeBrushSettings old_brush{};
         sdk::FRuntimeBrushSettings brush{};
         bool explicit_stroke_batch_used{false};
@@ -5461,6 +5524,52 @@ namespace
 
     std::mutex g_template_uv_brush_mutex;
     std::shared_ptr<TemplateUvBrushAsyncJob> g_template_uv_brush_job{};
+
+    auto write_front_samples_artifact(const std::shared_ptr<TemplateUvBrushAsyncJob>& job,
+                                      const SdkFrontCaptureResult& capture) -> bool
+    {
+        if (!job)
+        {
+            return false;
+        }
+        std::string json{};
+        json.reserve(256 + job->sample_pool.size() * 160);
+        json += "{\"schema_version\":1";
+        json += ",\"kind\":\"front_samples\"";
+        json += ",\"color_space\":\"linear\"";
+        json += ",\"mesh\":\"" + json_escape(early_hex_address(job->mesh)) + "\"";
+        json += ",\"component\":\"" + json_escape(early_hex_address(job->component)) + "\"";
+        json += ",\"viewport_width\":" + std::to_string(job->viewport_width);
+        json += ",\"viewport_height\":" + std::to_string(job->viewport_height);
+        json += ",\"capture_width\":" + std::to_string(capture.width);
+        json += ",\"capture_height\":" + std::to_string(capture.height);
+        json += ",\"capture_direction_x\":" + std::to_string(capture.capture_direction.X);
+        json += ",\"capture_direction_y\":" + std::to_string(capture.capture_direction.Y);
+        json += ",\"capture_direction_z\":" + std::to_string(capture.capture_direction.Z);
+        json += ",\"sample_count\":" + std::to_string(job->sample_pool.size());
+        json += ",\"samples\":[";
+        for (std::size_t i = 0; i < job->sample_pool.size(); ++i)
+        {
+            const auto& point = job->sample_pool[i];
+            if (i != 0)
+            {
+                json += ",";
+            }
+            json += "{\"x\":" + std::to_string(point.x);
+            json += ",\"y\":" + std::to_string(point.y);
+            json += ",\"u\":" + std::to_string(point.u);
+            json += ",\"v\":" + std::to_string(point.v);
+            json += ",\"r\":" + std::to_string(point.r);
+            json += ",\"g\":" + std::to_string(point.g);
+            json += ",\"b\":" + std::to_string(point.b);
+            json += ",\"metallic\":" + std::to_string(point.metallic);
+            json += ",\"roughness\":" + std::to_string(point.roughness);
+            json += ",\"stroke_radius\":" + std::to_string(point.stroke_radius);
+            json += "}";
+        }
+        json += "]}\n";
+        return write_bridge_sidecar_text(L".front_samples.json", json);
+    }
 
     auto is_template_uv_brush_request(const std::string& request) -> bool
     {
@@ -5910,6 +6019,7 @@ namespace
         const double tuning_server_brush_spacing = clamp_range(json_number_field(request, "server_brush_spacing", 0.08), 0.01, 0.5);
         const int tuning_server_batch_limit = json_int_field(request, "server_batch_limit", ServerPaintBatchStrokeLimit, 1, 500);
         const int tuning_server_batch_delay_ms = json_int_field(request, "server_batch_delay_ms", ServerPaintBatchDelayMs, 1, 1000);
+        const bool research_artifacts = request.find("\"research_artifacts\":true") != std::string::npos;
 
         auto job = std::make_shared<TemplateUvBrushAsyncJob>();
         job->queued = queued_job;
@@ -5933,6 +6043,7 @@ namespace
         job->server_brush_spacing = tuning_server_brush_spacing;
         job->server_batch_limit = tuning_server_batch_limit;
         job->server_batch_delay_ms = tuning_server_batch_delay_ms;
+        job->research_artifacts = research_artifacts;
         job->brush.Radius = static_cast<float>(job->brush_radius);
         const double visible_probe_width_px = std::max(1.0, static_cast<double>(job->viewport_width) * 0.88);
         const double visible_probe_height_px = std::max(1.0, static_cast<double>(job->viewport_height) * 0.96);
@@ -5962,6 +6073,7 @@ namespace
         job->metadata += ",\"tuning_server_batch_delay_ms\":" + std::to_string(job->server_batch_delay_ms);
         job->metadata += ",\"template_sampling_radius_policy\":\"fixed_brush_radius\"";
         job->metadata += ",\"template_sampling_brush_radius\":" + std::to_string(job->sampling_brush_radius);
+        job->metadata += std::string(",\"research_artifacts_requested\":") + json_bool(job->research_artifacts);
         job->started = std::chrono::steady_clock::now();
         job->last_tick = job->started;
 
@@ -6334,6 +6446,11 @@ namespace
                 job->roughness_sum += point.roughness;
             }
             job->sample_pool_points = static_cast<int>(job->sample_pool.size());
+            if (job->research_artifacts)
+            {
+                job->front_samples_artifact_written = write_front_samples_artifact(job, capture);
+                job->front_samples_artifact_count = job->front_samples_artifact_written ? job->sample_pool_points : 0;
+            }
             job->color_source = "scene_capture_basecolor_bulk_readback";
             auto paint_points = template_select_uniform_yx(job->sample_pool, job->point_target);
             for (auto& point : paint_points)
@@ -6525,7 +6642,8 @@ namespace
             const double denom = std::max(1, job->basecolor_samples);
             const double total_elapsed_ms = job_elapsed_ms();
             std::string metadata = job->metadata;
-            metadata += ",\"template_artifacts_written\":false";
+            metadata += std::string(",\"template_artifacts_written\":") + json_bool(job->front_samples_artifact_written);
+            metadata += ",\"front_samples_artifact_count\":" + std::to_string(job->front_samples_artifact_count);
             metadata += ",\"color_source\":\"" + json_escape(job->color_source) + "\"";
             metadata += ",\"template_base_probe_spacing_px\":" + std::to_string(job->base_probe_spacing_px);
             metadata += ",\"phase0_base_hits\":" + std::to_string(job->base_hits);

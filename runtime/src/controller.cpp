@@ -970,17 +970,30 @@ namespace
         return native_apply_mode == "template_brush_paint";
     }
 
+    auto research_artifacts_enabled() -> bool
+    {
+        wchar_t buffer[32]{};
+        const DWORD size = GetEnvironmentVariableW(L"MECCHA_RESEARCH_ARTIFACTS", buffer, static_cast<DWORD>(std::size(buffer)));
+        if (size == 0 || size >= std::size(buffer))
+            return false;
+        return buffer[0] == L'1' || buffer[0] == L't' || buffer[0] == L'T' || buffer[0] == L'y' || buffer[0] == L'Y';
+    }
+
     auto paint_payload(const Config& config, const ProcessInfo& process) -> std::string
     {
-        return std::string("{\"native_apply_mode\":") + json_string(config.native_apply_mode) +
-               ",\"route\":" + json_string(mode_to_route(config.native_apply_mode)) +
-               ",\"process\":{\"pid\":" + std::to_string(process.pid) +
-               ",\"name\":" + json_string(wide_to_utf8(process.name)) + "}" +
-               ",\"tuning\":{\"brush_radius\":" + std::to_string(config.tuning.brush_radius) +
-               ",\"brush_spacing\":" + std::to_string(config.tuning.brush_spacing) +
-               ",\"server_brush_spacing\":" + std::to_string(config.tuning.server_brush_spacing) +
-               ",\"server_batch_limit\":" + std::to_string(config.tuning.server_batch_limit) +
-               ",\"server_batch_delay_ms\":" + std::to_string(config.tuning.server_batch_delay_ms) + "}}";
+        auto payload = std::string("{\"native_apply_mode\":") + json_string(config.native_apply_mode) +
+                       ",\"route\":" + json_string(mode_to_route(config.native_apply_mode)) +
+                       ",\"process\":{\"pid\":" + std::to_string(process.pid) +
+                       ",\"name\":" + json_string(wide_to_utf8(process.name)) + "}" +
+                       ",\"tuning\":{\"brush_radius\":" + std::to_string(config.tuning.brush_radius) +
+                       ",\"brush_spacing\":" + std::to_string(config.tuning.brush_spacing) +
+                       ",\"server_brush_spacing\":" + std::to_string(config.tuning.server_brush_spacing) +
+                       ",\"server_batch_limit\":" + std::to_string(config.tuning.server_batch_limit) +
+                       ",\"server_batch_delay_ms\":" + std::to_string(config.tuning.server_batch_delay_ms) + "}";
+        if (research_artifacts_enabled())
+            payload += ",\"research_artifacts\":true";
+        payload += "}";
+        return payload;
     }
 
     auto wait_for_bridge_ready(const Config& config, const std::filesystem::path& bridge_path, Diagnostics& diagnostics, double seconds = 5.0) -> bool

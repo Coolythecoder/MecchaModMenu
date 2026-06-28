@@ -36,6 +36,9 @@ cd MecchaCamouflage
 make run
 ```
 
+Research notes for mesh, mapping, and resolver work live under
+[`docs/research`](docs/research/toolchain.md).
+
 ## License
 
 This project is licensed under [GPL-3.0-or-later](LICENSE.txt).

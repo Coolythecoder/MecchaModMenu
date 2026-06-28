@@ -1,8 +1,10 @@
 NATIVE_APPLY_MODE ?= template_brush_paint
+RESEARCH_ARTIFACTS ?= $(MECCHA_RESEARCH_ARTIFACTS)
 VERSION ?= 1.0.0
 BUILD_PS := scripts/build.ps1
 RUN_PS := scripts/dev.ps1
 PACKAGE_PS := scripts/release.ps1
+RESEARCH_ARTIFACT_FLAGS := $(if $(filter 1 true TRUE yes YES on ON,$(RESEARCH_ARTIFACTS)),-EnableResearchArtifacts,)
 
 .PHONY: build run package clean
 
@@ -21,7 +23,7 @@ build:
 	$(call RUN_POWERSHELL,$(BUILD_PS),)
 
 run: build
-	$(call RUN_POWERSHELL,$(RUN_PS),-NativeApplyMode $(NATIVE_APPLY_MODE))
+	$(call RUN_POWERSHELL,$(RUN_PS),-NativeApplyMode $(NATIVE_APPLY_MODE) $(RESEARCH_ARTIFACT_FLAGS))
 
 package: build
 	$(call RUN_POWERSHELL,$(PACKAGE_PS),-Version $(VERSION))
