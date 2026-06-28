@@ -2687,6 +2687,10 @@ namespace
         bool ok{false};
         std::string failure{"front_capture_unavailable"};
         std::vector<FrontSample> samples{};
+        std::vector<Color> capture_pixels{};
+        bool capture_pixels_available{false};
+        bool capture_flip_x{false};
+        bool capture_flip_y{false};
         std::string texture_source{"bulk_calibrated_direct_texture_unavailable"};
         int width{0};
         int height{0};
@@ -4735,12 +4739,11 @@ namespace
         int unsafe_side{0};
         int unsafe_back{0};
         int unsafe_enabled{0};
-        int unsafe_body_region{0};
-        int unsafe_limb_group{0};
-        int unsafe_source_distance{0};
+        int unsafe_projection_color{0};
         int source_depth_rejected{0};
         int source_facing_rejected{0};
         int source_direct_assignments{0};
+        int source_projection_assignments{0};
         double source_distance_avg_uv{0.0};
         double source_distance_p95_uv{0.0};
         double source_distance_max_uv{0.0};
@@ -4773,40 +4776,6 @@ namespace
             return stats.side_triangles;
         }
         return stats.back_triangles;
-    }
-
-    auto mesh_first_transfer_group_for_bone(const MeshFirstProfile& profile, int bone_index) -> std::string
-    {
-        if (bone_index < 0 || bone_index >= static_cast<int>(profile.bones.size()))
-        {
-            return {};
-        }
-        const auto name = lower_copy(profile.bones[static_cast<std::size_t>(bone_index)].name);
-        if (name.empty())
-        {
-            return {};
-        }
-        const bool left = name.size() >= 2 &&
-                          (name.rfind("_l") == name.size() - 2 ||
-                           name.rfind(".l") == name.size() - 2 ||
-                           name.rfind("-l") == name.size() - 2);
-        const bool right = name.size() >= 2 &&
-                           (name.rfind("_r") == name.size() - 2 ||
-                            name.rfind(".r") == name.size() - 2 ||
-                            name.rfind("-r") == name.size() - 2);
-        if (!left && !right)
-        {
-            return {};
-        }
-        if (contains_text(name, "leg") || contains_text(name, "foot") || contains_text(name, "hip"))
-        {
-            return left ? "leg_l" : "leg_r";
-        }
-        if (contains_text(name, "arm") || contains_text(name, "hand") || contains_text(name, "shoulder"))
-        {
-            return left ? "arm_l" : "arm_r";
-        }
-        return left ? "left" : "right";
     }
 
     auto mesh_first_uv_triangle_area(double u0, double v0, double u1, double v1, double u2, double v2) -> double
@@ -5384,55 +5353,102 @@ namespace
         return true;
     }
 
-    auto mesh_first_assign_colors(const MeshFirstProfile& profile,
-                                  std::vector<MeshFirstPlanSample>& samples,
-                                  const std::vector<FrontSample>& source_samples,
+    auto mesh_first_capture_project_color(const SdkFrontCaptureResult& capture,
+                                          const sdk::FVector& world_position,
+                                          Color& color) -> bool
+    {
+        const auto expected_pixels = static_cast<std::size_t>(std::max(0, capture.width)) *
+                                     static_cast<std::size_t>(std::max(0, capture.height));
+        if (!capture.capture_pixels_available ||
+            capture.width <= 0 ||
+            capture.height <= 0 ||
+            capture.capture_pixels.size() < expected_pixels)
+        {
+            return false;
+        }
+
+        const auto capture_forward = sdk_vec_normalize(capture.capture_direction);
+        sdk::FVector world_up{0.0, 0.0, 1.0};
+        auto capture_right = sdk_vec_normalize(sdk_vec_cross(world_up, capture_forward));
+        if (sdk_vec_len(capture_right) <= 0.000001)
+        {
+            world_up = {0.0, 1.0, 0.0};
+            capture_right = sdk_vec_normalize(sdk_vec_cross(world_up, capture_forward));
+        }
+        const auto capture_up = sdk_vec_normalize(sdk_vec_cross(capture_forward, capture_right));
+
+        const double half_fov_radians = capture.capture_fov * 3.14159265358979323846 / 360.0;
+        const double tan_half_horizontal = std::tan(half_fov_radians);
+        const double tan_half_vertical = tan_half_horizontal / std::max(0.001, capture.capture_aspect);
+        if (sdk_vec_len(capture_forward) <= 0.000001 ||
+            sdk_vec_len(capture_right) <= 0.000001 ||
+            sdk_vec_len(capture_up) <= 0.000001 ||
+            !std::isfinite(tan_half_horizontal) ||
+            !std::isfinite(tan_half_vertical) ||
+            tan_half_horizontal <= 0.000001 ||
+            tan_half_vertical <= 0.000001)
+        {
+            return false;
+        }
+
+        const auto rel = sdk_vec_sub(world_position, capture.capture_location);
+        const double depth = sdk_vec_dot(rel, capture_forward);
+        if (!std::isfinite(depth) || depth <= 0.000001)
+        {
+            return false;
+        }
+
+        const double right = sdk_vec_dot(rel, capture_right);
+        const double up = sdk_vec_dot(rel, capture_up);
+        const double ndc_x = right / (depth * tan_half_horizontal);
+        const double ndc_y = up / (depth * tan_half_vertical);
+        if (!std::isfinite(ndc_x) || !std::isfinite(ndc_y))
+        {
+            return false;
+        }
+
+        const double sx = (ndc_x * 0.5 + 0.5) * static_cast<double>(capture.width);
+        const double sy = (0.5 - ndc_y * 0.5) * static_cast<double>(capture.height);
+        if (sx < 0.0 ||
+            sy < 0.0 ||
+            sx >= static_cast<double>(capture.width) ||
+            sy >= static_cast<double>(capture.height))
+        {
+            return false;
+        }
+
+        const int px = std::max(0, std::min(capture.width - 1, static_cast<int>(std::round(sx))));
+        const int py = std::max(0, std::min(capture.height - 1, static_cast<int>(std::round(sy))));
+        const int bx = capture.capture_flip_x ? (capture.width - 1 - px) : px;
+        const int by = capture.capture_flip_y ? (capture.height - 1 - py) : py;
+        const auto pixel_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(capture.width) +
+                                 static_cast<std::size_t>(bx);
+        if (pixel_index >= capture.capture_pixels.size())
+        {
+            return false;
+        }
+
+        color = capture.capture_pixels[pixel_index];
+        color.r = clamp01(color.r);
+        color.g = clamp01(color.g);
+        color.b = clamp01(color.b);
+        color.roughness = 0.65;
+        color.metallic = 0.0;
+        return true;
+    }
+
+    auto mesh_first_assign_colors(std::vector<MeshFirstPlanSample>& samples,
+                                  const SdkFrontCaptureResult& capture,
                                   bool enable_front,
                                   bool enable_side,
                                   bool enable_back,
-                                  double side_source_max_uv,
-                                  double front_back_source_max_uv,
                                   MeshFirstPlanStats& stats) -> void
     {
+        const auto& source_samples = capture.samples;
         std::vector<double> uv_distances{};
         std::vector<double> component_distances{};
         uv_distances.reserve(samples.size());
         component_distances.reserve(samples.size());
-        auto unknown_body = [](const std::string& value) -> bool {
-            return value.empty() || value == "unknown";
-        };
-        auto transfer_key = [&](const std::string& body, const std::string& transfer_group) -> std::string {
-            if (!transfer_group.empty())
-            {
-                return transfer_group;
-            }
-            if (!unknown_body(body))
-            {
-                return body;
-            }
-            return "__unknown";
-        };
-        std::vector<std::string> source_keys{};
-        std::vector<std::vector<int>> source_bins{};
-        auto source_bin_for_key = [&](const std::string& key) -> int {
-            for (int i = 0; i < static_cast<int>(source_keys.size()); ++i)
-            {
-                if (source_keys[static_cast<std::size_t>(i)] == key)
-                {
-                    return i;
-                }
-            }
-            source_keys.push_back(key);
-            source_bins.emplace_back();
-            return static_cast<int>(source_bins.size() - 1);
-        };
-        for (int i = 0; i < static_cast<int>(source_samples.size()); ++i)
-        {
-            const auto& source = source_samples[static_cast<std::size_t>(i)];
-            const auto source_body = lower_copy(source.body_region);
-            const auto source_group = mesh_first_transfer_group_for_bone(profile, source.dominant_bone);
-            source_bins[static_cast<std::size_t>(source_bin_for_key(transfer_key(source_body, source_group)))].push_back(i);
-        }
         std::vector<const FrontSample*> direct_source_by_plan_index(samples.size(), nullptr);
         for (const auto& source : source_samples)
         {
@@ -5441,13 +5457,6 @@ namespace
                 direct_source_by_plan_index[static_cast<std::size_t>(source.plan_index)] = &source;
             }
         }
-        auto component_distance_limit = [&](MeshFirstRegion region) -> double {
-            if (region == MeshFirstRegion::Side)
-            {
-                return clamp_range(side_source_max_uv * 500.0, 20.0, 80.0);
-            }
-            return clamp_range(front_back_source_max_uv * 250.0, 40.0, 180.0);
-        };
         for (std::size_t sample_index = 0; sample_index < samples.size(); ++sample_index)
         {
             auto& sample = samples[sample_index];
@@ -5458,8 +5467,6 @@ namespace
             {
                 continue;
             }
-            bool source_body_mismatch = false;
-            bool source_limb_mismatch = false;
             if (source_samples.empty())
             {
                 sample.unsafe = true;
@@ -5485,101 +5492,27 @@ namespace
                     ++stats.enabled_samples;
                     continue;
                 }
-                const auto sample_body = lower_copy(sample.body_region);
-                const auto sample_transfer_group = mesh_first_transfer_group_for_bone(profile, sample.dominant_bone);
-                bool saw_body_candidate = false;
-                bool saw_limb_candidate = false;
-                const double max_component_distance = component_distance_limit(sample.region);
-                double best_distance_sq = std::numeric_limits<double>::infinity();
-                double best_uv_distance_sq = std::numeric_limits<double>::infinity();
-                const FrontSample* best = nullptr;
-                const auto sample_key = transfer_key(sample_body, sample_transfer_group);
-                int sample_bin = -1;
-                for (int i = 0; i < static_cast<int>(source_keys.size()); ++i)
+                Color projected_color{};
+                if (mesh_first_capture_project_color(capture, sample.world_position, projected_color))
                 {
-                    if (source_keys[static_cast<std::size_t>(i)] == sample_key)
-                    {
-                        sample_bin = i;
-                        break;
-                    }
+                    sample.source_distance_component = 0.0;
+                    sample.source_distance_uv = 0.0;
+                    component_distances.push_back(0.0);
+                    uv_distances.push_back(0.0);
+                    sample.r = clamp01(projected_color.r);
+                    sample.g = clamp01(projected_color.g);
+                    sample.b = clamp01(projected_color.b);
+                    sample.roughness = clamp01(projected_color.roughness);
+                    sample.metallic = clamp01(projected_color.metallic);
+                    sample.unsafe = false;
+                    ++stats.source_projection_assignments;
+                    ++stats.enabled_samples;
+                    continue;
                 }
-                if (sample_bin < 0)
-                {
-                    if (!sample_transfer_group.empty())
-                    {
-                        source_limb_mismatch = true;
-                    }
-                    else
-                    {
-                        source_body_mismatch = true;
-                    }
-                }
-                const auto* candidate_indices = sample_bin >= 0 ? &source_bins[static_cast<std::size_t>(sample_bin)] : nullptr;
-                if (candidate_indices)
-                {
-                    for (const int source_index : *candidate_indices)
-                    {
-                        const auto& source = source_samples[static_cast<std::size_t>(source_index)];
-                        if (!source.has_component_position)
-                        {
-                            continue;
-                        }
-                        saw_body_candidate = true;
-                        saw_limb_candidate = true;
-
-                        const auto component_delta = sdk_vec_sub(sample.local_position, source.component_position);
-                        const double component_distance_sq = sdk_vec_dot(component_delta, component_delta);
-                        if (!std::isfinite(component_distance_sq))
-                        {
-                            continue;
-                        }
-                        const double du = sample.u - source.u;
-                        const double dv = sample.v - source.v;
-                        const double uv_distance_sq = du * du + dv * dv;
-                        if (component_distance_sq < best_distance_sq ||
-                            (component_distance_sq == best_distance_sq && uv_distance_sq < best_uv_distance_sq))
-                        {
-                            best_distance_sq = component_distance_sq;
-                            best_uv_distance_sq = uv_distance_sq;
-                            best = &source;
-                        }
-                    }
-                }
-                if (best)
-                {
-                    sample.source_distance_component = std::sqrt(best_distance_sq);
-                    sample.source_distance_uv = std::sqrt(best_uv_distance_sq);
-                    component_distances.push_back(sample.source_distance_component);
-                    uv_distances.push_back(sample.source_distance_uv);
-                    sample.r = clamp01(best->r);
-                    sample.g = clamp01(best->g);
-                    sample.b = clamp01(best->b);
-                    sample.roughness = clamp01(std::max(0.35, best->roughness));
-                    sample.metallic = clamp01(best->metallic);
-                }
-                else
-                {
-                    sample.source_distance_uv = std::numeric_limits<double>::infinity();
-                    sample.source_distance_component = std::numeric_limits<double>::infinity();
-                }
-                sample.unsafe = !std::isfinite(sample.source_distance_component) ||
-                                sample.source_distance_component > max_component_distance;
-                if (best && sample.unsafe)
-                {
-                    ++stats.unsafe_source_distance;
-                }
-                if (!best)
-                {
-                    sample.unsafe = true;
-                    if (!saw_body_candidate && source_body_mismatch)
-                    {
-                        ++stats.unsafe_body_region;
-                    }
-                    else if (!saw_limb_candidate && source_limb_mismatch)
-                    {
-                        ++stats.unsafe_limb_group;
-                    }
-                }
+                sample.source_distance_uv = std::numeric_limits<double>::infinity();
+                sample.source_distance_component = std::numeric_limits<double>::infinity();
+                sample.unsafe = true;
+                ++stats.unsafe_projection_color;
             }
             if (sample.unsafe)
             {
@@ -5789,12 +5722,11 @@ namespace
                ",\"unsafe_side\":" + std::to_string(stats.unsafe_side) +
                ",\"unsafe_back\":" + std::to_string(stats.unsafe_back) +
                ",\"unsafe_enabled\":" + std::to_string(stats.unsafe_enabled) +
-               ",\"unsafe_body_region\":" + std::to_string(stats.unsafe_body_region) +
-               ",\"unsafe_limb_group\":" + std::to_string(stats.unsafe_limb_group) +
-               ",\"unsafe_source_distance\":" + std::to_string(stats.unsafe_source_distance) +
+               ",\"unsafe_projection_color\":" + std::to_string(stats.unsafe_projection_color) +
                ",\"source_depth_rejected\":" + std::to_string(stats.source_depth_rejected) +
                ",\"source_facing_rejected\":" + std::to_string(stats.source_facing_rejected) +
                ",\"source_direct_assignments\":" + std::to_string(stats.source_direct_assignments) +
+               ",\"source_projection_assignments\":" + std::to_string(stats.source_projection_assignments) +
                ",\"source_distance_avg_uv\":" + std::to_string(stats.source_distance_avg_uv) +
                ",\"source_distance_p95_uv\":" + std::to_string(stats.source_distance_p95_uv) +
                ",\"source_distance_max_uv\":" + std::to_string(stats.source_distance_max_uv) +
@@ -6404,23 +6336,17 @@ namespace
                                  metadata + ",\"replay_blocked\":true");
         }
 
-        mesh_first_assign_colors(profile,
-                                 plan_samples,
-                                 capture.samples,
+        mesh_first_assign_colors(plan_samples,
+                                 capture,
                                  enable_front,
                                  enable_side,
                                  enable_back,
-                                 tuning_side_source_max_uv,
-                                 tuning_front_back_source_max_uv,
                                  plan_stats);
         metadata += ",";
         metadata += mesh_first_plan_stats_metadata(plan_stats);
         metadata += ",\"planner_coverage_step_texels\":" + std::to_string(tuning_coverage_step_texels);
-        metadata += ",\"source_distance_policy\":\"visible_pose_component_nearest\"";
-        metadata += ",\"source_distance_side_max_uv\":" + std::to_string(tuning_side_source_max_uv);
-        metadata += ",\"source_distance_front_back_max_uv\":" + std::to_string(tuning_front_back_source_max_uv);
-        metadata += ",\"source_distance_side_max_component\":" + std::to_string(clamp_range(tuning_side_source_max_uv * 500.0, 20.0, 80.0));
-        metadata += ",\"source_distance_front_back_max_component\":" + std::to_string(clamp_range(tuning_front_back_source_max_uv * 250.0, 40.0, 180.0));
+        metadata += ",\"source_distance_policy\":\"camera_projection_pixel\"";
+        metadata += ",\"source_projection_color_available\":" + std::string(json_bool(capture.capture_pixels_available));
         metadata += ",\"source_samples\":" + std::to_string(capture.samples.size());
         if (plan_stats.unsafe_enabled > 0)
         {
@@ -6623,9 +6549,9 @@ namespace
             if (const auto thread_id = g_game_thread_id.load())
             {
                 PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
-            }
-            return {};
         }
+        return {};
+    }
 
         return response_json(false,
                              "mesh_first_async_required",
@@ -9119,7 +9045,7 @@ namespace
             return out;
         }
 
-        const auto& bulk = bulk_candidates[static_cast<std::size_t>(best_candidate)];
+        auto& bulk = bulk_candidates[static_cast<std::size_t>(best_candidate)];
         out.bulk_readback_used = true;
         out.texture_source = "bulk_calibrated_direct_texture";
         out.bulk_backend = bulk.backend;
@@ -9133,6 +9059,16 @@ namespace
                                        std::string(best_flip_y ? "flip_y" : "identity_y") + "|" +
                                        out.bulk_color_transform;
         out.capture_transform_backend = std::string(best_flip_x || best_flip_y ? "bulk_calibrated_flip" : "bulk_calibrated_identity");
+        out.capture_flip_x = best_flip_x;
+        out.capture_flip_y = best_flip_y;
+        for (auto& pixel : bulk.pixels)
+        {
+            pixel = sdk_apply_bulk_color_transform(pixel, best_transform);
+            pixel.roughness = 0.65;
+            pixel.metallic = 0.0;
+        }
+        out.capture_pixels = std::move(bulk.pixels);
+        out.capture_pixels_available = out.capture_pixels.size() >= static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height);
 
         out.samples.reserve(projected.size());
         for (const auto& projected_sample : projected)
@@ -9140,12 +9076,12 @@ namespace
             const int bx = best_flip_x ? (out.width - 1 - projected_sample.x) : projected_sample.x;
             const int by = best_flip_y ? (out.height - 1 - projected_sample.y) : projected_sample.y;
             const auto pixel_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(out.width) + static_cast<std::size_t>(bx);
-            if (pixel_index >= bulk.pixels.size())
+            if (pixel_index >= out.capture_pixels.size())
             {
                 ++out.missing_color;
                 continue;
             }
-            const auto raw_color = sdk_apply_bulk_color_transform(bulk.pixels[pixel_index], best_transform);
+            const auto raw_color = out.capture_pixels[pixel_index];
             const double raw_values[]{clamp01(raw_color.r), clamp01(raw_color.g), clamp01(raw_color.b)};
             bool raw_whiteish = true;
             for (const auto value : raw_values)
