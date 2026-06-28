@@ -1079,9 +1079,6 @@ namespace
                 summary.replay = "sent " + std::to_string(static_cast<long long>(sent));
                 if (batches >= 0.0)
                     summary.replay += ", batches " + std::to_string(static_cast<long long>(batches));
-                const bool local_ok = extract_json_bool(details, "local_visual_sync_ok", true);
-                if (!local_ok)
-                    summary.replay += ", local sync failed";
             }
             else
             {

@@ -85,7 +85,11 @@ namespace
 
     auto paint_full_route_native_direct(const std::string& request) -> std::string;
     auto is_mesh_first_paint_request(const std::string& request) -> bool;
-    auto paint_mesh_first_on_game_thread(const std::string& request) -> std::string;
+    auto paint_mesh_first_on_game_thread(const std::string& request,
+                                         const std::shared_ptr<QueuedPaintJob>& queued_job = {}) -> std::string;
+    auto start_mesh_first_paint_async_job(const std::string& request,
+                                          const std::shared_ptr<QueuedPaintJob>& queued_job) -> bool;
+    auto tick_mesh_first_batch_async_job() -> void;
     auto drain_paint_jobs_on_game_thread() -> void;
     void __fastcall hooked_process_event(void* object, void* function, void* params);
     LRESULT CALLBACK message_hook_proc(int code, WPARAM wparam, LPARAM lparam);
@@ -278,6 +282,20 @@ namespace
         }
         out += "}}\n";
         return out;
+    }
+
+    void complete_queued_paint_job(const std::shared_ptr<QueuedPaintJob>& job, const std::string& response)
+    {
+        if (!job)
+        {
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_paint_jobs_mutex);
+            job->response = response;
+            job->done = true;
+        }
+        g_paint_jobs_cv.notify_all();
     }
 
     auto resolve_bridge_port() -> int
@@ -3252,10 +3270,6 @@ namespace
                                        std::size_t offset,
                                        std::size_t count,
                                        std::string& failure) -> bool;
-    auto sdk_call_paint_at_uv_with_brush(std::uintptr_t component,
-                                         std::uintptr_t function,
-                                         const sdk::FPaintStroke& stroke,
-                                         std::string& failure) -> bool;
     auto sdk_call_server_paint_batch(const SdkContext& ctx,
                                      const std::vector<sdk::FPaintStroke>& strokes,
                                      std::size_t offset,
@@ -5115,13 +5129,42 @@ namespace
                ",\"" + key + "_failure\":\"" + json_escape(snapshot.failure) + "\"";
     }
 
+    struct MeshFirstServerBatchAsyncJob
+    {
+        std::shared_ptr<QueuedPaintJob> queued{};
+        std::uintptr_t component{0};
+        std::uintptr_t server_paint_batch_function{0};
+        std::vector<sdk::FPaintStroke> strokes{};
+        std::string metadata{};
+        MeshFirstChannelChecksum albedo_before{};
+        MeshFirstReplicationSnapshot replication_before{};
+        int server_batch_limit{ServerPaintBatchStrokeLimit};
+        int server_batch_delay_ms{ServerPaintBatchDelayMs};
+        int replay_front{0};
+        int replay_side{0};
+        int replay_back{0};
+        int server_batch_calls{0};
+        int server_batch_success{0};
+        int server_batch_failures{0};
+        int server_strokes_sent{0};
+        std::size_t offset{0};
+        std::string first_failure{};
+        std::chrono::steady_clock::time_point started{};
+        std::chrono::steady_clock::time_point server_next_batch_time{};
+        UINT_PTR server_batch_timer_id{0};
+    };
+
+    std::mutex g_mesh_first_batch_mutex;
+    std::shared_ptr<MeshFirstServerBatchAsyncJob> g_mesh_first_batch_job{};
+
     auto is_mesh_first_paint_request(const std::string& request) -> bool
     {
         return request.find("\"native_apply_mode\":\"mesh_first_paint\"") != std::string::npos ||
                request.find("\"route\":\"f10_mesh_first_paint\"") != std::string::npos;
     }
 
-    auto paint_mesh_first_on_game_thread(const std::string& request) -> std::string
+    auto paint_mesh_first_on_game_thread(const std::string& request,
+                                         const std::shared_ptr<QueuedPaintJob>& queued_job) -> std::string
     {
         const bool enable_front = json_bool_field(request, "enable_front_paint", true);
         const bool enable_side = json_bool_field(request, "enable_side_paint", true);
@@ -5155,6 +5198,29 @@ namespace
         metadata += ",\"server_batch_limit\":" + std::to_string(tuning_server_batch_limit);
         metadata += ",\"server_batch_delay_ms\":" + std::to_string(tuning_server_batch_delay_ms);
         metadata += ",\"bridge_events\":[\"mesh_profile_load\",\"pose_resolve\",\"planner_build\",\"bridge.paint_batch.request\",\"bridge.paint_batch.response\"]";
+
+        if (queued_job)
+        {
+            std::lock_guard<std::mutex> lock(g_mesh_first_batch_mutex);
+            if (g_mesh_first_batch_job)
+            {
+                return response_json(false,
+                                     "mesh_first_busy",
+                                     0,
+                                     1,
+                                     "mesh-first paint is already running",
+                                     metadata + ",\"replay_blocked\":true");
+            }
+        }
+        else
+        {
+            return response_json(false,
+                                 "mesh_first_async_required",
+                                 0,
+                                 1,
+                                 "mesh-first paint requires the async queued dispatcher",
+                                 metadata + ",\"replay_blocked\":true");
+        }
 
         if (!enable_front && !enable_side && !enable_back)
         {
@@ -5597,10 +5663,8 @@ namespace
         metadata += ",\"skeletal_triangle_anchor_used\":false";
         metadata += ",\"server_batch_rpc\":\"ServerPaintBatch\"";
         metadata += ",\"server_paint_batch_used\":true";
-        const auto local_paint_at_uv_function = ref.find_function(ctx.component, "PaintAtUVWithBrush");
-        metadata += ",\"local_paint_rpc\":\"PaintAtUVWithBrush\"";
-        metadata += ",\"local_paint_available\":" + std::string(json_bool(local_paint_at_uv_function != 0));
-        metadata += ",\"local_visual_sync_required\":false";
+        metadata += ",\"local_paint_rpc\":\"disabled\"";
+        metadata += ",\"authoritative_replay\":\"server_paint_batch_only\"";
 
         const auto albedo_before = mesh_first_export_channel_checksum(ref, ctx.component, sdk::EPaintChannel::Albedo);
         metadata += ",\"albedo_export_before_ok\":" + std::string(json_bool(albedo_before.ok));
@@ -5617,141 +5681,266 @@ namespace
                               4,
                               0.0,
                               "\"server_strokes_total\":" + std::to_string(strokes.size()) +
-                                  ",\"server_batch_limit\":" + std::to_string(tuning_server_batch_limit) +
-                                  ",\"server_batch_delay_ms\":" + std::to_string(tuning_server_batch_delay_ms));
-        const auto replication_before = mesh_first_capture_replication_snapshot(ref, ctx.component);
-        const auto batch_started = std::chrono::steady_clock::now();
-        int server_batch_calls = 0;
-        int server_batch_success = 0;
-        int server_batch_failures = 0;
-        int server_strokes_sent = 0;
-        int local_stroke_calls = 0;
-        int local_stroke_success = 0;
-        int local_stroke_failures = 0;
-        std::string first_failure{};
-        for (std::size_t offset = 0; offset < strokes.size();)
-        {
-            const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(tuning_server_batch_limit), strokes.size() - offset);
-            std::string batch_failure{};
-            ++server_batch_calls;
-            if (!sdk_call_server_paint_batch(ctx, strokes, offset, count, batch_failure))
-            {
-                ++server_batch_failures;
-                first_failure = batch_failure.empty() ? "ServerPaintBatch_failed" : batch_failure;
-                metadata += ",\"server_batch_calls\":" + std::to_string(server_batch_calls);
-                metadata += ",\"server_batch_success\":" + std::to_string(server_batch_success);
-                metadata += ",\"server_batch_failures\":" + std::to_string(server_batch_failures);
-                metadata += ",\"server_strokes_sent\":" + std::to_string(server_strokes_sent);
-                metadata += ",\"first_failure\":\"" + json_escape(first_failure) + "\"";
-                metadata += mesh_first_replication_snapshot_metadata("mesh_rep_before", replication_before);
-                metadata += mesh_first_replication_snapshot_metadata("mesh_rep_after_failure", mesh_first_capture_replication_snapshot(ref, ctx.component));
-                return response_json(false,
-                                     "mesh_server_batch_failed",
-                                     server_strokes_sent,
-                                     1,
-                                     "ServerPaintBatch failed: " + first_failure,
-                                     metadata);
-            }
-            ++server_batch_success;
-            server_strokes_sent += static_cast<int>(count);
-            offset += count;
-            const int percent = 80 + static_cast<int>((static_cast<long long>(server_strokes_sent) * 19LL) /
-                                                      std::max<int>(1, static_cast<int>(strokes.size())));
-            write_bridge_progress("mesh_server_batch",
-                                  "mesh-first ServerPaintBatch stream",
-                                  percent,
-                                  100,
-                                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - batch_started).count(),
-                                  "\"server_strokes_sent\":" + std::to_string(server_strokes_sent) +
-                                      ",\"server_strokes_total\":" + std::to_string(strokes.size()) +
-                                      ",\"server_batch_calls\":" + std::to_string(server_batch_calls) +
                                       ",\"server_batch_limit\":" + std::to_string(tuning_server_batch_limit) +
                                       ",\"server_batch_delay_ms\":" + std::to_string(tuning_server_batch_delay_ms));
-            if (offset < strokes.size())
+        const auto replication_before = mesh_first_capture_replication_snapshot(ref, ctx.component);
+
+        if (queued_job)
+        {
+            auto async_job = std::make_shared<MeshFirstServerBatchAsyncJob>();
+            async_job->queued = queued_job;
+            async_job->component = ctx.component;
+            async_job->server_paint_batch_function = ctx.server_paint_batch_function;
+            async_job->strokes = std::move(strokes);
+            async_job->metadata = metadata + ",\"server_batch_schedule\":\"timer_drained\"";
+            async_job->albedo_before = albedo_before;
+            async_job->replication_before = replication_before;
+            async_job->server_batch_limit = std::max(1, tuning_server_batch_limit);
+            async_job->server_batch_delay_ms = std::max(1, tuning_server_batch_delay_ms);
+            async_job->replay_front = replay_front;
+            async_job->replay_side = replay_side;
+            async_job->replay_back = replay_back;
+            async_job->started = std::chrono::steady_clock::now();
             {
-                Sleep(static_cast<DWORD>(std::max(1, tuning_server_batch_delay_ms)));
+                std::lock_guard<std::mutex> lock(g_mesh_first_batch_mutex);
+                g_mesh_first_batch_job = async_job;
+            }
+            if (const auto thread_id = g_game_thread_id.load())
+            {
+                PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+            }
+            return {};
+        }
+
+        return response_json(false,
+                             "mesh_first_async_required",
+                             0,
+                             1,
+                             "mesh-first paint requires the async queued dispatcher",
+                             metadata + ",\"replay_blocked\":true");
+    }
+
+    void complete_mesh_first_batch_job(const std::shared_ptr<MeshFirstServerBatchAsyncJob>& job, const std::string& response)
+    {
+        if (!job)
+        {
+            return;
+        }
+        if (job->server_batch_timer_id)
+        {
+            KillTimer(nullptr, job->server_batch_timer_id);
+            job->server_batch_timer_id = 0;
+        }
+        complete_queued_paint_job(job->queued, response);
+        {
+            std::lock_guard<std::mutex> lock(g_mesh_first_batch_mutex);
+            if (g_mesh_first_batch_job == job)
+            {
+                g_mesh_first_batch_job.reset();
             }
         }
-        const double batch_elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - batch_started).count();
-        const auto local_sync_started = std::chrono::steady_clock::now();
-        std::string local_visual_sync_failure{};
-        if (local_paint_at_uv_function)
+    }
+
+    auto start_mesh_first_paint_async_job(const std::string& request,
+                                          const std::shared_ptr<QueuedPaintJob>& queued_job) -> bool
+    {
+        const auto response = paint_mesh_first_on_game_thread(request, queued_job);
+        if (!response.empty())
         {
-            write_bridge_progress("mesh_local_visual_sync",
-                                  "Syncing local visual paint",
-                                  99,
+            complete_queued_paint_job(queued_job, response);
+        }
+        return true;
+    }
+
+    auto tick_mesh_first_batch_async_job() -> void
+    {
+        std::shared_ptr<MeshFirstServerBatchAsyncJob> job{};
+        {
+            std::lock_guard<std::mutex> lock(g_mesh_first_batch_mutex);
+            job = g_mesh_first_batch_job;
+        }
+        if (!job)
+        {
+            return;
+        }
+
+        auto clear_server_timer = [&]() {
+            if (job->server_batch_timer_id)
+            {
+                KillTimer(nullptr, job->server_batch_timer_id);
+                job->server_batch_timer_id = 0;
+            }
+        };
+        clear_server_timer();
+
+        auto post_next_after = [&](int delay_ms) {
+            if (const auto thread_id = g_game_thread_id.load())
+            {
+                if (delay_ms <= 0)
+                {
+                    PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+                    return;
+                }
+                const auto timer_id = SetTimer(nullptr, 0, static_cast<UINT>(std::max(1, delay_ms)), nullptr);
+                if (timer_id)
+                {
+                    job->server_batch_timer_id = timer_id;
+                    return;
+                }
+                PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+            }
+        };
+
+        auto elapsed_ms = [&]() {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - job->started).count();
+        };
+
+        if (job->strokes.empty())
+        {
+            complete_mesh_first_batch_job(job,
+                                          response_json(false,
+                                                        "mesh_replay_empty",
+                                                        0,
+                                                        1,
+                                                        "mesh-first async replay has no strokes",
+                                                        job->metadata + ",\"replay_blocked\":true"));
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (job->server_next_batch_time.time_since_epoch().count() != 0 &&
+            now < job->server_next_batch_time)
+        {
+            const int remaining_ms = std::max(
+                1,
+                static_cast<int>(std::ceil(std::chrono::duration<double, std::milli>(
+                    job->server_next_batch_time - now).count())));
+            post_next_after(remaining_ms);
+            return;
+        }
+        job->server_next_batch_time = {};
+
+        if (job->offset >= job->strokes.size())
+        {
+            const double batch_elapsed_ms = elapsed_ms();
+            std::string metadata = job->metadata;
+            metadata += ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls);
+            metadata += ",\"server_batch_success\":" + std::to_string(job->server_batch_success);
+            metadata += ",\"server_batch_failures\":" + std::to_string(job->server_batch_failures);
+            metadata += ",\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent);
+            metadata += ",\"server_batch_elapsed_ms\":" + std::to_string(batch_elapsed_ms);
+            metadata += ",\"first_failure\":\"" + json_escape(job->first_failure) + "\"";
+
+            Reflection ref{};
+            std::string init_failure{};
+            if (ref.init(init_failure))
+            {
+                const auto albedo_after = mesh_first_export_channel_checksum(ref, job->component, sdk::EPaintChannel::Albedo);
+                metadata += ",\"albedo_export_after_ok\":" + std::string(json_bool(albedo_after.ok));
+                metadata += ",\"albedo_export_after_bytes\":" + std::to_string(albedo_after.bytes);
+                metadata += ",\"albedo_export_after_hash\":\"" + std::to_string(albedo_after.hash) + "\"";
+                metadata += ",\"albedo_export_changed\":" +
+                            std::string(json_bool(job->albedo_before.ok && albedo_after.ok && job->albedo_before.hash != albedo_after.hash));
+                if (!albedo_after.ok)
+                {
+                    metadata += ",\"albedo_export_after_failure\":\"" + json_escape(albedo_after.failure) + "\"";
+                }
+                const auto replication_after = mesh_first_capture_replication_snapshot(ref, job->component);
+                metadata += mesh_first_replication_snapshot_metadata("mesh_rep_after", replication_after);
+            }
+            else
+            {
+                metadata += ",\"albedo_export_after_ok\":false";
+                metadata += ",\"albedo_export_after_failure\":\"reflection_unavailable:" + json_escape(init_failure) + "\"";
+                metadata += ",\"albedo_export_changed\":false";
+            }
+            metadata += mesh_first_replication_snapshot_metadata("mesh_rep_before", job->replication_before);
+
+            write_bridge_progress("mesh_paint_done",
+                                  "mesh-first paint completed",
+                                  100,
                                   100,
                                   batch_elapsed_ms,
-                                  "\"local_sync_strokes_total\":" + std::to_string(strokes.size()));
-            for (std::size_t local_index = 0; local_index < strokes.size(); ++local_index)
-            {
-                std::string local_failure{};
-                ++local_stroke_calls;
-                if (!sdk_call_paint_at_uv_with_brush(ctx.component,
-                                                     local_paint_at_uv_function,
-                                                     strokes[local_index],
-                                                     local_failure))
-                {
-                    ++local_stroke_failures;
-                    if (local_visual_sync_failure.empty())
-                    {
-                        local_visual_sync_failure = local_failure.empty() ? "PaintAtUVWithBrush_failed" : local_failure;
-                    }
-                    break;
-                }
-                ++local_stroke_success;
-            }
+                                  "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
+                                      ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls) +
+                                      ",\"front_strokes\":" + std::to_string(job->replay_front) +
+                                      ",\"side_strokes\":" + std::to_string(job->replay_side) +
+                                      ",\"back_strokes\":" + std::to_string(job->replay_back));
+            complete_mesh_first_batch_job(job,
+                                          response_json(true,
+                                                        "mesh_first_paint_done",
+                                                        job->server_strokes_sent,
+                                                        0,
+                                                        "mesh-first paint dispatched through ServerPaintBatch",
+                                                        metadata));
+            return;
         }
-        else
-        {
-            local_visual_sync_failure = "PaintAtUVWithBrush_unavailable";
-        }
-        const double local_sync_elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - local_sync_started).count();
-        metadata += ",\"server_batch_calls\":" + std::to_string(server_batch_calls);
-        metadata += ",\"server_batch_success\":" + std::to_string(server_batch_success);
-        metadata += ",\"server_batch_failures\":" + std::to_string(server_batch_failures);
-        metadata += ",\"server_strokes_sent\":" + std::to_string(server_strokes_sent);
-        metadata += ",\"local_stroke_calls\":" + std::to_string(local_stroke_calls);
-        metadata += ",\"local_stroke_success\":" + std::to_string(local_stroke_success);
-        metadata += ",\"local_stroke_failures\":" + std::to_string(local_stroke_failures);
-        metadata += ",\"local_visual_sync_used\":" + std::string(json_bool(local_paint_at_uv_function != 0));
-        metadata += ",\"local_visual_sync_ok\":" + std::string(json_bool(local_visual_sync_failure.empty()));
-        metadata += ",\"local_visual_sync_failure\":\"" + json_escape(local_visual_sync_failure) + "\"";
-        metadata += ",\"local_visual_sync_elapsed_ms\":" + std::to_string(local_sync_elapsed_ms);
-        metadata += ",\"server_batch_elapsed_ms\":" + std::to_string(batch_elapsed_ms);
-        metadata += ",\"first_failure\":\"" + json_escape(local_visual_sync_failure) + "\"";
-        Sleep(250);
-        const auto albedo_after = mesh_first_export_channel_checksum(ref, ctx.component, sdk::EPaintChannel::Albedo);
-        metadata += ",\"albedo_export_after_ok\":" + std::string(json_bool(albedo_after.ok));
-        metadata += ",\"albedo_export_after_bytes\":" + std::to_string(albedo_after.bytes);
-        metadata += ",\"albedo_export_after_hash\":\"" + std::to_string(albedo_after.hash) + "\"";
-        metadata += ",\"albedo_export_changed\":" + std::string(json_bool(albedo_before.ok && albedo_after.ok && albedo_before.hash != albedo_after.hash));
-        if (!albedo_after.ok)
-        {
-            metadata += ",\"albedo_export_after_failure\":\"" + json_escape(albedo_after.failure) + "\"";
-        }
-        const auto replication_after = mesh_first_capture_replication_snapshot(ref, ctx.component);
-        metadata += mesh_first_replication_snapshot_metadata("mesh_rep_before", replication_before);
-        metadata += mesh_first_replication_snapshot_metadata("mesh_rep_after", replication_after);
 
-        write_bridge_progress("mesh_paint_done",
-                              "mesh-first paint completed",
+        const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(std::max(1, job->server_batch_limit)),
+                                                        job->strokes.size() - job->offset);
+        SdkContext ctx{};
+        ctx.component = job->component;
+        ctx.server_paint_batch_function = job->server_paint_batch_function;
+        std::string batch_failure{};
+        ++job->server_batch_calls;
+        if (!sdk_call_server_paint_batch(ctx, job->strokes, job->offset, count, batch_failure))
+        {
+            ++job->server_batch_failures;
+            job->first_failure = batch_failure.empty() ? "ServerPaintBatch_failed" : batch_failure;
+            const double batch_elapsed_ms = elapsed_ms();
+            std::string metadata = job->metadata;
+            metadata += ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls);
+            metadata += ",\"server_batch_success\":" + std::to_string(job->server_batch_success);
+            metadata += ",\"server_batch_failures\":" + std::to_string(job->server_batch_failures);
+            metadata += ",\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent);
+            metadata += ",\"server_batch_elapsed_ms\":" + std::to_string(batch_elapsed_ms);
+            metadata += ",\"first_failure\":\"" + json_escape(job->first_failure) + "\"";
+            metadata += mesh_first_replication_snapshot_metadata("mesh_rep_before", job->replication_before);
+            Reflection ref{};
+            std::string init_failure{};
+            if (ref.init(init_failure))
+            {
+                metadata += mesh_first_replication_snapshot_metadata("mesh_rep_after_failure",
+                                                                     mesh_first_capture_replication_snapshot(ref, job->component));
+            }
+            else
+            {
+                metadata += ",\"mesh_rep_after_failure_failure\":\"reflection_unavailable:" + json_escape(init_failure) + "\"";
+            }
+            complete_mesh_first_batch_job(job,
+                                          response_json(false,
+                                                        "mesh_server_batch_failed",
+                                                        job->server_strokes_sent,
+                                                        1,
+                                                        "ServerPaintBatch failed: " + job->first_failure,
+                                                        metadata));
+            return;
+        }
+
+        ++job->server_batch_success;
+        job->server_strokes_sent += static_cast<int>(count);
+        job->offset += count;
+
+        const int percent = 80 + static_cast<int>((static_cast<long long>(job->server_strokes_sent) * 19LL) /
+                                                  std::max<int>(1, static_cast<int>(job->strokes.size())));
+        write_bridge_progress("mesh_server_batch",
+                              "mesh-first ServerPaintBatch stream",
+                              percent,
                               100,
-                              100,
-                              batch_elapsed_ms,
-                              "\"server_strokes_sent\":" + std::to_string(server_strokes_sent) +
-                                  ",\"server_batch_calls\":" + std::to_string(server_batch_calls) +
-                                  ",\"front_strokes\":" + std::to_string(replay_front) +
-                                  ",\"side_strokes\":" + std::to_string(replay_side) +
-                                  ",\"back_strokes\":" + std::to_string(replay_back));
-        return response_json(true,
-                             "mesh_first_paint_done",
-                             server_strokes_sent,
-                             local_visual_sync_failure.empty() ? 0 : 1,
-                             local_visual_sync_failure.empty()
-                                 ? "mesh-first paint dispatched through ServerPaintBatch"
-                                 : "mesh-first paint dispatched through ServerPaintBatch; local visual sync failed: " + local_visual_sync_failure,
-                             metadata);
+                              elapsed_ms(),
+                              "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
+                                  ",\"server_strokes_total\":" + std::to_string(job->strokes.size()) +
+                                  ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls) +
+                                  ",\"server_batch_limit\":" + std::to_string(job->server_batch_limit) +
+                                  ",\"server_batch_delay_ms\":" + std::to_string(job->server_batch_delay_ms));
+        if (job->offset < job->strokes.size())
+        {
+            job->server_next_batch_time = std::chrono::steady_clock::now() +
+                                          std::chrono::milliseconds(std::max(1, job->server_batch_delay_ms));
+            post_next_after(job->server_batch_delay_ms);
+            return;
+        }
+        post_next_after(0);
     }
 
     auto sdk_find_front_mesh(Reflection& ref, const SdkContext& ctx) -> std::uintptr_t
@@ -6248,29 +6437,6 @@ namespace
                                              offset,
                                              count,
                                              failure);
-    }
-
-    auto sdk_call_paint_at_uv_with_brush(std::uintptr_t component,
-                                         std::uintptr_t function,
-                                         const sdk::FPaintStroke& stroke,
-                                         std::string& failure) -> bool
-    {
-        if (!function)
-        {
-            failure = "PaintAtUVWithBrush_unavailable";
-            return false;
-        }
-        if (!live_uobject(component))
-        {
-            failure = "paint_component_unavailable";
-            return false;
-        }
-        sdk::RuntimePaintableComponent_PaintAtUVWithBrush params{};
-        params.Uv = stroke.Uv;
-        params.ChannelData = stroke.ChannelData;
-        params.BrushSettings = stroke.BrushSettings;
-        params.Channel = stroke.TargetChannel;
-        return process_event(component, function, reinterpret_cast<std::uint8_t*>(&params), failure);
     }
 
     struct SdkFrontColorStats
@@ -9509,6 +9675,9 @@ namespace
 
     auto drain_paint_jobs_on_game_thread() -> void
     {
+        tick_mesh_first_batch_async_job();
+        tick_template_uv_brush_async_job();
+
         std::vector<std::shared_ptr<QueuedPaintJob>> jobs{};
         {
             std::lock_guard<std::mutex> lock(g_paint_jobs_mutex);
@@ -9522,23 +9691,15 @@ namespace
             }
             if (is_mesh_first_paint_request(job->request))
             {
-                const auto response = paint_mesh_first_on_game_thread(job->request);
-                {
-                    std::lock_guard<std::mutex> lock(g_paint_jobs_mutex);
-                    job->response = response;
-                    job->done = true;
-                }
-                g_paint_jobs_cv.notify_all();
+                start_mesh_first_paint_async_job(job->request, job);
                 continue;
             }
             const auto response = paint_full_route_native_direct(job->request);
-            {
-                std::lock_guard<std::mutex> lock(g_paint_jobs_mutex);
-                job->response = response;
-                job->done = true;
-            }
-            g_paint_jobs_cv.notify_all();
+            complete_queued_paint_job(job, response);
         }
+
+        tick_mesh_first_batch_async_job();
+        tick_template_uv_brush_async_job();
     }
 
     void __fastcall hooked_process_event(void* object, void* function, void* params)

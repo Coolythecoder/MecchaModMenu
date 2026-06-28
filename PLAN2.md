@@ -15,10 +15,9 @@ coverage, source color transfer, and multiplayer replay through
 `ServerPaintBatch`.
 
 No fallback to dense hit-test, template paint, local-only paint, hidden
-material fill, orbit capture, or automatic quality downgrade should remain.
-`PaintAtUVWithBrush` is allowed only after successful `ServerPaintBatch` as
-local visual sync; it is never a fallback or replacement for server replay.
-If validation fails, paint fails clearly with Log and Trace details.
+material fill, orbit capture, automatic quality downgrade, or local visual sync
+should remain. If validation fails, paint fails clearly with Log and Trace
+details.
 
 ## Current Findings
 
@@ -189,11 +188,8 @@ Stroke rules:
 - `bHasLocalPosition=false`.
 - `bHasSkeletalTriangleAnchor=false` unless a later validated server need
   proves otherwise.
-- `PaintAtUVWithBrush` is not used in production replay.
-- After all `ServerPaintBatch` calls succeed, `PaintAtUVWithBrush` may run as
-  local visual sync only.
-- Local visual sync failure is reported separately and never treated as a
-  fallback success path.
+- `PaintAtUVWithBrush` is not used in production replay or local mirror sync.
+- `ServerPaintBatch` is the only authoritative replay operation.
 - `BrushSettings.Radius` comes from `stroke_radius_texels / texture_size`.
 - `BrushSettings.Spacing` is fixed internally and not exposed as quality.
 - `Hardness=1.0`, `Opacity=1.0`, normal blend mode.
@@ -323,7 +319,8 @@ or advertise it as part of the runtime path.
 ### Phase 5: Server Replay Cleanup
 
 - Send exactly one Albedo `ServerPaintBatch` stream.
-- Run local visual sync only after all server batches succeed.
+- Drain the stream through the game thread message/timer loop, one batch per tick, so batch pacing never sleeps on the game thread.
+- Do not run local visual sync after server replay.
 - Report batch counts and elapsed time.
 - Keep channel checksum diagnostics for Albedo.
 
@@ -366,9 +363,7 @@ Every mesh-first run must include these keys:
 - `estimated_replay_ms`
 - `runtime_hit_test_used=false`
 - `old_dense_hittest_fallback_used=false`
-- `local_visual_sync_used`
-- `local_visual_sync_ok`
-- `local_visual_sync_failure`
+- `authoritative_replay=server_paint_batch_only`
 
 ## Test Plan
 
@@ -384,8 +379,7 @@ Every mesh-first run must include these keys:
 - Confirm `Max strokes` blocks replay instead of downsampling.
 - Confirm unsafe side candidates block replay when side is enabled.
 - Confirm front/back are both enabled by default and use shared source colors.
-- Confirm `PaintAtUVWithBrush` is not called before successful
-  `ServerPaintBatch`, and local sync failures are reported separately.
+- Confirm `PaintAtUVWithBrush` is not called by the production mesh-first path.
 - Live visual tests:
   - front view
   - back view

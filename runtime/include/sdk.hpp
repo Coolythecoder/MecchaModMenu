@@ -263,15 +263,6 @@ namespace sdk
         FPaintStrokeBatch Batch{};
     };
 
-    struct RuntimePaintableComponent_PaintAtUVWithBrush
-    {
-        FVector2D Uv{};
-        FPaintChannelData ChannelData{};
-        FRuntimeBrushSettings BrushSettings{};
-        EPaintChannel Channel{EPaintChannel::Albedo};
-        std::uint8_t Pad_59[0x7]{};
-    };
-
     struct Controller_K2_GetPawn
     {
         void* ReturnValue{nullptr};
@@ -370,7 +361,6 @@ namespace sdk
     static_assert(offsetof(FPaintStroke, TargetChannel) == 0xB0, "PaintStroke TargetChannel offset mismatch");
     static_assert(sizeof(FPaintStrokeBatch) == 0x10, "PaintStrokeBatch layout mismatch");
     static_assert(sizeof(RuntimePaintableComponent_ServerPaintBatch) == 0x10, "ServerPaintBatch params layout mismatch");
-    static_assert(sizeof(RuntimePaintableComponent_PaintAtUVWithBrush) == 0x60, "PaintAtUVWithBrush params layout mismatch");
     static_assert(sizeof(Actor_K2_GetActorLocation) == 0x18, "K2_GetActorLocation params layout mismatch");
     static_assert(sizeof(KismetRenderingLibrary_CreateRenderTarget2D) == 0x30, "CreateRenderTarget2D params layout mismatch");
     static_assert(offsetof(KismetRenderingLibrary_CreateRenderTarget2D, Format) == 0x10, "CreateRenderTarget2D Format offset mismatch");
