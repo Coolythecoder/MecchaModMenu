@@ -6376,7 +6376,7 @@ namespace
                                  runtime_triangle_cache.failure.empty() ? "runtime_triangle_cache_unavailable" : runtime_triangle_cache.failure.c_str(),
                                  0,
                                  1,
-                                 "RuntimePaintable cached current triangles are unavailable; mesh-first paint cannot plan safely",
+                                 "RuntimePaintable cached current triangles are unavailable for the selected mesh; mesh-first paint is blocked before replay",
                                  metadata + ",\"replay_blocked\":true");
         }
         const int active_texture_size = profile_available ? profile.texture_size : 1024;
@@ -6446,7 +6446,7 @@ namespace
                                  "runtime_triangle_coordinate_projection_unavailable",
                                  0,
                                  1,
-                                 "no runtime triangle coordinate mode projects camera-facing samples into the viewport",
+                                 "no runtime triangle coordinate mode projects camera-facing samples into the current viewport",
                                  metadata + ",\"replay_blocked\":true");
         }
 
@@ -6514,7 +6514,7 @@ namespace
                                  "planner_source_unavailable",
                                  0,
                                  1,
-                                 "mesh-first planner produced no camera-facing source samples",
+                                 "mesh-first planner produced no camera-facing source samples; paint is blocked because no reliable source color can be captured",
                                  metadata + ",\"replay_blocked\":true");
         }
 
@@ -6572,7 +6572,7 @@ namespace
                                  "planner_blocked",
                                  0,
                                  1,
-                                 "mesh-first planner found unsafe color-transfer candidates in enabled regions",
+                                 "mesh-first planner found unsafe color-transfer candidates in enabled regions; replay was blocked instead of skipping samples",
                                  metadata + ",\"replay_blocked\":true");
         }
         if (research_artifacts)

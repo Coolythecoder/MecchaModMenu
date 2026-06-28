@@ -341,6 +341,11 @@ namespace
         return out.str();
     }
 
+    auto json_bool_text(bool value) -> const char*
+    {
+        return value ? "true" : "false";
+    }
+
     auto extract_json_bool(const std::string& text, const std::string& key, bool fallback = false) -> bool
     {
         const std::string needle = std::string("\"") + key + "\":";
@@ -1108,6 +1113,134 @@ namespace
         return summary;
     }
 
+    auto metric_count(const std::string& details, const std::string& key) -> long long
+    {
+        const auto value = extract_json_number(details, key, -1.0);
+        return value >= 0.0 ? static_cast<long long>(value) : -1;
+    }
+
+    void append_metric(std::ostringstream& out, const char* label, long long value)
+    {
+        if (value >= 0)
+            out << ", " << label << "=" << value;
+    }
+
+    void append_metric_double(std::ostringstream& out, const char* label, double value, int precision = 1)
+    {
+        if (value >= 0.0)
+            out << ", " << label << "=" << format_summary_number(value, precision);
+    }
+
+    auto paint_run_summary_message(const BridgeResponse& response, double elapsed_ms) -> std::string
+    {
+        const std::string& raw = response.raw;
+        std::ostringstream out;
+        out << (response.success ? "Paint summary: " : "Paint blocked: ");
+        out << (response.stage.empty() ? (response.success ? "ok" : "failed") : response.stage);
+        append_metric_double(out, "elapsed_ms", elapsed_ms, 0);
+        append_metric(out, "triangles", metric_count(raw, "runtime_triangle_cache_triangles"));
+        append_metric(out, "source", metric_count(raw, "planner_samples_source"));
+        append_metric(out, "front", metric_count(raw, "planner_samples_front"));
+        append_metric(out, "side", metric_count(raw, "planner_samples_side"));
+        append_metric(out, "back", metric_count(raw, "planner_samples_back"));
+        append_metric(out, "enabled", metric_count(raw, "planner_samples_enabled"));
+        append_metric(out, "unsafe", metric_count(raw, "unsafe_enabled"));
+        append_metric(out, "sent", metric_count(raw, "server_strokes_sent"));
+        append_metric(out, "batches", metric_count(raw, "server_batch_calls"));
+        append_metric(out, "batch_limit", metric_count(raw, "server_batch_limit"));
+        append_metric(out, "batch_delay_ms", metric_count(raw, "server_batch_delay_ms"));
+        append_metric_double(out, "brush_tx", extract_json_number(raw, "stroke_size_texels", -1.0), 1);
+        append_metric_double(out, "step_tx", extract_json_number(raw, "coverage_step_texels", -1.0), 1);
+        return out.str();
+    }
+
+    auto paint_run_summary_details(const BridgeResponse& response, double elapsed_ms) -> std::string
+    {
+        const std::string& raw = response.raw;
+        return std::string("{\"success\":") + json_bool_text(response.success) +
+               ",\"stage\":" + json_string(response.stage) +
+               ",\"message\":" + json_string(response.message.empty() ? response.transport_error : response.message) +
+               ",\"elapsed_ms\":" + std::to_string(elapsed_ms) +
+               ",\"quality_preset\":" + json_string(extract_json_string(raw, "quality_preset")) +
+               ",\"stroke_size_texels\":" + std::to_string(extract_json_number(raw, "stroke_size_texels", -1.0)) +
+               ",\"coverage_step_texels\":" + std::to_string(extract_json_number(raw, "coverage_step_texels", -1.0)) +
+               ",\"max_strokes\":" + std::to_string(metric_count(raw, "max_strokes")) +
+               ",\"server_batch_limit\":" + std::to_string(metric_count(raw, "server_batch_limit")) +
+               ",\"server_batch_delay_ms\":" + std::to_string(metric_count(raw, "server_batch_delay_ms")) +
+               ",\"enable_front_paint\":" + json_bool_text(extract_json_bool(raw, "enable_front_paint", false)) +
+               ",\"enable_side_paint\":" + json_bool_text(extract_json_bool(raw, "enable_side_paint", false)) +
+               ",\"enable_back_paint\":" + json_bool_text(extract_json_bool(raw, "enable_back_paint", false)) +
+               ",\"runtime_triangle_cache_used\":" + json_bool_text(extract_json_bool(raw, "runtime_triangle_cache_used", false)) +
+               ",\"runtime_triangle_cache_mode\":" + json_string(extract_json_string(raw, "runtime_triangle_cache_mode")) +
+               ",\"runtime_triangle_cache_triangles\":" + std::to_string(metric_count(raw, "runtime_triangle_cache_triangles")) +
+               ",\"runtime_triangle_cache_failure\":" + json_string(extract_json_string(raw, "runtime_triangle_cache_failure")) +
+               ",\"projection_mode\":" + json_string(extract_json_string(raw, "runtime_triangle_projection_mode")) +
+               ",\"projection_summary\":" + json_string(extract_json_string(raw, "runtime_triangle_projection_summary")) +
+               ",\"source_samples\":" + std::to_string(metric_count(raw, "planner_samples_source")) +
+               ",\"enabled_samples\":" + std::to_string(metric_count(raw, "planner_samples_enabled")) +
+               ",\"unsafe_enabled\":" + std::to_string(metric_count(raw, "unsafe_enabled")) +
+               ",\"unsafe_front\":" + std::to_string(metric_count(raw, "unsafe_front")) +
+               ",\"unsafe_side\":" + std::to_string(metric_count(raw, "unsafe_side")) +
+               ",\"unsafe_back\":" + std::to_string(metric_count(raw, "unsafe_back")) +
+               ",\"server_strokes_sent\":" + std::to_string(metric_count(raw, "server_strokes_sent")) +
+               ",\"server_batch_calls\":" + std::to_string(metric_count(raw, "server_batch_calls")) + "}";
+    }
+
+    auto paint_failure_hint_message(const BridgeResponse& response) -> std::string
+    {
+        const std::string& raw = response.raw;
+        const std::string stage = response.stage;
+        if (stage == "runtime_triangle_cache_unavailable" ||
+            response.message.find("RuntimePaintable cached current triangles") != std::string::npos)
+        {
+            const auto failure = extract_json_string(raw, "runtime_triangle_cache_failure");
+            std::string hint = "The selected mesh has no usable live RuntimePaintable triangle cache, so replay was blocked before sending strokes.";
+            if (!failure.empty())
+                hint += " Cache scan detail: " + failure + ".";
+            hint += " Test the same default settings on another mesh, or report this mesh as unsupported.";
+            return hint;
+        }
+        if (stage == "planner_source_unavailable")
+        {
+            return "No camera-facing source samples were found. Aim the camera at a visible painted surface that fills more of the viewport and retry with default settings.";
+        }
+        if (stage == "runtime_triangle_coordinate_projection_unavailable")
+        {
+            return "Runtime triangle coordinates did not project into the current camera view. This points to a coordinate/projection mismatch for this mesh.";
+        }
+        if (stage == "mesh_source_capture_failed")
+        {
+            const auto failure = extract_json_string(raw, "front_capture_failure");
+            return "SceneCapture could not read BaseColor for the camera-visible source samples." +
+                   std::string(failure.empty() ? "" : " Capture detail: " + failure + ".");
+        }
+        if (stage == "planner_blocked")
+        {
+            std::ostringstream out;
+            out << "Unsafe color-transfer candidates affect enabled regions, so paint was blocked instead of silently skipping samples.";
+            append_metric(out, "unsafe_front", metric_count(raw, "unsafe_front"));
+            append_metric(out, "unsafe_side", metric_count(raw, "unsafe_side"));
+            append_metric(out, "unsafe_back", metric_count(raw, "unsafe_back"));
+            append_metric(out, "unsafe_enabled", metric_count(raw, "unsafe_enabled"));
+            return out.str();
+        }
+        if (stage == "planner_max_strokes_exceeded")
+        {
+            std::ostringstream out;
+            out << "The planner exceeded Max strokes. Keep defaults for validation, or lower quality only after confirming the mesh works.";
+            append_metric(out, "enabled", metric_count(raw, "planner_samples_enabled"));
+            append_metric(out, "max", metric_count(raw, "max_strokes"));
+            return out.str();
+        }
+        if (stage == "mesh_replay_empty")
+            return "Planner produced no strokes for the enabled regions. Check that at least one mesh region is enabled and the mesh has valid UV coverage.";
+        if (stage == "component_world_transform_unavailable")
+            return "The live mesh component transform could not be resolved. Paint is blocked because current pose/world placement is not trustworthy.";
+        if (stage == "mesh_profile_runtime_identity_mismatch")
+            return "A live mesh was found, but it did not match the optional profile catalog. Runtime cache fallback should handle supported meshes; if it did not, report the selected mesh.";
+        return {};
+    }
+
     auto paint_payload(const Config& config, const ProcessInfo& process) -> std::string
     {
         const bool research_artifacts = std::getenv("MECCHA_RESEARCH_ARTIFACTS") != nullptr;
@@ -1338,6 +1471,15 @@ namespace
                               std::string("{\"elapsed_ms\":") + std::to_string(elapsed_ms) +
                               ",\"bridge_response\":" + (response.raw.empty() ? "{}" : response.raw) + "}", run_id);
         }
+        const std::string summary_details = paint_run_summary_details(response, elapsed_ms);
+        diagnostics.event("paint_run_summary",
+                          response.success ? "info" : "warning",
+                          response.success ? "paint_summary" : "paint_blocked",
+                          paint_run_summary_message(response, elapsed_ms),
+                          summary_details,
+                          run_id);
+        if (trace)
+            trace->push("paint", "summary", summary_details);
         diagnostics.set_last_run(std::string("{\"run_id\":") + json_string(run_id) +
                                  ",\"stage\":" + json_string(response.stage) +
                                  ",\"success\":" + (response.success ? "true" : "false") +
@@ -1356,6 +1498,8 @@ namespace
         const std::string details = std::string("{\"elapsed_ms\":") + std::to_string(elapsed_ms) +
                                     ",\"bridge_response\":" + (response.raw.empty() ? "{}" : response.raw) +
                                     ",\"win32_error\":" + std::to_string(response.win32_error) + "}";
+        if (const std::string hint = paint_failure_hint_message(response); !hint.empty())
+            diagnostics.event("paint_failure_hint", "warning", stage, hint, summary_details, run_id);
         diagnostics.record_error(stage, message, details, run_id);
         diagnostics.event("paint_failed", "error", stage, message, details, run_id);
         return false;
