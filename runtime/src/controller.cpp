@@ -911,8 +911,8 @@ namespace
         std::string last_result{"Waiting"};
         std::future<bool> paint_future{};
         bool paint_future_active{false};
-        std::future<BridgeResponse> shutdown_future{};
-        bool shutdown_future_active{false};
+        std::future<BridgeResponse> stop_future{};
+        bool stop_future_active{false};
         std::future<BridgeCheckResult> bridge_check_future{};
         bool bridge_check_future_active{false};
         DWORD bridge_check_pid{0};
@@ -1254,8 +1254,9 @@ namespace
         if (stage == "mesh_paint_done")
         {
             const double server_elapsed_ms = extract_json_number(progress, "server_batch_elapsed_ms", -1.0);
-            const double apply_initial = extract_json_number(progress, "apply_initial_pending_strokes", -1.0);
-            const double apply_elapsed_ms = apply_initial >= 0.0 ? extract_json_number(progress, "apply_queue_elapsed_ms", -1.0) : -1.0;
+            double apply_elapsed_ms = extract_json_number(progress, "local_visual_sync_elapsed_ms", -1.0);
+            if (apply_elapsed_ms < 0.0)
+                apply_elapsed_ms = extract_json_number(progress, "apply_queue_elapsed_ms", -1.0);
             if (server_elapsed_ms >= 0.0)
             {
                 ui_runtime.metric_server_elapsed = format_duration_label(server_elapsed_ms);
@@ -1625,8 +1626,12 @@ namespace
             return "Planner produced no strokes for the enabled regions. Check that at least one mesh region is enabled and the mesh has valid UV coverage.";
         if (stage == "component_world_transform_unavailable")
             return "The live mesh component transform could not be resolved. Paint is blocked because current pose/world placement is not trustworthy.";
+        if (stage == "mesh_profile_missing")
+            return "Optional mesh profile data is missing. The runtime mesh cache will be used when available.";
+        if (stage == "mesh_profile_identity_mismatch")
+            return "Optional mesh profile data did not match the live mesh. The runtime mesh cache will be used when available.";
         if (stage == "mesh_profile_runtime_identity_mismatch")
-            return "A live mesh was found, but it did not match the optional profile catalog. Runtime cache fallback should handle supported meshes; if it did not, report the selected mesh.";
+            return "The live mesh did not match the optional profile data. Paint was blocked instead of replaying with unsafe region mapping.";
         return {};
     }
 
@@ -1686,19 +1691,27 @@ namespace
         }
         diagnostics.set_bridge(bridge_json(config, bridge_path, "not_ready", ping));
         if (injected_pid == process.pid)
+        {
+            diagnostics.event("bridge_unavailable_same_pid",
+                              "error",
+                              "bridge",
+                              "Bridge unavailable; restart the game.",
+                              std::string("{\"process\":") + process_json(process, config.game_process_name) +
+                                  ",\"bridge_port\":" + std::to_string(config.bridge_port) + "}");
             return false;
+        }
         diagnostics.event("inject_started", "info", "inject", "attempting native bridge injection",
                           std::string("{\"process\":") + process_json(process, config.game_process_name) +
                           ",\"bridge_dll\":" + json_string(wide_to_utf8(bridge_path.wstring())) + "}");
         write_bridge_port_file(bridge_path, config.bridge_port);
         const auto [ok, message] = inject_dll(process.pid, bridge_path);
-        injected_pid = process.pid;
         diagnostics.event(ok ? "inject_done" : "inject_failed", ok ? "info" : "error", "inject",
                           ok ? "native bridge injection completed" : "native bridge injection failed",
                           std::string("{\"message\":") + json_string(message) +
                           ",\"bridge_port\":" + std::to_string(config.bridge_port) + "}");
         if (!ok)
             return false;
+        injected_pid = process.pid;
         return wait_for_bridge_ready(config, bridge_path, diagnostics, 5.0);
     }
 
@@ -1997,25 +2010,14 @@ namespace
         auto start_paint = [&](const char* trigger) {
             if (service.paint_future_active || !service.process.pid || !service.bridge_ready)
                 return;
-            const double start_now = seconds_now();
-            if (service.paint_settle_until > start_now)
-            {
-                const auto wait_seconds = static_cast<int>(std::ceil(service.paint_settle_until - start_now));
-                diagnostics.event("paint_hotkey_ignored",
-                                  "warning",
-                                  "paint",
-                                  "Previous paint is still settling; wait before starting another paint.",
-                                  std::string("{\"remaining_seconds\":") + std::to_string(wait_seconds) +
-                                      ",\"trigger\":" + json_string(trigger ? trigger : "") + "}");
-                return;
-            }
             if (paint_editing)
             {
                 diagnostics.event("paint_hotkey_ignored", "warning", "settings", "Paint settings are being edited; hotkey ignored.");
                 return;
             }
+            const std::string trigger_text = trigger ? trigger : "";
             const DWORD foreground_pid = foreground_process_id();
-            if (foreground_pid != 0 && foreground_pid != service.process.pid)
+            if (trigger_text != "UI Hotkey" && foreground_pid != 0 && foreground_pid != service.process.pid)
             {
                 diagnostics.event("paint_hotkey_ignored",
                                   "warning",
@@ -2046,6 +2048,7 @@ namespace
             service.paint_running = true;
             service.paint_state = "Running";
             service.last_result = "Painting";
+            service.paint_settle_until = 0.0;
             service.paint_started_at = seconds_now();
             {
                 std::error_code ec;
@@ -2097,8 +2100,7 @@ namespace
                 return;
             service.state = ControllerServiceState::Starting;
             service.bridge_ready = false;
-            service.bridge_state = "Recovering";
-            service.injected_pid = 0;
+            service.bridge_state = service.injected_pid == service.process.pid && service.process.pid != 0 ? "Checking" : "Recovering";
             service.waiting_for_hotkey_logged = false;
             service.waiting_for_process_logged = false;
             service.not_ready_hotkey_logged = false;
@@ -2120,14 +2122,14 @@ namespace
             service.waiting_for_hotkey_logged = false;
             service.not_ready_hotkey_logged = false;
             diagnostics.event("service_stop_requested", "info", "service", "Stopping service.");
-            if (!service.shutdown_future_active)
+            if (!service.stop_future_active)
             {
-                Config shutdown_config = config;
-                shutdown_config.bridge_timeout_seconds = 5.0;
-                service.shutdown_future = std::async(std::launch::async, [shutdown_config, bridge_path, &trace_buffer]() {
-                    return run_bridge_command(shutdown_config, bridge_path, "shutdown", "{}", &trace_buffer);
+                Config stop_config = config;
+                stop_config.bridge_timeout_seconds = 5.0;
+                service.stop_future = std::async(std::launch::async, [stop_config, bridge_path, &trace_buffer]() {
+                    return run_bridge_command(stop_config, bridge_path, "cancel_paint", "{}", &trace_buffer);
                 });
-                service.shutdown_future_active = true;
+                service.stop_future_active = true;
             }
         };
 
@@ -2217,11 +2219,22 @@ namespace
                 const bool ok = service.paint_future.get();
                 service.paint_future_active = false;
                 service.paint_running = false;
-                if (ok)
+                if (service.state == ControllerServiceState::Stopping)
                 {
-                    service.paint_settle_until = seconds_now() + 20.0;
-                    service.paint_state = "Settling";
-                    service.last_result = "Settling";
+                    service.paint_settle_until = 0.0;
+                    service.paint_state = "Idle";
+                    service.last_result = "Stopped";
+                    if (!service.stop_future_active)
+                    {
+                        service.state = ControllerServiceState::Stopped;
+                        service.bridge_state = "Paused";
+                    }
+                }
+                else if (ok)
+                {
+                    service.paint_settle_until = 0.0;
+                    service.paint_state = "Done";
+                    service.last_result = "Paint complete";
                 }
                 else
                 {
@@ -2232,20 +2245,38 @@ namespace
                 service.duplicate_paint_hotkey_logged = false;
             }
 
-            if (service.shutdown_future_active &&
-                service.shutdown_future.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+            if (service.stop_future_active &&
+                service.stop_future.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
             {
-                const auto response = service.shutdown_future.get();
-                service.shutdown_future_active = false;
-                service.state = response.success ? ControllerServiceState::Stopped : ControllerServiceState::Error;
-                service.bridge_ready = false;
-                service.bridge_state = response.success ? "Stopped" : "Stop failed";
-                service.injected_pid = 0;
-                service.last_bridge_check = 0.0;
-                diagnostics.event(response.success ? "service_stopped" : "service_stopped_shutdown_failed",
-                                  response.success ? "info" : "warning",
-                                  "service",
-                                  response.success ? "Service stopped." : "Service stopped; bridge shutdown did not confirm.");
+                const auto response = service.stop_future.get();
+                service.stop_future_active = false;
+                if (response.success)
+                {
+                    if (!service.paint_future_active)
+                    {
+                        service.state = ControllerServiceState::Stopped;
+                        service.bridge_state = "Paused";
+                    }
+                    else
+                    {
+                        service.bridge_state = "Cancelling";
+                    }
+                    service.bridge_ready = false;
+                    service.paint_settle_until = 0.0;
+                    service.last_bridge_check = 0.0;
+                    diagnostics.event("service_stopped", "info", "service", "Service stopped.");
+                }
+                else
+                {
+                    service.state = ControllerServiceState::Error;
+                    service.bridge_ready = false;
+                    service.bridge_state = "Stop failed";
+                    service.last_bridge_check = 0.0;
+                    diagnostics.event("service_stop_failed",
+                                      "warning",
+                                      response.stage.empty() ? "service" : response.stage,
+                                      response.message.empty() ? "Service stop failed." : response.message);
+                }
             }
 
             if (service.bridge_check_future_active &&
@@ -2258,8 +2289,13 @@ namespace
                 {
                     service.state = ControllerServiceState::Running;
                     service.bridge_ready = result.ready;
-                    service.injected_pid = result.ready ? result.injected_pid : 0;
+                    service.injected_pid = result.injected_pid;
                     service.bridge_state = result.ready ? "Ready" : "Not ready";
+                    if (!result.ready && result.injected_pid == result.pid && result.pid != 0)
+                    {
+                        service.state = ControllerServiceState::Error;
+                        service.bridge_state = "Unavailable";
+                    }
                     if (result.ready)
                     {
                         service.not_ready_hotkey_logged = false;
@@ -2341,7 +2377,6 @@ namespace
                 {
                     service.bridge_ready = false;
                     service.bridge_state = "Recovering";
-                    service.injected_pid = 0;
                     service.last_bridge_check = 0.0;
                     service.waiting_for_hotkey_logged = false;
                     if (!service.not_ready_hotkey_logged)
@@ -2383,15 +2418,16 @@ namespace
             ui_runtime.bridge_state = service.bridge_state;
             ui_runtime.bridge_ready = service.bridge_ready;
             ui_runtime.game_attached = service.process.pid != 0;
-            ui_runtime.paint_running = service.paint_running;
+            const bool paint_busy = service.paint_running || service.paint_future_active;
+            ui_runtime.paint_running = paint_busy;
             const bool paint_settling = service.paint_settle_until > seconds_now();
             ui_runtime.paint_ready = service.state == ControllerServiceState::Running &&
                                      service.process.pid != 0 &&
                                      service.bridge_ready &&
-                                     !service.paint_running &&
+                                     !paint_busy &&
                                      !paint_editing &&
                                      !paint_settling;
-            ui_runtime.paint_state = service.paint_running ? "Running" : (paint_settling ? "Settling" : (ui_runtime.paint_ready ? "Ready" : service.paint_state));
+            ui_runtime.paint_state = paint_busy ? "Running" : (paint_settling ? "Settling" : (ui_runtime.paint_ready ? "Ready" : service.paint_state));
             const auto mesh_summary = latest_mesh_ui_summary(events);
             ui_runtime.mesh_status = mesh_summary.mesh;
             ui_runtime.planner_status = mesh_summary.planner;
@@ -2400,7 +2436,7 @@ namespace
             ui_runtime.metric_server_elapsed = mesh_summary.server_elapsed.empty() ? "-" : mesh_summary.server_elapsed;
             ui_runtime.metric_apply_eta = mesh_summary.apply_eta.empty() ? "-" : mesh_summary.apply_eta;
             ui_runtime.metric_apply_elapsed = mesh_summary.apply_elapsed.empty() ? "-" : mesh_summary.apply_elapsed;
-            if (service.paint_running)
+            if (paint_busy)
             {
                 const double running_elapsed = std::max(0.0, (seconds_now() - service.paint_started_at) * 1000.0);
                 ui_runtime.metric_server_eta = "Calculating";
@@ -2429,7 +2465,7 @@ namespace
                 ui_runtime.status_title = "Recovering bridge.";
                 ui_runtime.status_detail = "Press " + meccha::hotkey_to_string(hotkeys.paint_binding()) + " again when ready.";
             }
-            else if (service.paint_running)
+            else if (paint_busy)
             {
                 ui_runtime.status_title = "Painting.";
                 ui_runtime.status_detail = "Paint request is running through ServerPaintBatch.";
@@ -2497,7 +2533,6 @@ namespace
                 {
                     service.bridge_ready = false;
                     service.bridge_state = "Recovering";
-                    service.injected_pid = 0;
                     service.last_bridge_check = 0.0;
                     if (!service.bridge_check_future_active)
                         start_bridge_check(service.process, now);
@@ -2705,8 +2740,8 @@ namespace
             service.paint_future.wait();
         if (service.bridge_check_future_active)
             service.bridge_check_future.wait();
-        if (service.shutdown_future_active)
-            service.shutdown_future.wait();
+        if (service.stop_future_active)
+            service.stop_future.wait();
         {
             Config shutdown_config = config;
             shutdown_config.bridge_timeout_seconds = 5.0;

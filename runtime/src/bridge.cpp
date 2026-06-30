@@ -41,6 +41,10 @@ namespace
     constexpr UINT PaintDispatchMessage = WM_APP + 0x4D43;
     constexpr int ServerPaintBatchStrokeLimit = 50;
     constexpr int ServerPaintBatchDelayMs = 300;
+    constexpr int MeshFirstServerBatchMinDelayMs = 15;
+    constexpr int MeshFirstApplySafePendingStrokes = 1000;
+    constexpr int MeshFirstApplyPollMs = 1000;
+    constexpr int MeshFirstApplyTimeoutMs = 240000;
 
     constexpr std::uintptr_t OffClass = 0x10;
     constexpr std::uintptr_t OffName = 0x18;
@@ -65,6 +69,7 @@ namespace
     std::atomic<std::uintptr_t> g_original_process_event{0};
     std::atomic<HHOOK> g_message_hook{nullptr};
     std::atomic<DWORD> g_game_thread_id{0};
+    std::atomic<HWND> g_game_window{nullptr};
     std::mutex g_hook_mutex;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> g_process_event_hook_slots;
     thread_local bool g_inside_process_event_hook = false;
@@ -94,6 +99,27 @@ namespace
     auto drain_paint_jobs_on_game_thread() -> void;
     void __fastcall hooked_process_event(void* object, void* function, void* params);
     LRESULT CALLBACK message_hook_proc(int code, WPARAM wparam, LPARAM lparam);
+
+    auto post_paint_dispatch_message() -> void
+    {
+        if (const auto hwnd = g_game_window.load())
+        {
+            PostMessageW(hwnd, PaintDispatchMessage, 0, 0);
+        }
+        if (const auto thread_id = g_game_thread_id.load())
+        {
+            PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+        }
+    }
+
+    void CALLBACK paint_dispatch_timer_proc(HWND, UINT, UINT_PTR timer_id, DWORD)
+    {
+        if (timer_id)
+        {
+            KillTimer(nullptr, timer_id);
+        }
+        post_paint_dispatch_message();
+    }
 
     template <typename T>
     auto safe_read(std::uintptr_t address, T fallback = T{}) -> T
@@ -2009,7 +2035,11 @@ namespace
         {
             return true;
         }
-        DWORD thread_id = 0;
+        struct HookTarget
+        {
+            DWORD thread_id{0};
+            HWND hwnd{nullptr};
+        } target{};
         const DWORD process_id = GetCurrentProcessId();
         EnumWindows(
             [](HWND hwnd, LPARAM lparam) -> BOOL {
@@ -2017,27 +2047,30 @@ namespace
                 const DWORD tid = GetWindowThreadProcessId(hwnd, &owner_pid);
                 if (owner_pid == GetCurrentProcessId() && tid != 0 && IsWindowVisible(hwnd))
                 {
-                    *reinterpret_cast<DWORD*>(lparam) = tid;
+                    auto* target = reinterpret_cast<HookTarget*>(lparam);
+                    target->thread_id = tid;
+                    target->hwnd = hwnd;
                     return FALSE;
                 }
                 return TRUE;
             },
-            reinterpret_cast<LPARAM>(&thread_id));
-        if (thread_id == 0)
+            reinterpret_cast<LPARAM>(&target));
+        if (target.thread_id == 0)
         {
             failure = "game_window_thread_unavailable pid=" + std::to_string(process_id);
             return false;
         }
-        const auto hook = SetWindowsHookExW(WH_GETMESSAGE, message_hook_proc, nullptr, thread_id);
+        const auto hook = SetWindowsHookExW(WH_GETMESSAGE, message_hook_proc, nullptr, target.thread_id);
         if (!hook)
         {
-            failure = "message_hook_install_failed win32=" + std::to_string(GetLastError()) + " thread=" + std::to_string(thread_id);
+            failure = "message_hook_install_failed win32=" + std::to_string(GetLastError()) + " thread=" + std::to_string(target.thread_id);
             return false;
         }
         g_message_hook.store(hook);
-        g_game_thread_id.store(thread_id);
+        g_game_thread_id.store(target.thread_id);
+        g_game_window.store(target.hwnd);
         g_process_event_hook_installed.store(true);
-        PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+        post_paint_dispatch_message();
         return true;
     }
 
@@ -2049,6 +2082,7 @@ namespace
             UnhookWindowsHookEx(message_hook);
         }
         g_game_thread_id.store(0);
+        g_game_window.store(nullptr);
         const auto hook = reinterpret_cast<std::uintptr_t>(&hooked_process_event);
         std::lock_guard<std::mutex> hook_lock(g_hook_mutex);
         for (const auto& entry : g_process_event_hook_slots)
@@ -4014,11 +4048,11 @@ namespace
         }
         if (profiles.empty())
         {
-            failure = "optional Mesh Profile V2 catalog is empty; using live runtime triangle cache";
+            failure = "optional mesh profile catalog is empty; using live runtime triangle cache";
         }
         else
         {
-            failure = "no Mesh Profile V2 matched the live mesh identity";
+            failure = "no optional mesh profile matched the live mesh identity";
             if (invalid_count > 0)
             {
                 failure += " (" + std::to_string(invalid_count) + " invalid profile(s) ignored)";
@@ -6054,6 +6088,172 @@ namespace
         metadata += ",\"mesh_debug_uv_region_bmp\":\"" + json_escape(narrow(region_path)) + "\"";
     }
 
+    auto mesh_first_write_projection_debug_artifact(const std::vector<MeshFirstPlanSample>& samples,
+                                                    const SdkFrontCaptureResult& capture,
+                                                    bool enable_front,
+                                                    bool enable_side,
+                                                    bool enable_back,
+                                                    std::string& metadata) -> void
+    {
+        const auto dir = runtime_log_dir_path();
+        if (dir.empty() || capture.width <= 0 || capture.height <= 0)
+        {
+            metadata += ",\"mesh_debug_projection_written\":false";
+            metadata += ",\"mesh_debug_projection_failure\":\"runtime_log_dir_or_capture_unavailable\"";
+            return;
+        }
+        const int width = capture.width;
+        const int height = capture.height;
+        const auto stamp = std::to_wstring(GetTickCount64());
+        const auto projection_path = dir + L"\\mesh-first-screen-projection-" + stamp + L".bmp";
+        std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3, 8);
+        if (capture.capture_pixels_available &&
+            capture.capture_pixels.size() >= static_cast<std::size_t>(width) * static_cast<std::size_t>(height))
+        {
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    const auto index = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+                    const auto& pixel = capture.capture_pixels[index];
+                    const auto out = index * 3;
+                    rgb[out + 0] = static_cast<std::uint8_t>(std::round(clamp01(pixel.r) * 255.0));
+                    rgb[out + 1] = static_cast<std::uint8_t>(std::round(clamp01(pixel.g) * 255.0));
+                    rgb[out + 2] = static_cast<std::uint8_t>(std::round(clamp01(pixel.b) * 255.0));
+                }
+            }
+        }
+
+        auto draw_disc = [&](int cx, int cy, int radius, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+            for (int dy = -radius; dy <= radius; ++dy)
+            {
+                for (int dx = -radius; dx <= radius; ++dx)
+                {
+                    if (dx * dx + dy * dy > radius * radius)
+                    {
+                        continue;
+                    }
+                    const int x = cx + dx;
+                    const int y = cy + dy;
+                    if (x < 0 || y < 0 || x >= width || y >= height)
+                    {
+                        continue;
+                    }
+                    const auto out = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 3;
+                    rgb[out + 0] = r;
+                    rgb[out + 1] = g;
+                    rgb[out + 2] = b;
+                }
+            }
+        };
+
+        auto project_to_capture = [&](const sdk::FVector& world_position, int& out_x, int& out_y) -> bool {
+            const auto capture_forward = sdk_vec_normalize(capture.capture_direction);
+            sdk::FVector world_up{0.0, 0.0, 1.0};
+            auto capture_right = sdk_vec_normalize(sdk_vec_cross(world_up, capture_forward));
+            if (sdk_vec_len(capture_right) <= 0.000001)
+            {
+                world_up = {0.0, 1.0, 0.0};
+                capture_right = sdk_vec_normalize(sdk_vec_cross(world_up, capture_forward));
+            }
+            const auto capture_up = sdk_vec_normalize(sdk_vec_cross(capture_forward, capture_right));
+            const double half_fov_radians = capture.capture_fov * 3.14159265358979323846 / 360.0;
+            const double tan_half_horizontal = std::tan(half_fov_radians);
+            const double tan_half_vertical = tan_half_horizontal / std::max(0.001, capture.capture_aspect);
+            if (sdk_vec_len(capture_forward) <= 0.000001 ||
+                sdk_vec_len(capture_right) <= 0.000001 ||
+                sdk_vec_len(capture_up) <= 0.000001 ||
+                !std::isfinite(tan_half_horizontal) ||
+                !std::isfinite(tan_half_vertical) ||
+                tan_half_horizontal <= 0.000001 ||
+                tan_half_vertical <= 0.000001)
+            {
+                return false;
+            }
+            const auto rel = sdk_vec_sub(world_position, capture.capture_location);
+            const double depth = sdk_vec_dot(rel, capture_forward);
+            if (!std::isfinite(depth) || depth <= 0.000001)
+            {
+                return false;
+            }
+            const double right = sdk_vec_dot(rel, capture_right);
+            const double up = sdk_vec_dot(rel, capture_up);
+            const double ndc_x = right / (depth * tan_half_horizontal);
+            const double ndc_y = up / (depth * tan_half_vertical);
+            if (!std::isfinite(ndc_x) || !std::isfinite(ndc_y))
+            {
+                return false;
+            }
+            const double sx = (ndc_x * 0.5 + 0.5) * static_cast<double>(width);
+            const double sy = (0.5 - ndc_y * 0.5) * static_cast<double>(height);
+            if (sx < 0.0 || sy < 0.0 || sx >= static_cast<double>(width) || sy >= static_cast<double>(height))
+            {
+                return false;
+            }
+            out_x = std::max(0, std::min(width - 1, static_cast<int>(std::round(sx))));
+            out_y = std::max(0, std::min(height - 1, static_cast<int>(std::round(sy))));
+            return true;
+        };
+
+        int source_drawn = 0;
+        for (const auto& source : capture.samples)
+        {
+            const int x = std::max(0, std::min(width - 1, static_cast<int>(std::round(clamp01(source.screen_nx) * static_cast<double>(width - 1)))));
+            const int y = std::max(0, std::min(height - 1, static_cast<int>(std::round(clamp01(source.screen_ny) * static_cast<double>(height - 1)))));
+            draw_disc(x, y, 2, 255, 255, 255);
+            ++source_drawn;
+        }
+
+        int plan_drawn = 0;
+        int plan_project_failed = 0;
+        for (const auto& sample : samples)
+        {
+            const bool enabled = (sample.region == MeshFirstRegion::Front && enable_front) ||
+                                 (sample.region == MeshFirstRegion::Side && enable_side) ||
+                                 (sample.region == MeshFirstRegion::Back && enable_back);
+            if (!enabled || sample.unsafe)
+            {
+                continue;
+            }
+            int x = 0;
+            int y = 0;
+            if (!project_to_capture(sample.world_position, x, y))
+            {
+                ++plan_project_failed;
+                continue;
+            }
+            if (sample.region == MeshFirstRegion::Front)
+            {
+                draw_disc(x, y, 1, 255, 70, 70);
+            }
+            else if (sample.region == MeshFirstRegion::Side)
+            {
+                draw_disc(x, y, 1, 80, 230, 110);
+            }
+            else
+            {
+                draw_disc(x, y, 1, 100, 150, 255);
+            }
+            ++plan_drawn;
+        }
+
+        const bool projection_ok = mesh_first_write_bmp_rgb(projection_path, width, height, rgb);
+        auto narrow = [](const std::wstring& value) {
+            std::string out{};
+            out.reserve(value.size());
+            for (const auto ch : value)
+            {
+                out.push_back(ch >= 0 && ch < 128 ? static_cast<char>(ch) : '?');
+            }
+            return out;
+        };
+        metadata += ",\"mesh_debug_projection_written\":" + std::string(json_bool(projection_ok));
+        metadata += ",\"mesh_debug_projection_source_samples\":" + std::to_string(source_drawn);
+        metadata += ",\"mesh_debug_projection_plan_samples\":" + std::to_string(plan_drawn);
+        metadata += ",\"mesh_debug_projection_failed\":" + std::to_string(plan_project_failed);
+        metadata += ",\"mesh_debug_screen_projection_bmp\":\"" + json_escape(narrow(projection_path)) + "\"";
+    }
+
     auto mesh_first_plan_stats_metadata(const MeshFirstPlanStats& stats) -> std::string
     {
         return "\"planner_triangles_total\":" + std::to_string(stats.total_triangles) +
@@ -6252,6 +6452,7 @@ namespace
         double server_batch_elapsed_ms{-1.0};
         std::size_t offset{0};
         std::string first_failure{};
+        bool local_visual_sync_enabled{false};
         bool local_sync_started{false};
         std::size_t local_offset{0};
         int local_stroke_calls{0};
@@ -6264,10 +6465,10 @@ namespace
         std::chrono::steady_clock::time_point apply_wait_started_at{};
         int apply_initial_pending_strokes{-1};
         int apply_last_pending_strokes{-1};
-        int apply_zero_confirmations{0};
         std::chrono::steady_clock::time_point server_next_batch_time{};
         UINT_PTR server_batch_timer_id{0};
         std::atomic<bool> cancel_requested{false};
+        std::string cancel_reason{"cancelled"};
     };
 
     std::mutex g_mesh_first_batch_mutex;
@@ -6392,6 +6593,21 @@ namespace
                                  metadata);
         }
 
+        const auto replication_preflight = mesh_first_capture_replication_snapshot(ref, ctx.component);
+        const int preflight_pending_strokes = mesh_first_pending_replication_strokes(replication_preflight);
+        if (preflight_pending_strokes > MeshFirstApplySafePendingStrokes)
+        {
+            return response_json(false,
+                                 "paint_queue_busy",
+                                 0,
+                                 1,
+                                 "previous paint is still applying; wait before starting another paint",
+                                 metadata + mesh_first_replication_snapshot_metadata("mesh_rep_preflight", replication_preflight) +
+                                     ",\"apply_pending_strokes\":" + std::to_string(preflight_pending_strokes) +
+                                     ",\"apply_safe_pending_strokes\":" + std::to_string(MeshFirstApplySafePendingStrokes) +
+                                     ",\"replay_blocked\":true");
+        }
+
         const auto mesh_candidates = sdk_collect_front_mesh_candidates(ref, ctx);
         metadata += ",\"front_mesh_candidate_count\":" + std::to_string(mesh_candidates.size());
         metadata += ",\"front_mesh_candidates\":" + sdk_front_mesh_candidates_json(ref, mesh_candidates);
@@ -6424,7 +6640,7 @@ namespace
         metadata += ",\"selected_mesh_asset_path\":\"" + json_escape(ref.object_path(selected_mesh.asset)) + "\"";
 
         write_bridge_progress("mesh_profile_load",
-                              "Loading Mesh Profile V2",
+                              "Loading optional mesh profile",
                               1,
                               4,
                               0.0,
@@ -6444,9 +6660,9 @@ namespace
         {
             metadata += ",\"mesh_profile_stage\":\"" + std::string(profile_catalog.empty() ? "mesh_profile_missing" : "mesh_profile_identity_mismatch") + "\"";
             metadata += ",\"mesh_profile_ok\":false";
-            metadata += ",\"mesh_profile_failure\":\"" + json_escape(profile_failure.empty() ? "Mesh Profile V2 is unavailable or does not match the live mesh" : profile_failure) + "\"";
+            metadata += ",\"mesh_profile_failure\":\"" + json_escape(profile_failure.empty() ? "optional mesh profile is unavailable or does not match the live mesh" : profile_failure) + "\"";
             metadata += ",\"mesh_identity_match\":false";
-            metadata += ",\"runtime_dynamic_profile_required\":true";
+            metadata += ",\"runtime_dynamic_profile_required\":false";
         }
 
         write_bridge_progress("pose_resolve",
@@ -6565,7 +6781,7 @@ namespace
                                  runtime_triangle_cache.failure.empty() ? "runtime_triangle_cache_unavailable" : runtime_triangle_cache.failure.c_str(),
                                  0,
                                  1,
-                                 "RuntimePaintable cached current triangles are unavailable for the selected mesh; mesh-first paint is blocked before replay",
+                                 "RuntimePaintable cached current triangles are unavailable; mesh-first paint cannot plan safely",
                                  metadata + ",\"replay_blocked\":true");
         }
         const int active_texture_size = profile_available ? profile.texture_size : 1024;
@@ -6777,6 +6993,12 @@ namespace
                                                 enable_side,
                                                 enable_back,
                                                 metadata);
+            mesh_first_write_projection_debug_artifact(plan_samples,
+                                                       capture,
+                                                       enable_front,
+                                                       enable_side,
+                                                       enable_back,
+                                                       metadata);
         }
 
         sdk::FRuntimeBrushSettings brush{};
@@ -6797,8 +7019,14 @@ namespace
 
         std::vector<sdk::FPaintStroke> strokes{};
         strokes.reserve(static_cast<std::size_t>(plan_stats.enabled_samples));
-        const bool use_mesh_anchors = false;
-        metadata += ",\"replay_anchor_policy\":\"" + std::string(use_mesh_anchors ? "profile_verified_triangle_anchor" : "uv_only_dynamic_runtime") + "\"";
+        const bool use_mesh_anchors = runtime_triangle_cache.ok &&
+                                      (runtime_triangle_cache_mode == "profile_verified" ||
+                                       runtime_triangle_cache_mode == "dynamic_runtime_scan");
+        const std::string replay_anchor_policy =
+            use_mesh_anchors
+                ? (runtime_triangle_cache_mode == "profile_verified" ? "profile_verified_triangle_anchor" : "runtime_triangle_cache_anchor")
+                : "uv_only_dynamic_runtime";
+        metadata += ",\"replay_anchor_policy\":\"" + replay_anchor_policy + "\"";
         int replay_front = 0;
         int replay_side = 0;
         int replay_back = 0;
@@ -6908,10 +7136,13 @@ namespace
         metadata += ",\"planner_strokes_side\":" + std::to_string(replay_side);
         metadata += ",\"planner_strokes_back\":" + std::to_string(replay_back);
         metadata += ",\"planner_strokes_total\":" + std::to_string(strokes.size());
+        const int effective_server_batch_delay_ms = std::max(MeshFirstServerBatchMinDelayMs, tuning_server_batch_delay_ms);
         const int estimated_batches = (static_cast<int>(strokes.size()) + std::max(1, tuning_server_batch_limit) - 1) / std::max(1, tuning_server_batch_limit);
-        const int estimated_replay_ms = std::max(0, estimated_batches - 1) * std::max(1, tuning_server_batch_delay_ms);
+        const int estimated_replay_ms = std::max(0, estimated_batches - 1) * effective_server_batch_delay_ms;
         metadata += ",\"server_batch_estimated_calls\":" + std::to_string(estimated_batches);
         metadata += ",\"estimated_replay_ms\":" + std::to_string(estimated_replay_ms);
+        metadata += ",\"server_batch_delay_requested_ms\":" + std::to_string(tuning_server_batch_delay_ms);
+        metadata += ",\"server_batch_delay_effective_ms\":" + std::to_string(effective_server_batch_delay_ms);
         metadata += ",\"skeletal_triangle_anchor_used\":" + std::string(json_bool(replay_triangle_anchors > 0));
         metadata += ",\"replay_anchor_mode\":\"" + std::string(use_mesh_anchors ? "skeletal_triangle" : "uv_only") + "\"";
         metadata += ",\"replay_world_anchors\":" + std::to_string(replay_world_anchors);
@@ -6924,7 +7155,7 @@ namespace
         metadata += ",\"local_paint_available\":" + std::string(json_bool(local_paint_at_uv_function != 0));
         metadata += ",\"local_visual_sync_required\":true";
         metadata += ",\"local_visual_sync_after_server_success\":true";
-        metadata += ",\"authoritative_replay\":\"server_paint_batch_then_local_visual_sync\"";
+        metadata += ",\"authoritative_replay\":\"server_paint_batch_with_interleaved_local_visual_sync\"";
 
         const auto albedo_before = mesh_first_export_channel_checksum(ref, ctx.component, sdk::EPaintChannel::Albedo);
         metadata += ",\"albedo_export_before_ok\":" + std::string(json_bool(albedo_before.ok));
@@ -6940,10 +7171,23 @@ namespace
                               3,
                               4,
                               0.0,
-                              "\"server_strokes_total\":" + std::to_string(strokes.size()) +
-                                      ",\"server_batch_limit\":" + std::to_string(tuning_server_batch_limit) +
-                                      ",\"server_batch_delay_ms\":" + std::to_string(tuning_server_batch_delay_ms));
+                                      "\"server_strokes_total\":" + std::to_string(strokes.size()) +
+                                              ",\"server_batch_limit\":" + std::to_string(tuning_server_batch_limit) +
+                                      ",\"server_batch_delay_ms\":" + std::to_string(effective_server_batch_delay_ms));
         const auto replication_before = mesh_first_capture_replication_snapshot(ref, ctx.component);
+        const int pending_before = mesh_first_pending_replication_strokes(replication_before);
+        if (pending_before > MeshFirstApplySafePendingStrokes)
+        {
+            return response_json(false,
+                                 "paint_queue_busy",
+                                 0,
+                                 1,
+                                 "previous paint is still applying; wait before starting another paint",
+                                 metadata + mesh_first_replication_snapshot_metadata("mesh_rep_before", replication_before) +
+                                     ",\"apply_pending_strokes\":" + std::to_string(pending_before) +
+                                     ",\"apply_safe_pending_strokes\":" + std::to_string(MeshFirstApplySafePendingStrokes) +
+                                     ",\"replay_blocked\":true");
+        }
 
         if (queued_job)
         {
@@ -6952,12 +7196,13 @@ namespace
             async_job->component = ctx.component;
             async_job->server_paint_batch_function = ctx.server_paint_batch_function;
             async_job->local_paint_at_uv_function = local_paint_at_uv_function;
+            async_job->local_visual_sync_enabled = true;
             async_job->strokes = std::move(strokes);
             async_job->metadata = metadata + ",\"server_batch_schedule\":\"timer_drained\"";
             async_job->albedo_before = albedo_before;
             async_job->replication_before = replication_before;
             async_job->server_batch_limit = std::max(1, tuning_server_batch_limit);
-            async_job->server_batch_delay_ms = std::max(1, tuning_server_batch_delay_ms);
+            async_job->server_batch_delay_ms = effective_server_batch_delay_ms;
             async_job->replay_front = replay_front;
             async_job->replay_side = replay_side;
             async_job->replay_back = replay_back;
@@ -6966,12 +7211,9 @@ namespace
                 std::lock_guard<std::mutex> lock(g_mesh_first_batch_mutex);
                 g_mesh_first_batch_job = async_job;
             }
-            if (const auto thread_id = g_game_thread_id.load())
-            {
-                PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+            post_paint_dispatch_message();
+            return {};
         }
-        return {};
-    }
 
         return response_json(false,
                              "mesh_first_async_required",
@@ -7041,35 +7283,9 @@ namespace
             return 0;
         }
         const std::string cancel_reason = reason && *reason ? reason : "cancelled";
+        job->cancel_reason = cancel_reason;
         job->cancel_requested.store(true);
-        if (const auto thread_id = g_game_thread_id.load())
-        {
-            PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
-        }
-        if (job->queued)
-        {
-            std::unique_lock<std::mutex> lock(g_paint_jobs_mutex);
-            const bool completed = g_paint_jobs_cv.wait_for(lock, std::chrono::milliseconds(1500), [&]() {
-                return job->queued->done;
-            });
-            if (completed)
-            {
-                return 1;
-            }
-        }
-        const double elapsed_ms = std::chrono::duration<double, std::milli>(
-                                      std::chrono::steady_clock::now() - job->started)
-                                      .count();
-        write_bridge_progress("mesh_paint_cancelled",
-                              "mesh-first paint cancelled",
-                              0,
-                              1,
-                              elapsed_ms,
-                              "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
-                                  ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls) +
-                                  ",\"local_strokes_synced\":" + std::to_string(job->local_stroke_success) +
-                                  ",\"cancel_reason\":\"" + json_escape(cancel_reason) + "\"");
-        complete_mesh_first_batch_job(job, mesh_first_cancel_response(job, cancel_reason));
+        post_paint_dispatch_message();
         return 1;
     }
 
@@ -7116,20 +7332,23 @@ namespace
         clear_server_timer();
 
         auto post_next_after = [&](int delay_ms) {
-            if (const auto thread_id = g_game_thread_id.load())
+            if (g_game_thread_id.load() || g_game_window.load())
             {
                 if (delay_ms <= 0)
                 {
-                    PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+                    post_paint_dispatch_message();
                     return;
                 }
-                const auto timer_id = SetTimer(nullptr, 0, static_cast<UINT>(std::max(1, delay_ms)), nullptr);
+                const auto timer_id = SetTimer(nullptr,
+                                               0,
+                                               static_cast<UINT>(std::max(1, delay_ms)),
+                                               paint_dispatch_timer_proc);
                 if (timer_id)
                 {
                     job->server_batch_timer_id = timer_id;
                     return;
                 }
-                PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+                post_paint_dispatch_message();
             }
         };
 
@@ -7139,6 +7358,7 @@ namespace
 
         if (job->cancel_requested.load())
         {
+            const std::string cancel_reason = job->cancel_reason.empty() ? "cancelled" : job->cancel_reason;
             write_bridge_progress("mesh_paint_cancelled",
                                   "mesh-first paint cancelled",
                                   0,
@@ -7147,8 +7367,8 @@ namespace
                                   "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
                                       ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls) +
                                       ",\"local_strokes_synced\":" + std::to_string(job->local_stroke_success) +
-                                      ",\"cancel_reason\":\"shutdown\"");
-            complete_mesh_first_batch_job(job, mesh_first_cancel_response(job, "shutdown"));
+                                      ",\"cancel_reason\":\"" + json_escape(cancel_reason) + "\"");
+            complete_mesh_first_batch_job(job, mesh_first_cancel_response(job, cancel_reason));
             return;
         }
 
@@ -7179,7 +7399,9 @@ namespace
 
         const std::size_t local_target_offset =
             std::min<std::size_t>(job->offset, job->strokes.size());
-        if (job->local_visual_sync_failure.empty() && job->local_offset < local_target_offset)
+        if (job->local_visual_sync_enabled &&
+            job->local_visual_sync_failure.empty() &&
+            job->local_offset < local_target_offset)
         {
             if (!job->local_sync_started)
             {
@@ -7257,14 +7479,10 @@ namespace
                     ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - job->local_sync_started_at).count()
                     : 0.0;
             const bool local_visual_sync_ok =
-                job->local_visual_sync_failure.empty() &&
-                job->local_stroke_success == static_cast<int>(job->strokes.size());
+                !job->local_visual_sync_enabled ||
+                (job->local_visual_sync_failure.empty() &&
+                 job->local_stroke_success == static_cast<int>(job->strokes.size()));
             const std::string final_failure = !job->first_failure.empty() ? job->first_failure : job->local_visual_sync_failure;
-            if (local_visual_sync_ok && final_failure.empty())
-            {
-                job->apply_wait_started = false;
-            }
-            const double apply_queue_elapsed_ms = 0.0;
             int final_pending_strokes = -1;
             Reflection pending_ref{};
             std::string pending_ref_failure{};
@@ -7272,6 +7490,68 @@ namespace
             {
                 const auto pending_snapshot = mesh_first_capture_replication_snapshot(pending_ref, job->component);
                 final_pending_strokes = mesh_first_pending_replication_strokes(pending_snapshot);
+            }
+            const bool pending_known = final_pending_strokes >= 0;
+            if (!job->apply_wait_started)
+            {
+                job->apply_wait_started = true;
+                job->apply_wait_started_at = std::chrono::steady_clock::now();
+                job->apply_initial_pending_strokes = final_pending_strokes;
+            }
+            if (job->apply_initial_pending_strokes < final_pending_strokes)
+            {
+                job->apply_initial_pending_strokes = final_pending_strokes;
+            }
+            job->apply_last_pending_strokes = final_pending_strokes;
+            const double apply_queue_elapsed_ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - job->apply_wait_started_at).count();
+            if (pending_known && final_pending_strokes > MeshFirstApplySafePendingStrokes)
+            {
+                if (apply_queue_elapsed_ms >= MeshFirstApplyTimeoutMs)
+                {
+                    std::string timeout_metadata = job->metadata;
+                    timeout_metadata += ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls);
+                    timeout_metadata += ",\"server_batch_success\":" + std::to_string(job->server_batch_success);
+                    timeout_metadata += ",\"server_batch_failures\":" + std::to_string(job->server_batch_failures);
+                    timeout_metadata += ",\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent);
+                    timeout_metadata += ",\"server_batch_elapsed_ms\":" + std::to_string(server_elapsed_ms);
+                    timeout_metadata += ",\"apply_queue_wait_used\":true";
+                    timeout_metadata += ",\"apply_queue_elapsed_ms\":" + std::to_string(apply_queue_elapsed_ms);
+                    timeout_metadata += ",\"apply_safe_pending_strokes\":" + std::to_string(MeshFirstApplySafePendingStrokes);
+                    timeout_metadata += ",\"apply_queue_timeout_ms\":" + std::to_string(MeshFirstApplyTimeoutMs);
+                    timeout_metadata += ",\"apply_initial_pending_strokes\":" + std::to_string(job->apply_initial_pending_strokes);
+                    timeout_metadata += ",\"apply_last_pending_strokes\":" + std::to_string(final_pending_strokes);
+                    timeout_metadata += ",\"first_failure\":\"apply_queue_timeout\"";
+                    complete_mesh_first_batch_job(job,
+                                                  response_json(false,
+                                                                "mesh_apply_queue_timeout",
+                                                                job->server_strokes_sent,
+                                                                1,
+                                                                "paint apply queue did not drain before timeout",
+                                                                timeout_metadata));
+                    return;
+                }
+
+                const int initial = std::max(job->apply_initial_pending_strokes, final_pending_strokes);
+                const int done = std::max(0, initial - final_pending_strokes);
+                const int step = 80 + static_cast<int>((static_cast<long long>(done) * 19LL) / std::max(1, initial));
+                write_bridge_progress("mesh_apply_wait",
+                                      "Waiting for game paint apply queue",
+                                      step,
+                                      100,
+                                      total_elapsed_ms,
+                                      "\"server_strokes_sent\":" + std::to_string(job->server_strokes_sent) +
+                                          ",\"server_strokes_total\":" + std::to_string(job->strokes.size()) +
+                                          ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls) +
+                                          ",\"server_batch_limit\":" + std::to_string(job->server_batch_limit) +
+                                          ",\"server_batch_delay_ms\":" + std::to_string(job->server_batch_delay_ms) +
+                                          ",\"server_batch_elapsed_ms\":" + std::to_string(server_elapsed_ms) +
+                                          ",\"apply_queue_elapsed_ms\":" + std::to_string(apply_queue_elapsed_ms) +
+                                          ",\"apply_initial_pending_strokes\":" + std::to_string(initial) +
+                                          ",\"apply_pending_strokes\":" + std::to_string(final_pending_strokes) +
+                                          ",\"apply_safe_pending_strokes\":" + std::to_string(MeshFirstApplySafePendingStrokes));
+                post_next_after(MeshFirstApplyPollMs);
+                return;
             }
             std::string metadata = job->metadata;
             metadata += ",\"server_batch_calls\":" + std::to_string(job->server_batch_calls);
@@ -7282,17 +7562,18 @@ namespace
             metadata += ",\"local_stroke_calls\":" + std::to_string(job->local_stroke_calls);
             metadata += ",\"local_stroke_success\":" + std::to_string(job->local_stroke_success);
             metadata += ",\"local_stroke_failures\":" + std::to_string(job->local_stroke_failures);
-            metadata += ",\"local_visual_sync_used\":" + std::string(json_bool(job->local_paint_at_uv_function != 0));
+            metadata += ",\"local_visual_sync_used\":" + std::string(json_bool(job->local_visual_sync_enabled));
             metadata += ",\"local_visual_sync_ok\":" + std::string(json_bool(local_visual_sync_ok));
             metadata += ",\"local_visual_sync_failure\":\"" + json_escape(job->local_visual_sync_failure) + "\"";
             metadata += ",\"local_visual_sync_elapsed_ms\":" + std::to_string(local_sync_elapsed_ms);
-            metadata += ",\"apply_queue_wait_used\":false";
+            metadata += ",\"apply_queue_wait_used\":" + std::string(json_bool(job->apply_wait_started));
             metadata += ",\"apply_queue_elapsed_ms\":" + std::to_string(apply_queue_elapsed_ms);
-            metadata += ",\"apply_initial_pending_strokes\":" + std::to_string(final_pending_strokes);
+            metadata += ",\"apply_safe_pending_strokes\":" + std::to_string(MeshFirstApplySafePendingStrokes);
+            metadata += ",\"apply_queue_timeout_ms\":" + std::to_string(MeshFirstApplyTimeoutMs);
+            metadata += ",\"apply_initial_pending_strokes\":" + std::to_string(job->apply_initial_pending_strokes);
             metadata += ",\"apply_last_pending_strokes\":" + std::to_string(final_pending_strokes);
             metadata += ",\"total_replay_elapsed_ms\":" + std::to_string(total_elapsed_ms);
             metadata += ",\"first_failure\":\"" + json_escape(final_failure) + "\"";
-
             Reflection ref{};
             std::string init_failure{};
             if (ref.init(init_failure))
@@ -7331,7 +7612,8 @@ namespace
                                       ",\"local_visual_sync_elapsed_ms\":" + std::to_string(local_sync_elapsed_ms) +
                                       ",\"apply_queue_elapsed_ms\":" + std::to_string(apply_queue_elapsed_ms) +
                                       ",\"apply_initial_pending_strokes\":" + std::to_string(job->apply_initial_pending_strokes) +
-                                      ",\"apply_pending_strokes\":" + std::to_string(std::max(0, job->apply_last_pending_strokes)) +
+                                      ",\"apply_pending_strokes\":" + std::to_string(std::max(0, final_pending_strokes)) +
+                                      ",\"apply_safe_pending_strokes\":" + std::to_string(MeshFirstApplySafePendingStrokes) +
                                       ",\"front_strokes\":" + std::to_string(job->replay_front) +
                                       ",\"side_strokes\":" + std::to_string(job->replay_side) +
                                       ",\"back_strokes\":" + std::to_string(job->replay_back));
@@ -7341,7 +7623,7 @@ namespace
                                                         job->server_strokes_sent,
                                                         local_visual_sync_ok ? 0 : 1,
                                                         local_visual_sync_ok
-                                                            ? "mesh-first paint dispatched through ServerPaintBatch and local visual sync"
+                                                            ? "mesh-first paint dispatched through ServerPaintBatch"
                                                             : "ServerPaintBatch succeeded but local visual sync failed: " + final_failure,
                                                         metadata));
             return;
@@ -10539,10 +10821,7 @@ namespace
                               100,
                               0.0,
                               "\"color_source\":\"scene_capture_basecolor_bulk_readback\"");
-        if (const auto thread_id = g_game_thread_id.load())
-        {
-            PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
-        }
+        post_paint_dispatch_message();
         return true;
     }
 
@@ -10567,20 +10846,23 @@ namespace
         };
         clear_server_timer();
         auto post_next_after = [&](int delay_ms) {
-            if (const auto thread_id = g_game_thread_id.load())
+            if (g_game_thread_id.load() || g_game_window.load())
             {
                 if (delay_ms <= 0)
                 {
-                    PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+                    post_paint_dispatch_message();
                     return;
                 }
-                const auto timer_id = SetTimer(nullptr, 0, static_cast<UINT>(std::max(1, delay_ms)), nullptr);
+                const auto timer_id = SetTimer(nullptr,
+                                               0,
+                                               static_cast<UINT>(std::max(1, delay_ms)),
+                                               paint_dispatch_timer_proc);
                 if (timer_id)
                 {
                     job->server_batch_timer_id = timer_id;
                     return;
                 }
-                PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
+                post_paint_dispatch_message();
             }
         };
         auto post_next = [&]() {
@@ -11294,12 +11576,16 @@ namespace
     {
         if (code >= 0)
         {
-            __try
+            const auto* msg = reinterpret_cast<const MSG*>(lparam);
+            if (msg && msg->message == PaintDispatchMessage)
             {
-                drain_paint_jobs_on_game_thread();
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
+                __try
+                {
+                    drain_paint_jobs_on_game_thread();
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
             }
         }
         return CallNextHookEx(g_message_hook.load(), code, wparam, lparam);
@@ -11319,14 +11605,28 @@ namespace
             g_paint_jobs.push_back(job);
         }
         g_paint_jobs_cv.notify_all();
-        if (const auto thread_id = g_game_thread_id.load())
-        {
-            PostThreadMessageW(thread_id, PaintDispatchMessage, 0, 0);
-        }
+        post_paint_dispatch_message();
         std::unique_lock<std::mutex> lock(g_paint_jobs_mutex);
-        const bool completed = g_paint_jobs_cv.wait_for(lock, std::chrono::seconds(240), [&]() {
-            return job->done;
-        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(240);
+        bool completed = job->done;
+        while (!completed)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline)
+            {
+                break;
+            }
+            completed = g_paint_jobs_cv.wait_until(lock,
+                                                   std::min(deadline, now + std::chrono::milliseconds(1000)),
+                                                   [&]() { return job->done; });
+            if (completed)
+            {
+                break;
+            }
+            lock.unlock();
+            post_paint_dispatch_message();
+            lock.lock();
+        }
         if (!completed)
         {
             return response_json(false, "game_thread_dispatch_timeout", 0, 1, "game thread did not process paint job");
@@ -11342,17 +11642,31 @@ namespace
         }
         if (line.find("\"type\":\"capabilities\"") != std::string::npos)
         {
-            std::string commands = "[\"ping\",\"capabilities\",\"paint_full_route\",\"shutdown\"]";
+            std::string commands = "[\"ping\",\"capabilities\",\"paint_full_route\",\"cancel_paint\",\"shutdown\"]";
             return std::string("{\"success\":true,\"stage\":\"capabilities\",\"applied\":0,\"failures\":0,") +
                    "\"message\":\"ok\",\"timing_ms\":{}," +
                    "\"metadata\":{\"commands\":" + commands + "," +
+                   "\"cancel_paint\":true," +
+                   "\"single_injection_per_pid\":true," +
                    "\"sdk\":\"runtime_dynamic_reflection_min\"," +
                    "\"paint_full_route\":\"mesh_first_paint\"," +
                    "\"texture_import_used\":false," +
-                   "\"local_paint_used\":false," +
-                   "\"paint_at_uv_with_brush_used\":false," +
+                   "\"local_paint_used\":true," +
+                   "\"paint_at_uv_with_brush_used\":true," +
                    "\"replication\":\"server_paint_batch\"," +
                    "\"multiplayer_replicated\":true}}\n";
+        }
+        if (line.find("\"type\":\"cancel_paint\"") != std::string::npos)
+        {
+            const int cancelled_active = cancel_active_mesh_first_batch_job("cancel_paint");
+            const int cancelled_queued = cancel_queued_paint_jobs("cancel_paint");
+            return response_json(true,
+                                 "paint_cancel_requested",
+                                 0,
+                                 0,
+                                 "paint cancel requested",
+                                 "\"cancelled_active_paint_jobs\":" + std::to_string(cancelled_active) +
+                                     ",\"cancelled_queued_paint_jobs\":" + std::to_string(cancelled_queued));
         }
         if (line.find("\"type\":\"shutdown\"") != std::string::npos)
         {
