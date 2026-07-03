@@ -48,6 +48,8 @@ namespace
     constexpr int MeshFirstFastApplyRenderTargetWritesPerFrame = 4096;
     constexpr int MeshFirstServerTextureSyncPollMs = 50;
     constexpr int MeshFirstServerTextureSyncMaxPolls = 40;
+    constexpr int MeshFirstTextureSyncObserverPollMs = 50;
+    constexpr int MeshFirstTextureSyncObserverMaxPolls = 40;
     constexpr double MeshFirstRuntimeCoordinateMaxAvgErrorCm = 50.0;
 
     constexpr std::uintptr_t OffClass = 0x10;
@@ -64,7 +66,7 @@ namespace
     constexpr std::uintptr_t OffFFieldName = 0x20;
     constexpr std::uintptr_t OffFPropertyElementSize = 0x3C;
     constexpr std::uintptr_t OffFPropertyOffset = 0x44;
-    constexpr std::uintptr_t OffFStructPropertyStruct = 0x78;
+    constexpr std::uintptr_t OffFStructPropertyStruct = 0x70;
 
     HMODULE g_module = nullptr;
     std::atomic<bool> g_running{true};
@@ -74,6 +76,15 @@ namespace
     std::atomic<HHOOK> g_message_hook{nullptr};
     std::atomic<DWORD> g_game_thread_id{0};
     std::atomic<HWND> g_game_window{nullptr};
+    std::atomic<std::uintptr_t> g_observed_sync_channel_function{0};
+    std::atomic<std::uintptr_t> g_observed_sync_compressed_channel_function{0};
+    std::atomic<int> g_observed_sync_channel_calls{0};
+    std::atomic<int> g_observed_sync_compressed_channel_calls{0};
+    std::atomic<int> g_observed_sync_channel_last_channel{-1};
+    std::atomic<int> g_observed_sync_compressed_channel_last_channel{-1};
+    std::atomic<std::int64_t> g_observed_sync_channel_bytes{0};
+    std::atomic<std::int64_t> g_observed_sync_compressed_channel_bytes{0};
+    std::atomic<std::int64_t> g_observed_sync_compressed_channel_uncompressed_bytes{0};
     std::mutex g_hook_mutex;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> g_process_event_hook_slots;
     thread_local bool g_inside_process_event_hook = false;
@@ -86,6 +97,17 @@ namespace
         std::string response{};
         bool dispatched{false};
         bool done{false};
+    };
+
+    struct TextureSyncObserverSnapshot
+    {
+        int sync_channel_calls{0};
+        int sync_compressed_channel_calls{0};
+        int sync_channel_last_channel{-1};
+        int sync_compressed_channel_last_channel{-1};
+        std::int64_t sync_channel_bytes{0};
+        std::int64_t sync_compressed_channel_bytes{0};
+        std::int64_t sync_compressed_channel_uncompressed_bytes{0};
     };
 
     std::mutex g_paint_jobs_mutex;
@@ -102,8 +124,55 @@ namespace
                                           const std::shared_ptr<QueuedPaintJob>& queued_job) -> bool;
     auto tick_mesh_first_batch_async_job() -> void;
     auto drain_paint_jobs_on_game_thread() -> void;
+    auto is_paint_replication_probe_request(const std::string& request) -> bool;
+    auto paint_replication_probe_on_game_thread(const std::string& request) -> std::string;
     void __fastcall hooked_process_event(void* object, void* function, void* params);
     LRESULT CALLBACK message_hook_proc(int code, WPARAM wparam, LPARAM lparam);
+
+    auto reset_texture_sync_observer(std::uintptr_t sync_channel_function,
+                                     std::uintptr_t sync_compressed_channel_function) -> void
+    {
+        g_observed_sync_channel_function.store(sync_channel_function);
+        g_observed_sync_compressed_channel_function.store(sync_compressed_channel_function);
+        g_observed_sync_channel_calls.store(0);
+        g_observed_sync_compressed_channel_calls.store(0);
+        g_observed_sync_channel_last_channel.store(-1);
+        g_observed_sync_compressed_channel_last_channel.store(-1);
+        g_observed_sync_channel_bytes.store(0);
+        g_observed_sync_compressed_channel_bytes.store(0);
+        g_observed_sync_compressed_channel_uncompressed_bytes.store(0);
+    }
+
+    auto texture_sync_observer_snapshot() -> TextureSyncObserverSnapshot
+    {
+        TextureSyncObserverSnapshot out{};
+        out.sync_channel_calls = g_observed_sync_channel_calls.load();
+        out.sync_compressed_channel_calls = g_observed_sync_compressed_channel_calls.load();
+        out.sync_channel_last_channel = g_observed_sync_channel_last_channel.load();
+        out.sync_compressed_channel_last_channel = g_observed_sync_compressed_channel_last_channel.load();
+        out.sync_channel_bytes = g_observed_sync_channel_bytes.load();
+        out.sync_compressed_channel_bytes = g_observed_sync_compressed_channel_bytes.load();
+        out.sync_compressed_channel_uncompressed_bytes = g_observed_sync_compressed_channel_uncompressed_bytes.load();
+        return out;
+    }
+
+    auto texture_sync_observer_has_activity(const TextureSyncObserverSnapshot& snapshot) -> bool
+    {
+        return snapshot.sync_channel_calls > 0 || snapshot.sync_compressed_channel_calls > 0;
+    }
+
+    auto texture_sync_observer_metadata(const char* prefix, const TextureSyncObserverSnapshot& snapshot) -> std::string
+    {
+        const std::string key(prefix ? prefix : "texture_sync_observer");
+        return ",\"" + key + "_sync_channel_calls\":" + std::to_string(snapshot.sync_channel_calls) +
+               ",\"" + key + "_sync_compressed_channel_calls\":" + std::to_string(snapshot.sync_compressed_channel_calls) +
+               ",\"" + key + "_sync_channel_last_channel\":" + std::to_string(snapshot.sync_channel_last_channel) +
+               ",\"" + key + "_sync_compressed_channel_last_channel\":" + std::to_string(snapshot.sync_compressed_channel_last_channel) +
+               ",\"" + key + "_sync_channel_bytes\":" + std::to_string(snapshot.sync_channel_bytes) +
+               ",\"" + key + "_sync_compressed_channel_bytes\":" + std::to_string(snapshot.sync_compressed_channel_bytes) +
+               ",\"" + key + "_sync_compressed_channel_uncompressed_bytes\":" +
+                   std::to_string(snapshot.sync_compressed_channel_uncompressed_bytes);
+    }
 
     auto post_paint_dispatch_message() -> void
     {
@@ -1043,6 +1112,7 @@ namespace
     auto write_number(Reflection& ref, std::uintptr_t prop, std::uint8_t* container, double value) -> bool;
     auto process_event(std::uintptr_t object, std::uintptr_t function, std::uint8_t* params, std::string& failure) -> bool;
     auto read_return_bool(Reflection& ref, std::uintptr_t function, std::uint8_t* params) -> bool;
+    auto json_bool(bool value) -> const char*;
 
     auto clamp01(double value) -> double
     {
@@ -1350,6 +1420,229 @@ namespace
             cls = safe_read<std::uintptr_t>(cls + OffSuperStruct);
         }
         return 0;
+    }
+
+    auto paint_probe_property_schema(Reflection& ref, std::uintptr_t structure, int max_fields = 16) -> std::string
+    {
+        if (!structure)
+        {
+            return "";
+        }
+        std::string out{};
+        int count = 0;
+        for (auto prop = safe_read<std::uintptr_t>(structure + OffChildProperties);
+             prop && count < max_fields;
+             prop = safe_read<std::uintptr_t>(prop + OffFFieldNext), ++count)
+        {
+            if (!out.empty())
+            {
+                out += ";";
+            }
+            const auto name = ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName));
+            out += name + "@" + std::to_string(prop_offset(prop)) + "#" + std::to_string(prop_element_size(prop));
+            const auto struct_type_ptr = safe_read<std::uintptr_t>(prop + OffFStructPropertyStruct);
+            if (live_uobject(struct_type_ptr))
+            {
+                out += ":" + ref.object_name(struct_type_ptr);
+            }
+        }
+        if (safe_read<std::uintptr_t>(structure + OffChildProperties) && count >= max_fields)
+        {
+            out += ";...";
+        }
+        return out;
+    }
+
+    auto paint_probe_function_schema(Reflection& ref, std::uintptr_t function) -> std::string
+    {
+        if (!function)
+        {
+            return "";
+        }
+        return paint_probe_property_schema(ref, function, 24);
+    }
+
+    auto paint_probe_struct_schema_for_param(Reflection& ref, std::uintptr_t function, const char* param_name) -> std::string
+    {
+        if (!function || !param_name)
+        {
+            return "";
+        }
+        const auto prop = ref.find_property(function, param_name);
+        if (!prop)
+        {
+            return "";
+        }
+        const auto structure = safe_read<std::uintptr_t>(prop + OffFStructPropertyStruct);
+        if (!live_uobject(structure))
+        {
+            return "";
+        }
+        return ref.object_name(structure) + "[" + paint_probe_property_schema(ref, structure, 24) + "]";
+    }
+
+    auto paint_probe_plausible_name(const std::string& name) -> bool
+    {
+        if (name.empty() || name.size() > 96)
+        {
+            return false;
+        }
+        for (const char ch : name)
+        {
+            const auto value = static_cast<unsigned char>(ch);
+            if (value < 0x20 || value > 0x7e)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    auto paint_probe_property_pointer_scan(Reflection& ref, std::uintptr_t prop) -> std::string
+    {
+        if (!prop)
+        {
+            return "";
+        }
+        std::string out{};
+        for (int offset = 0; offset <= 0xc0; offset += 8)
+        {
+            const auto candidate = safe_read<std::uintptr_t>(prop + static_cast<std::uintptr_t>(offset));
+            if (!candidate)
+            {
+                continue;
+            }
+            std::string entry{};
+            if (live_uobject(candidate))
+            {
+                entry = hex_address(candidate) + ":" + ref.object_path(candidate) + "<" + ref.class_name(candidate) + ">";
+            }
+            else
+            {
+                const auto name_at_field_name =
+                    ref.names.resolve(safe_read<std::uint32_t>(candidate + OffFFieldName));
+                const auto name_at_28 =
+                    ref.names.resolve(safe_read<std::uint32_t>(candidate + 0x28));
+                const auto name_at_30 =
+                    ref.names.resolve(safe_read<std::uint32_t>(candidate + 0x30));
+                if (paint_probe_plausible_name(name_at_field_name))
+                {
+                    entry = hex_address(candidate) + ":ffield@" + hex_address(OffFFieldName) + "=" + name_at_field_name;
+                }
+                else if (paint_probe_plausible_name(name_at_28))
+                {
+                    entry = hex_address(candidate) + ":ffield@0x28=" + name_at_28;
+                }
+                else if (paint_probe_plausible_name(name_at_30))
+                {
+                    entry = hex_address(candidate) + ":ffield@0x30=" + name_at_30;
+                }
+            }
+            if (!entry.empty())
+            {
+                if (!out.empty())
+                {
+                    out += ";";
+                }
+                out += "ptr+" + hex_address(static_cast<std::uintptr_t>(offset)) + "=" + entry;
+            }
+        }
+        return out;
+    }
+
+    auto paint_probe_function_deep_schema(Reflection& ref, std::uintptr_t function) -> std::string
+    {
+        if (!function)
+        {
+            return "";
+        }
+        std::string out{};
+        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties);
+             prop;
+             prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
+        {
+            const auto name = ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName));
+            if (!out.empty())
+            {
+                out += "|";
+            }
+            out += name + "@" + std::to_string(prop_offset(prop)) + "#" + std::to_string(prop_element_size(prop)) +
+                   " prop=" + hex_address(prop) + " [" + paint_probe_property_pointer_scan(ref, prop) + "]";
+        }
+        return out;
+    }
+
+    auto paint_replication_function_probe_metadata(Reflection& ref,
+                                                   std::uintptr_t object,
+                                                   const char* prefix,
+                                                   const std::vector<const char*>& function_names) -> std::string
+    {
+        std::string metadata{};
+        int available_count = 0;
+        const std::string key_prefix(prefix ? prefix : "paint_probe");
+        metadata += ",\"" + key_prefix + "_object\":\"" + hex_address(object) + "\"";
+        metadata += ",\"" + key_prefix + "_object_available\":" + std::string(json_bool(live_uobject(object)));
+        metadata += ",\"" + key_prefix + "_class\":\"" + json_escape(ref.class_name(object)) + "\"";
+        for (const auto* function_name : function_names)
+        {
+            if (!function_name)
+            {
+                continue;
+            }
+            const auto function = live_uobject(object) ? ref.find_function(object, function_name) : 0;
+            const bool available = function != 0;
+            available_count += available ? 1 : 0;
+            const std::string name_key = key_prefix + "_" + function_name;
+            metadata += ",\"" + name_key + "_available\":" + std::string(json_bool(available));
+            metadata += ",\"" + name_key + "\":\"" + hex_address(function) + "\"";
+            if (available)
+            {
+                metadata += ",\"" + name_key + "_path\":\"" + json_escape(ref.object_path(function)) + "\"";
+                metadata += ",\"" + name_key + "_params_size\":" + std::to_string(safe_read<int>(function + OffPropertiesSize, -1));
+                metadata += ",\"" + name_key + "_schema\":\"" + json_escape(paint_probe_function_schema(ref, function)) + "\"";
+                metadata += ",\"" + name_key + "_deep_schema\":\"" + json_escape(paint_probe_function_deep_schema(ref, function)) + "\"";
+                metadata += ",\"" + name_key + "_batch_schema\":\"" + json_escape(paint_probe_struct_schema_for_param(ref, function, "Batch")) + "\"";
+                metadata += ",\"" + name_key + "_stroke_schema\":\"" + json_escape(paint_probe_struct_schema_for_param(ref, function, "Stroke")) + "\"";
+            }
+        }
+        metadata += ",\"" + key_prefix + "_available_count\":" + std::to_string(available_count);
+        return metadata;
+    }
+
+    auto paint_replication_property_probe_metadata(Reflection& ref,
+                                                   std::uintptr_t object,
+                                                   const char* prefix,
+                                                   const std::vector<const char*>& property_names) -> std::string
+    {
+        std::string metadata{};
+        const std::string key_prefix(prefix ? prefix : "paint_property_probe");
+        metadata += ",\"" + key_prefix + "_object\":\"" + hex_address(object) + "\"";
+        metadata += ",\"" + key_prefix + "_object_available\":" + std::string(json_bool(live_uobject(object)));
+        metadata += ",\"" + key_prefix + "_class\":\"" + json_escape(ref.class_name(object)) + "\"";
+        for (const auto* property_name : property_names)
+        {
+            if (!property_name)
+            {
+                continue;
+            }
+            const auto prop = live_uobject(object) ? find_object_property(ref, object, property_name) : 0;
+            const bool available = prop != 0;
+            const std::string name_key = key_prefix + "_" + property_name;
+            metadata += ",\"" + name_key + "_available\":" + std::string(json_bool(available));
+            if (available)
+            {
+                const int offset = prop_offset(prop);
+                const int size = prop_element_size(prop);
+                metadata += ",\"" + name_key + "_offset\":" + std::to_string(offset);
+                metadata += ",\"" + name_key + "_size\":" + std::to_string(size);
+                if (offset >= 0 && size > 0 && size <= 4)
+                {
+                    metadata += ",\"" + name_key + "_raw\":" +
+                                std::to_string(safe_read<std::uint32_t>(object + static_cast<std::uintptr_t>(offset), 0));
+                }
+            }
+        }
+        return metadata;
     }
 
     auto write_number(Reflection& ref, std::uintptr_t prop, std::uint8_t* container, double value) -> bool
@@ -2208,7 +2501,9 @@ namespace
         std::uintptr_t k2_get_actor_location_function{0};
         sdk::FVector body_world_position{};
         std::uintptr_t component{0};
+        std::uintptr_t relay_component{0};
         std::uintptr_t server_paint_batch_function{0};
+        std::uintptr_t server_compact_paint_batch_function{0};
     };
 
     struct SdkViewportInfo
@@ -2597,6 +2892,109 @@ namespace
         return wrote && process_event(object, function, params.data(), failure);
     }
 
+    struct SdkCallDetail
+    {
+        bool object_available{false};
+        bool function_available{false};
+        bool wrote_params{false};
+        bool process_ok{false};
+        std::string failure{};
+    };
+
+    auto sdk_call_no_params_detail(Reflection& ref, std::uintptr_t object, const char* function_name) -> SdkCallDetail
+    {
+        SdkCallDetail out{};
+        out.object_available = live_uobject(object);
+        if (!out.object_available)
+        {
+            out.failure = "object_unavailable";
+            return out;
+        }
+        const auto function = ref.find_function(object, function_name);
+        out.function_available = function != 0;
+        if (!function)
+        {
+            out.failure = std::string(function_name) + "_unavailable";
+            return out;
+        }
+        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
+        if (params_size < 0 || params_size > 1024)
+        {
+            out.failure = std::string(function_name) + "_params_size_invalid";
+            return out;
+        }
+        std::vector<std::uint8_t> params(static_cast<std::size_t>(std::max(1, params_size)), 0);
+        out.wrote_params = true;
+        out.process_ok = process_event(object, function, params.data(), out.failure);
+        if (!out.process_ok)
+        {
+            out.failure = std::string(function_name) + "_failed:" + out.failure;
+        }
+        return out;
+    }
+
+    auto sdk_call_object_param_detail(Reflection& ref,
+                                      std::uintptr_t object,
+                                      const char* function_name,
+                                      std::uintptr_t value) -> SdkCallDetail
+    {
+        SdkCallDetail out{};
+        out.object_available = live_uobject(object);
+        if (!out.object_available)
+        {
+            out.failure = "object_unavailable";
+            return out;
+        }
+        if (!live_uobject(value))
+        {
+            out.failure = "param_object_unavailable";
+            return out;
+        }
+        const auto function = ref.find_function(object, function_name);
+        out.function_available = function != 0;
+        if (!function)
+        {
+            out.failure = std::string(function_name) + "_unavailable";
+            return out;
+        }
+        const auto params_size = safe_read<int>(function + OffPropertiesSize, 0);
+        if (params_size <= 0 || params_size > 1024)
+        {
+            out.failure = std::string(function_name) + "_params_size_invalid";
+            return out;
+        }
+        std::vector<std::uint8_t> params(static_cast<std::size_t>(params_size), 0);
+        for (auto prop = safe_read<std::uintptr_t>(function + OffChildProperties); prop; prop = safe_read<std::uintptr_t>(prop + OffFFieldNext))
+        {
+            const auto name = ref.names.resolve(safe_read<std::uint32_t>(prop + OffFFieldName));
+            if (name != "ReturnValue")
+            {
+                out.wrote_params = sdk_write_object(prop, params.data(), value) || out.wrote_params;
+            }
+        }
+        if (!out.wrote_params)
+        {
+            out.failure = std::string(function_name) + "_schema_unmatched";
+            return out;
+        }
+        out.process_ok = process_event(object, function, params.data(), out.failure);
+        if (!out.process_ok)
+        {
+            out.failure = std::string(function_name) + "_failed:" + out.failure;
+        }
+        return out;
+    }
+
+    auto sdk_call_detail_metadata(const char* prefix, const SdkCallDetail& detail) -> std::string
+    {
+        const std::string key(prefix ? prefix : "sdk_call");
+        return ",\"" + key + "_object_available\":" + json_bool(detail.object_available) +
+               ",\"" + key + "_function_available\":" + json_bool(detail.function_available) +
+               ",\"" + key + "_wrote_params\":" + json_bool(detail.wrote_params) +
+               ",\"" + key + "_process_ok\":" + json_bool(detail.process_ok) +
+               ",\"" + key + "_failure\":\"" + json_escape(detail.failure) + "\"";
+    }
+
     auto sdk_context_metadata(Reflection& ref, const SdkContext& ctx) -> std::string
     {
         return "\"sdk_version\":\"runtime_dynamic_reflection_min\"" +
@@ -2622,8 +3020,12 @@ namespace
                ",\"runtime_paintable_offset\":\"0xb68\"" +
                ",\"component\":\"" + hex_address(ctx.component) + "\"" +
                ",\"component_class\":\"" + json_escape(ref.class_name(ctx.component)) + "\"" +
+               ",\"relay_component\":\"" + hex_address(ctx.relay_component) + "\"" +
+               ",\"relay_component_class\":\"" + json_escape(ref.class_name(ctx.relay_component)) + "\"" +
                ",\"function_server_paint_batch_available\":" + std::string(json_bool(ctx.server_paint_batch_function != 0)) +
                ",\"function_server_paint_batch\":\"" + hex_address(ctx.server_paint_batch_function) + "\"" +
+               ",\"function_server_compact_paint_batch_available\":" + std::string(json_bool(ctx.server_compact_paint_batch_function != 0)) +
+               ",\"function_server_compact_paint_batch\":\"" + hex_address(ctx.server_compact_paint_batch_function) + "\"" +
                ",\"param_schema\":\"FPaintStroke{Uv@0,WorldPosition@16,bHasWorldPosition@40,BrushSettings@104,ChannelData@144,TargetChannel@176};ServerPaintBatch{Batch@0}\"" +
                std::string(",\"sdk_replication_api\":\"component_server_paint_batch\"") +
                ",\"multiplayer_replicated\":true";
@@ -2756,7 +3158,26 @@ namespace
             ctx.message = "BP_FirstPersonCharacter.RuntimePaintable unavailable";
             return ctx;
         }
+        const auto controller_class_name = ref.class_name(ctx.controller);
+        const auto relay_offset = ref.resolve_property_offset(controller_class_name.c_str(), "RuntimePaintRelay");
+        if (relay_offset >= 0)
+        {
+            const auto relay = safe_read<std::uintptr_t>(ctx.controller + static_cast<std::uintptr_t>(relay_offset));
+            if (live_uobject(relay) && contains_text(lower_copy(ref.class_name(relay)), "runtimepaintrelay"))
+            {
+                ctx.relay_component = relay;
+            }
+        }
+        if (!live_uobject(ctx.relay_component))
+        {
+            const auto relay = ref.find_first_instance("RuntimePaintRelayComponent");
+            if (live_uobject(relay))
+            {
+                ctx.relay_component = relay;
+            }
+        }
         ctx.server_paint_batch_function = ref.find_function(ctx.component, "ServerPaintBatch");
+        ctx.server_compact_paint_batch_function = ref.find_function(ctx.component, "ServerCompactPaintBatch");
         ctx.ok = true;
         ctx.stage = "sdk_ready";
         ctx.message = "SDK context ready";
@@ -3564,6 +3985,11 @@ namespace
                                      std::size_t offset,
                                      std::size_t count,
                                      std::string& failure) -> bool;
+    auto sdk_call_server_compact_paint_batch(const SdkContext& ctx,
+                                             const std::vector<sdk::FPaintStroke>& strokes,
+                                             std::size_t offset,
+                                             std::size_t count,
+                                             std::string& failure) -> bool;
 
     auto sdk_resolve_skinned_pose(Reflection& ref,
                                   std::uintptr_t mesh,
@@ -6828,6 +7254,7 @@ namespace
         Planning,
         ServerBatch,
         LocalTextureImport,
+        TextureSyncObserve,
         ServerTextureSync,
         LocalSync,
         Done,
@@ -6839,7 +7266,12 @@ namespace
     {
         std::shared_ptr<QueuedPaintJob> queued{};
         std::uintptr_t component{0};
+        std::uintptr_t relay_component{0};
         std::uintptr_t server_paint_batch_function{0};
+        std::uintptr_t server_compact_paint_batch_function{0};
+        bool server_compact_paint_batch_enabled{false};
+        bool server_compact_paint_batch_available{false};
+        std::string server_batch_rpc{"ServerPaintBatch"};
         std::vector<sdk::FPaintStroke> strokes{};
         std::string metadata{};
         MeshFirstChannelChecksum albedo_before{};
@@ -6882,10 +7314,22 @@ namespace
         bool server_texture_sync_server_request_called{false};
         bool server_texture_sync_albedo_changed{false};
         bool server_texture_sync_timed_out{false};
+        bool server_texture_sync_after_import_started{false};
+        std::string server_texture_sync_after_import_route{"none"};
+        SdkCallDetail server_texture_sync_after_import_server_relay{};
+        SdkCallDetail server_texture_sync_after_import_relay{};
+        SdkCallDetail server_texture_sync_after_import_request_full{};
+        SdkCallDetail server_texture_sync_after_import_server_request{};
         int server_texture_sync_polls{0};
         int server_texture_sync_poll_ms{MeshFirstServerTextureSyncPollMs};
         int server_texture_sync_max_polls{MeshFirstServerTextureSyncMaxPolls};
         std::string server_texture_sync_failure{};
+        bool texture_sync_observer_wait_started{false};
+        bool texture_sync_observer_wait_observed{false};
+        int texture_sync_observer_wait_polls{0};
+        int texture_sync_observer_wait_poll_ms{MeshFirstTextureSyncObserverPollMs};
+        int texture_sync_observer_wait_max_polls{MeshFirstTextureSyncObserverMaxPolls};
+        double texture_sync_observer_wait_elapsed_ms{-1.0};
         int texture_size{1024};
         std::size_t local_offset{0};
         int local_stroke_calls{0};
@@ -6896,6 +7340,7 @@ namespace
         std::chrono::steady_clock::time_point started{};
         std::chrono::steady_clock::time_point local_sync_started_at{};
         std::chrono::steady_clock::time_point server_texture_sync_started_at{};
+        std::chrono::steady_clock::time_point texture_sync_observer_wait_started_at{};
         double local_visual_sync_elapsed_ms{0.0};
         double server_texture_sync_elapsed_ms{-1.0};
         std::chrono::steady_clock::time_point next_dispatch_time{};
@@ -6905,6 +7350,69 @@ namespace
         std::atomic<bool> completed{false};
         std::string cancel_reason{"cancelled"};
     };
+
+    auto mesh_first_request_texture_sync_after_import(Reflection& ref,
+                                                      const std::shared_ptr<MeshFirstServerBatchAsyncJob>& job) -> void
+    {
+        if (!job || job->server_texture_sync_after_import_started)
+        {
+            return;
+        }
+        job->server_texture_sync_after_import_started = true;
+
+        job->server_texture_sync_after_import_server_relay =
+            sdk_call_object_param_detail(ref,
+                                         job->relay_component,
+                                         "ServerRelayTextureSync",
+                                         job->component);
+
+        job->server_texture_sync_after_import_relay =
+            sdk_call_object_param_detail(ref,
+                                         job->relay_component,
+                                         "RelayTextureSyncToServer",
+                                         job->component);
+
+        job->server_texture_sync_after_import_request_full =
+            sdk_call_no_params_detail(ref, job->component, "RequestFullTextureSync");
+
+        job->server_texture_sync_after_import_server_request =
+            sdk_call_no_params_detail(ref, job->component, "ServerRequestTextureSync");
+
+        std::vector<std::string> routes{};
+        if (job->server_texture_sync_after_import_server_relay.process_ok)
+        {
+            routes.emplace_back("server_relay_texture_sync");
+        }
+        if (job->server_texture_sync_after_import_relay.process_ok)
+        {
+            routes.emplace_back("relay_texture_sync_to_server");
+        }
+        if (job->server_texture_sync_after_import_request_full.process_ok)
+        {
+            routes.emplace_back("request_full_texture_sync");
+        }
+        if (job->server_texture_sync_after_import_server_request.process_ok)
+        {
+            routes.emplace_back("server_request_texture_sync");
+        }
+
+        if (!routes.empty())
+        {
+            std::string route;
+            for (std::size_t i = 0; i < routes.size(); ++i)
+            {
+                if (i > 0)
+                {
+                    route += '+';
+                }
+                route += routes[i];
+            }
+            job->server_texture_sync_after_import_route = route;
+            return;
+        }
+
+        job->server_texture_sync_after_import_route = "unavailable";
+    }
 
     auto mesh_first_phase_name(MeshFirstBatchPhase phase) -> const char*
     {
@@ -6916,6 +7424,8 @@ namespace
             return "server_batch";
         case MeshFirstBatchPhase::LocalTextureImport:
             return "local_texture_import";
+        case MeshFirstBatchPhase::TextureSyncObserve:
+            return "texture_sync_observe";
         case MeshFirstBatchPhase::ServerTextureSync:
             return "server_texture_sync";
         case MeshFirstBatchPhase::LocalSync:
@@ -7018,6 +7528,11 @@ namespace
         out += ",\"total_strokes\":" + std::to_string(total_strokes);
         out += ",\"server_batch_limit\":" + std::to_string(server_batch_limit);
         out += ",\"server_batch_delay_ms\":" + std::to_string(server_batch_delay_ms);
+        out += ",\"server_batch_rpc\":\"" + json_escape(job ? job->server_batch_rpc : "ServerPaintBatch") + "\"";
+        out += ",\"server_compact_paint_batch_enabled\":" +
+               std::string(json_bool(job && job->server_compact_paint_batch_enabled));
+        out += ",\"server_compact_paint_batch_available\":" +
+               std::string(json_bool(job && job->server_compact_paint_batch_available));
         out += ",\"server_batches_total\":" + std::to_string(server_batches_total);
         out += ",\"server_batches_done\":" + std::to_string(server_batches_done);
         out += ",\"server_batch_calls\":" + std::to_string(job ? job->server_batch_calls : 0);
@@ -7045,6 +7560,10 @@ namespace
         out += ",\"server_texture_sync_elapsed_ms\":" + std::to_string(server_texture_sync_elapsed_ms);
         out += ",\"server_texture_sync_albedo_changed\":" + std::string(json_bool(job && job->server_texture_sync_albedo_changed));
         out += ",\"server_texture_sync_timed_out\":" + std::string(json_bool(job && job->server_texture_sync_timed_out));
+        out += ",\"texture_sync_observer_wait_started\":" + std::string(json_bool(job && job->texture_sync_observer_wait_started));
+        out += ",\"texture_sync_observer_wait_polls\":" + std::to_string(job ? job->texture_sync_observer_wait_polls : 0);
+        out += ",\"texture_sync_observer_wait_max_polls\":" + std::to_string(job ? job->texture_sync_observer_wait_max_polls : 0);
+        out += ",\"texture_sync_observer_wait_observed\":" + std::string(json_bool(job && job->texture_sync_observer_wait_observed));
         out += ",\"paint_elapsed_ms\":" + std::to_string(paint_elapsed_ms);
         out += ",\"paint_eta_ms\":" + std::to_string(paint_eta_ms);
         if (job)
@@ -7871,8 +8390,14 @@ namespace
         metadata += ",\"replay_world_anchors\":" + std::to_string(replay_world_anchors);
         metadata += ",\"replay_local_anchors\":" + std::to_string(replay_local_anchors);
         metadata += ",\"replay_triangle_anchors\":" + std::to_string(replay_triangle_anchors);
-        metadata += ",\"server_batch_rpc\":\"ServerPaintBatch\"";
-        metadata += ",\"server_paint_batch_used\":true";
+        const bool use_compact_server_batch = ctx.server_compact_paint_batch_function != 0;
+        metadata += ",\"server_batch_rpc\":\"" + std::string(use_compact_server_batch ? "ServerCompactPaintBatch" : "ServerPaintBatch") + "\"";
+        metadata += ",\"server_paint_batch_used\":" + std::string(json_bool(!use_compact_server_batch));
+        metadata += ",\"server_compact_paint_batch_available\":" + std::string(json_bool(ctx.server_compact_paint_batch_function != 0));
+        metadata += ",\"server_compact_paint_batch_used\":" + std::string(json_bool(use_compact_server_batch));
+        metadata += ",\"server_compact_paint_batch_layout\":\"CompactPaintStroke{Triangle@0,Bary16@4,Radius@12,ColorBGRA8@16,MR8@20,Target@22,Effective@24,Guid@40}\"";
+        metadata += ",\"server_compact_paint_batch_color_encoding\":\"linear_unit_to_bgra8_direct\"";
+        metadata += ",\"server_compact_paint_batch_barycentric_encoding\":\"unit_to_uint16_high_low\"";
         const auto replication_manager = ref.find_first_instance("RuntimePaintReplicationManager");
         const bool fast_apply_component_strokes =
             sdk_write_number_property_by_name(ref, ctx.component, "MaxReplicatedPaintStrokesPerTick", MeshFirstFastApplyStrokesPerTick);
@@ -7902,6 +8427,68 @@ namespace
         metadata += ",\"fast_apply_component_strokes_written\":" + std::string(json_bool(fast_apply_component_strokes));
         metadata += ",\"fast_apply_manager_strokes_written\":" + std::string(json_bool(fast_apply_manager_strokes));
         metadata += ",\"fast_apply_manager_writes_written\":" + std::string(json_bool(fast_apply_manager_writes));
+        const auto sync_channel_function = ref.find_function(ctx.component, "MulticastSyncChannelData");
+        const auto sync_compressed_channel_function = ref.find_function(ctx.component, "MulticastSyncCompressedChannelData");
+        reset_texture_sync_observer(sync_channel_function, sync_compressed_channel_function);
+        metadata += ",\"texture_sync_hidden_route\":\"relay_or_component_full_texture_sync_after_local_import\"";
+        metadata += ",\"texture_sync_relay_component\":\"" + hex_address(ctx.relay_component) + "\"";
+        metadata += ",\"texture_sync_relay_component_class\":\"" + json_escape(ref.class_name(ctx.relay_component)) + "\"";
+        metadata += ",\"function_server_relay_texture_sync_available\":" +
+                    std::string(json_bool(live_uobject(ctx.relay_component) &&
+                                          ref.find_function(ctx.relay_component, "ServerRelayTextureSync") != 0));
+        metadata += ",\"function_relay_texture_sync_to_server_available\":" +
+                    std::string(json_bool(live_uobject(ctx.relay_component) &&
+                                          ref.find_function(ctx.relay_component, "RelayTextureSyncToServer") != 0));
+        metadata += ",\"function_request_full_texture_sync_available\":" +
+                    std::string(json_bool(ref.find_function(ctx.component, "RequestFullTextureSync") != 0));
+        metadata += ",\"function_server_request_texture_sync_available\":" +
+                    std::string(json_bool(ref.find_function(ctx.component, "ServerRequestTextureSync") != 0));
+        metadata += ",\"function_multicast_sync_channel_data_available\":" +
+                    std::string(json_bool(sync_channel_function != 0));
+        metadata += ",\"function_multicast_sync_channel_data\":\"" + hex_address(sync_channel_function) + "\"";
+        metadata += ",\"function_multicast_sync_compressed_channel_data_available\":" +
+                    std::string(json_bool(sync_compressed_channel_function != 0));
+        metadata += ",\"function_multicast_sync_compressed_channel_data\":\"" + hex_address(sync_compressed_channel_function) + "\"";
+        const std::vector<const char*> component_paint_replication_candidates{
+            "ServerCompactPaint",
+            "ServerCompactPaintBatch",
+            "ServerPackedPaintBatch",
+            "MulticastCompactPaint",
+            "MulticastCompactPaintBatch",
+            "MulticastCompactPaintBatchToOthers",
+            "MulticastCompactPaintToOthers",
+            "MulticastPackedPaintBatch",
+            "MulticastPackedPaintBatchToOthers",
+        };
+        const std::vector<const char*> relay_paint_replication_candidates{
+            "ServerRelayCompactPaint",
+            "ServerRelayCompactStrokeBatch",
+            "ServerRelayPackedStrokeBatch",
+        };
+        const std::vector<const char*> paint_replication_property_candidates{
+            "bUseCompactPaintReplication",
+            "bUseExperimentalPackedPaintReplication",
+            "MaxOutgoingStrokesPerBatch",
+            "MaxOutgoingNetworkBatchesPerSecond",
+            "bCoalesceOutgoingStrokes",
+        };
+        metadata += paint_replication_function_probe_metadata(ref,
+                                                              ctx.component,
+                                                              "paint_replication_component_probe",
+                                                              component_paint_replication_candidates);
+        metadata += paint_replication_function_probe_metadata(ref,
+                                                              ctx.relay_component,
+                                                              "paint_replication_relay_probe",
+                                                              relay_paint_replication_candidates);
+        metadata += paint_replication_property_probe_metadata(ref,
+                                                              ctx.component,
+                                                              "paint_replication_component_property_probe",
+                                                              paint_replication_property_candidates);
+        metadata += paint_replication_property_probe_metadata(ref,
+                                                              replication_manager,
+                                                              "paint_replication_manager_property_probe",
+                                                              paint_replication_property_candidates);
+        metadata += texture_sync_observer_metadata("texture_sync_observer_before", texture_sync_observer_snapshot());
 
         auto albedo_before_bytes = mesh_first_export_channel_bytes(ref, ctx.component, sdk::EPaintChannel::Albedo);
         MeshFirstChannelChecksum albedo_before{};
@@ -7931,7 +8518,12 @@ namespace
             auto async_job = std::make_shared<MeshFirstServerBatchAsyncJob>();
             async_job->queued = queued_job;
             async_job->component = ctx.component;
+            async_job->relay_component = ctx.relay_component;
             async_job->server_paint_batch_function = ctx.server_paint_batch_function;
+            async_job->server_compact_paint_batch_function = ctx.server_compact_paint_batch_function;
+            async_job->server_compact_paint_batch_available = ctx.server_compact_paint_batch_function != 0;
+            async_job->server_compact_paint_batch_enabled = ctx.server_compact_paint_batch_function != 0;
+            async_job->server_batch_rpc = async_job->server_compact_paint_batch_enabled ? "ServerCompactPaintBatch" : "ServerPaintBatch";
             async_job->local_visual_sync_enabled = false;
             async_job->strokes = std::move(strokes);
             async_job->metadata = metadata + ",\"server_batch_schedule\":\"timer_drained\"";
@@ -8378,6 +8970,27 @@ namespace
             metadata += ",\"server_texture_sync_timed_out\":" + std::string(json_bool(job->server_texture_sync_timed_out));
             metadata += ",\"server_texture_sync_ok\":" + std::string(json_bool(server_texture_sync_ok));
             metadata += ",\"server_texture_sync_failure\":\"" + json_escape(job->server_texture_sync_failure) + "\"";
+            metadata += ",\"texture_sync_observer_wait_started\":" + std::string(json_bool(job->texture_sync_observer_wait_started));
+            metadata += ",\"texture_sync_observer_wait_polls\":" + std::to_string(job->texture_sync_observer_wait_polls);
+            metadata += ",\"texture_sync_observer_wait_poll_ms\":" + std::to_string(job->texture_sync_observer_wait_poll_ms);
+            metadata += ",\"texture_sync_observer_wait_max_polls\":" + std::to_string(job->texture_sync_observer_wait_max_polls);
+            metadata += ",\"texture_sync_observer_wait_observed\":" + std::string(json_bool(job->texture_sync_observer_wait_observed));
+            metadata += ",\"texture_sync_observer_wait_elapsed_ms\":" + std::to_string(job->texture_sync_observer_wait_elapsed_ms);
+            metadata += ",\"server_texture_sync_after_import_started\":" +
+                        std::string(json_bool(job->server_texture_sync_after_import_started));
+            metadata += ",\"server_texture_sync_after_import_route\":\"" +
+                        json_escape(job->server_texture_sync_after_import_route) + "\"";
+            metadata += ",\"server_texture_sync_after_import_relay_component\":\"" +
+                        hex_address(job->relay_component) + "\"";
+            metadata += sdk_call_detail_metadata("server_texture_sync_after_import_server_relay",
+                                                 job->server_texture_sync_after_import_server_relay);
+            metadata += sdk_call_detail_metadata("server_texture_sync_after_import_relay",
+                                                 job->server_texture_sync_after_import_relay);
+            metadata += sdk_call_detail_metadata("server_texture_sync_after_import_request_full",
+                                                 job->server_texture_sync_after_import_request_full);
+            metadata += sdk_call_detail_metadata("server_texture_sync_after_import_server_request",
+                                                 job->server_texture_sync_after_import_server_request);
+            metadata += texture_sync_observer_metadata("texture_sync_observer_after", texture_sync_observer_snapshot());
             metadata += ",\"total_replay_elapsed_ms\":" + std::to_string(total_elapsed_ms);
             metadata += ",\"paint_elapsed_ms\":" + std::to_string(total_elapsed_ms);
             metadata += ",\"paint_eta_ms\":0";
@@ -8422,8 +9035,8 @@ namespace
                                                         job->server_strokes_sent,
                                                         local_visual_sync_ok && visual_sync_ok ? 0 : 1,
                                                         local_visual_sync_ok && visual_sync_ok
-                                                            ? "mesh-first paint sent through ServerPaintBatch with local channel import preview"
-                                                            : "ServerPaintBatch succeeded but local texture import did not update local texture",
+                                                            ? "mesh-first paint sent through " + job->server_batch_rpc + " with local channel import preview"
+                                                            : job->server_batch_rpc + " succeeded but local texture import did not update local texture",
                                                         metadata));
         };
 
@@ -8463,6 +9076,22 @@ namespace
             job->phase = MeshFirstBatchPhase::ServerTextureSync;
             job->next_dispatch_time = {};
             post_next_after(0);
+        };
+
+        auto begin_texture_sync_observe = [&]() {
+            job->phase = MeshFirstBatchPhase::TextureSyncObserve;
+            job->texture_sync_observer_wait_started = true;
+            job->texture_sync_observer_wait_started_at = std::chrono::steady_clock::now();
+            job->next_dispatch_time = job->texture_sync_observer_wait_started_at +
+                                      std::chrono::milliseconds(std::max(1, job->texture_sync_observer_wait_poll_ms));
+            write_mesh_progress("mesh_texture_sync_observe",
+                                "Waiting for texture sync multicast observer",
+                                job->server_strokes_sent,
+                                static_cast<int>(job->strokes.size()),
+                                MeshFirstBatchPhase::TextureSyncObserve,
+                                false,
+                                "running");
+            post_next_after(job->texture_sync_observer_wait_poll_ms);
         };
 
         auto begin_local_texture_import = [&]() {
@@ -8526,10 +9155,60 @@ namespace
             job->local_texture_import_failure = result.failure;
             if (result.ok)
             {
+                mesh_first_request_texture_sync_after_import(ref, job);
+                if (job->server_texture_sync_after_import_route != "unavailable")
+                {
+                    begin_texture_sync_observe();
+                    return;
+                }
                 finish_done();
                 return;
             }
             begin_server_texture_sync();
+            return;
+        }
+
+        if (job->phase == MeshFirstBatchPhase::TextureSyncObserve)
+        {
+            if (!job->texture_sync_observer_wait_started)
+            {
+                begin_texture_sync_observe();
+                return;
+            }
+
+            const auto snapshot = texture_sync_observer_snapshot();
+            if (texture_sync_observer_has_activity(snapshot))
+            {
+                job->texture_sync_observer_wait_observed = true;
+                job->texture_sync_observer_wait_elapsed_ms =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - job->texture_sync_observer_wait_started_at)
+                        .count();
+                finish_done();
+                return;
+            }
+
+            ++job->texture_sync_observer_wait_polls;
+            if (job->texture_sync_observer_wait_polls >= std::max(1, job->texture_sync_observer_wait_max_polls))
+            {
+                job->texture_sync_observer_wait_elapsed_ms =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - job->texture_sync_observer_wait_started_at)
+                        .count();
+                finish_done();
+                return;
+            }
+
+            write_mesh_progress("mesh_texture_sync_observe",
+                                "Waiting for texture sync multicast observer",
+                                job->server_strokes_sent,
+                                static_cast<int>(job->strokes.size()),
+                                MeshFirstBatchPhase::TextureSyncObserve,
+                                false,
+                                "running");
+            job->next_dispatch_time = std::chrono::steady_clock::now() +
+                                      std::chrono::milliseconds(std::max(1, job->texture_sync_observer_wait_poll_ms));
+            post_next_after(job->texture_sync_observer_wait_poll_ms);
             return;
         }
 
@@ -8632,15 +9311,19 @@ namespace
         SdkContext ctx{};
         ctx.component = job->component;
         ctx.server_paint_batch_function = job->server_paint_batch_function;
+        ctx.server_compact_paint_batch_function = job->server_compact_paint_batch_function;
         std::string batch_failure{};
         ++job->server_batch_calls;
-        if (!sdk_call_server_paint_batch(ctx, job->strokes, chunk_offset, count, batch_failure))
+        const bool batch_ok = job->server_compact_paint_batch_enabled
+                                  ? sdk_call_server_compact_paint_batch(ctx, job->strokes, chunk_offset, count, batch_failure)
+                                  : sdk_call_server_paint_batch(ctx, job->strokes, chunk_offset, count, batch_failure);
+        if (!batch_ok)
         {
             ++job->server_batch_failures;
-            job->first_failure = batch_failure.empty() ? "ServerPaintBatch_failed" : batch_failure;
+            job->first_failure = batch_failure.empty() ? job->server_batch_rpc + "_failed" : batch_failure;
             job->server_batch_elapsed_ms = elapsed_ms();
             finish_failed("mesh_server_batch_failed",
-                          "ServerPaintBatch failed: " + job->first_failure,
+                          job->server_batch_rpc + " failed: " + job->first_failure,
                           job->first_failure);
             return;
         }
@@ -8651,7 +9334,7 @@ namespace
         job->server_batch_elapsed_ms = elapsed_ms();
 
         write_mesh_progress("mesh_server_batch",
-                            "mesh-first ServerPaintBatch fast apply queue",
+                            "mesh-first " + job->server_batch_rpc + " fast apply queue",
                             job->server_strokes_sent,
                             static_cast<int>(job->strokes.size()),
                             MeshFirstBatchPhase::ServerBatch,
@@ -9146,6 +9829,84 @@ namespace
         return stroke;
     }
 
+    auto sdk_unit_to_byte(double value) -> std::uint8_t
+    {
+        return static_cast<std::uint8_t>(std::clamp<int>(static_cast<int>(std::lround(clamp01(value) * 255.0)), 0, 255));
+    }
+
+    auto sdk_unit_to_u16(double value) -> std::uint16_t
+    {
+        return static_cast<std::uint16_t>(std::clamp<int>(static_cast<int>(std::lround(clamp01(value) * 65535.0)), 0, 65535));
+    }
+
+    auto sdk_write_compact_barycentric(double value, std::uint8_t& high, std::uint8_t& low) -> void
+    {
+        const auto packed = sdk_unit_to_u16(value);
+        high = static_cast<std::uint8_t>((packed >> 8) & 0xff);
+        low = static_cast<std::uint8_t>(packed & 0xff);
+    }
+
+    auto sdk_make_compact_paint_stroke(const sdk::FPaintStroke& stroke,
+                                       sdk::FCompactPaintStroke& compact,
+                                       std::string& failure) -> bool
+    {
+        if (!stroke.bHasSkeletalTriangleAnchor || stroke.SkeletalTriangleIndex < 0)
+        {
+            failure = "compact_paint_requires_skeletal_triangle_anchor";
+            return false;
+        }
+        compact = {};
+        compact.SkeletalTriangleIndex = stroke.SkeletalTriangleIndex;
+        sdk_write_compact_barycentric(stroke.SkeletalTriangleBarycentric.X,
+                                      compact.BarycentricXHigh,
+                                      compact.BarycentricXLow);
+        sdk_write_compact_barycentric(stroke.SkeletalTriangleBarycentric.Y,
+                                      compact.BarycentricYHigh,
+                                      compact.BarycentricYLow);
+        sdk_write_compact_barycentric(stroke.SkeletalTriangleBarycentric.Z,
+                                      compact.BarycentricZHigh,
+                                      compact.BarycentricZLow);
+        compact.Radius = stroke.BrushSettings.Radius;
+        compact.AlbedoColor.R = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.R);
+        compact.AlbedoColor.G = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.G);
+        compact.AlbedoColor.B = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.B);
+        compact.AlbedoColor.A = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.A);
+        compact.Metallic = sdk_unit_to_byte(stroke.ChannelData.Metallic);
+        compact.Roughness = sdk_unit_to_byte(stroke.ChannelData.Roughness);
+        compact.TargetChannel = stroke.TargetChannel;
+        compact.EffectiveBrushWorldRadius = stroke.EffectiveBrushWorldRadius;
+        compact.EffectiveSubdivisionLevel = stroke.EffectiveSubdivisionLevel;
+        compact.EffectiveSubdivisionPixelSize = stroke.EffectiveSubdivisionPixelSize;
+        compact.EffectiveTemplateResolution = stroke.EffectiveTemplateResolution;
+        compact.ReplicationSourceId = stroke.ReplicationSourceId;
+        return true;
+    }
+
+    auto sdk_make_compact_paint_strokes(const std::vector<sdk::FPaintStroke>& strokes,
+                                        std::size_t offset,
+                                        std::size_t count,
+                                        std::vector<sdk::FCompactPaintStroke>& compact,
+                                        std::string& failure) -> bool
+    {
+        if (offset > strokes.size() || count > strokes.size() - offset)
+        {
+            failure = "compact_paint_range_invalid";
+            return false;
+        }
+        compact.clear();
+        compact.resize(count);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            if (!sdk_make_compact_paint_stroke(strokes[offset + i], compact[i], failure))
+            {
+                failure += " index=" + std::to_string(offset + i);
+                compact.clear();
+                return false;
+            }
+        }
+        return true;
+    }
+
     auto sdk_call_paint_batch_function(std::uintptr_t component,
                                        std::uintptr_t function,
                                        const std::vector<sdk::FPaintStroke>& strokes,
@@ -9174,6 +9935,39 @@ namespace
         return true;
     }
 
+    auto sdk_call_compact_paint_batch_function(std::uintptr_t component,
+                                               std::uintptr_t function,
+                                               const std::vector<sdk::FPaintStroke>& strokes,
+                                               std::size_t offset,
+                                               std::size_t count,
+                                               std::string& failure) -> bool
+    {
+        if (!function || count == 0)
+        {
+            failure = "server_compact_paint_batch_unavailable";
+            return false;
+        }
+        if (!live_uobject(component))
+        {
+            failure = "paint_component_unavailable";
+            return false;
+        }
+        std::vector<sdk::FCompactPaintStroke> compact{};
+        if (!sdk_make_compact_paint_strokes(strokes, offset, count, compact, failure))
+        {
+            return false;
+        }
+        sdk::RuntimePaintableComponent_ServerCompactPaintBatch params{};
+        params.Batch.Strokes.Data = compact.data();
+        params.Batch.Strokes.Num = static_cast<std::int32_t>(compact.size());
+        params.Batch.Strokes.Max = static_cast<std::int32_t>(compact.size());
+        if (!process_event(component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
+        {
+            return false;
+        }
+        return true;
+    }
+
     auto sdk_call_server_paint_batch(const SdkContext& ctx,
                                      const std::vector<sdk::FPaintStroke>& strokes,
                                      std::size_t offset,
@@ -9186,6 +9980,20 @@ namespace
                                              offset,
                                              count,
                                              failure);
+    }
+
+    auto sdk_call_server_compact_paint_batch(const SdkContext& ctx,
+                                             const std::vector<sdk::FPaintStroke>& strokes,
+                                             std::size_t offset,
+                                             std::size_t count,
+                                             std::string& failure) -> bool
+    {
+        return sdk_call_compact_paint_batch_function(ctx.component,
+                                                     ctx.server_compact_paint_batch_function,
+                                                     strokes,
+                                                     offset,
+                                                     count,
+                                                     failure);
     }
 
     auto sdk_call_paint_at_uv_with_brush(std::uintptr_t component,
@@ -11092,6 +11900,118 @@ namespace
         return cdo ? cdo : cls;
     }
 
+    auto is_paint_replication_probe_request(const std::string& request) -> bool
+    {
+        return request.find("\"type\":\"paint_replication_probe\"") != std::string::npos;
+    }
+
+    auto paint_replication_probe_metadata_for_context(Reflection& ref, const SdkContext& ctx) -> std::string
+    {
+        std::string metadata = "\"route\":\"paint_replication_probe\"";
+        metadata += ",";
+        metadata += sdk_context_metadata(ref, ctx);
+        metadata += paint_stroke_reflection_metadata(ref, ctx.server_paint_batch_function);
+
+        const auto replication_manager = ref.find_first_instance("RuntimePaintReplicationManager");
+        metadata += ",\"paint_replication_manager\":\"" + hex_address(replication_manager) + "\"";
+        metadata += ",\"paint_replication_manager_class\":\"" + json_escape(ref.class_name(replication_manager)) + "\"";
+        metadata += ",\"function_request_full_texture_sync_available\":" +
+                    std::string(json_bool(ref.find_function(ctx.component, "RequestFullTextureSync") != 0));
+        metadata += ",\"function_server_request_texture_sync_available\":" +
+                    std::string(json_bool(ref.find_function(ctx.component, "ServerRequestTextureSync") != 0));
+        metadata += ",\"function_multicast_sync_channel_data_available\":" +
+                    std::string(json_bool(ref.find_function(ctx.component, "MulticastSyncChannelData") != 0));
+        metadata += ",\"function_multicast_sync_compressed_channel_data_available\":" +
+                    std::string(json_bool(ref.find_function(ctx.component, "MulticastSyncCompressedChannelData") != 0));
+        metadata += ",\"function_server_relay_texture_sync_available\":" +
+                    std::string(json_bool(live_uobject(ctx.relay_component) &&
+                                          ref.find_function(ctx.relay_component, "ServerRelayTextureSync") != 0));
+        metadata += ",\"function_relay_texture_sync_to_server_available\":" +
+                    std::string(json_bool(live_uobject(ctx.relay_component) &&
+                                          ref.find_function(ctx.relay_component, "RelayTextureSyncToServer") != 0));
+
+        const std::vector<const char*> component_paint_replication_candidates{
+            "ServerCompactPaint",
+            "ServerCompactPaintBatch",
+            "ServerPackedPaintBatch",
+            "MulticastCompactPaint",
+            "MulticastCompactPaintBatch",
+            "MulticastCompactPaintBatchToOthers",
+            "MulticastCompactPaintToOthers",
+            "MulticastPackedPaintBatch",
+            "MulticastPackedPaintBatchToOthers",
+        };
+        const std::vector<const char*> relay_paint_replication_candidates{
+            "ServerRelayCompactPaint",
+            "ServerRelayCompactStrokeBatch",
+            "ServerRelayPackedStrokeBatch",
+        };
+        const std::vector<const char*> paint_replication_property_candidates{
+            "bUseCompactPaintReplication",
+            "bUseExperimentalPackedPaintReplication",
+            "MaxOutgoingStrokesPerBatch",
+            "MaxOutgoingNetworkBatchesPerSecond",
+            "bCoalesceOutgoingStrokes",
+            "MaxReplicatedPaintStrokesPerTick",
+            "MaxReplicatedPaintRenderTargetWritesPerFrame",
+        };
+        metadata += paint_replication_function_probe_metadata(ref,
+                                                              ctx.component,
+                                                              "paint_replication_component_probe",
+                                                              component_paint_replication_candidates);
+        metadata += paint_replication_function_probe_metadata(ref,
+                                                              ctx.relay_component,
+                                                              "paint_replication_relay_probe",
+                                                              relay_paint_replication_candidates);
+        metadata += paint_replication_property_probe_metadata(ref,
+                                                              ctx.component,
+                                                              "paint_replication_component_property_probe",
+                                                              paint_replication_property_candidates);
+        metadata += paint_replication_property_probe_metadata(ref,
+                                                              replication_manager,
+                                                              "paint_replication_manager_property_probe",
+                                                              paint_replication_property_candidates);
+        return metadata;
+    }
+
+    auto paint_replication_probe_on_game_thread(const std::string& request) -> std::string
+    {
+        (void)request;
+        Reflection ref{};
+        std::string failure{};
+        if (!ref.init(failure))
+        {
+            return response_json(false,
+                                 "sdk_update_required",
+                                 0,
+                                 1,
+                                 failure.empty() ? "SDK reflection init failed" : failure,
+                                 "\"route\":\"paint_replication_probe\",\"sdk_resolution_exception\":true");
+        }
+
+        SdkContext ctx{};
+        try
+        {
+            ctx = sdk_resolve_context(ref);
+        }
+        catch (const SdkResolutionException& ex)
+        {
+            return response_json(false,
+                                 ex.stage.c_str(),
+                                 0,
+                                 1,
+                                 ex.what(),
+                                 "\"route\":\"paint_replication_probe\",\"sdk_resolution_exception\":true");
+        }
+
+        const auto metadata = paint_replication_probe_metadata_for_context(ref, ctx);
+        if (!ctx.ok)
+        {
+            return response_json(false, ctx.stage.c_str(), 0, 1, ctx.message, metadata);
+        }
+        return response_json(true, "paint_replication_probe", 0, 0, "paint replication probe complete", metadata);
+    }
+
     auto paint_full_route_native_direct(const std::string& request) -> std::string
     {
         (void)request;
@@ -11118,6 +12038,13 @@ namespace
             {
                 continue;
             }
+            if (is_paint_replication_probe_request(job->request))
+            {
+                mark_queued_paint_job_dispatched(job);
+                const auto response = paint_replication_probe_on_game_thread(job->request);
+                complete_queued_paint_job(job, response);
+                continue;
+            }
             if (is_mesh_first_paint_request(job->request))
             {
                 start_mesh_first_paint_async_job(job->request, job);
@@ -11133,6 +12060,38 @@ namespace
     void __fastcall hooked_process_event(void* object, void* function, void* params)
     {
         const auto original = g_original_process_event.load();
+        (void)object;
+        if (function && params)
+        {
+            __try
+            {
+                const auto function_address = reinterpret_cast<std::uintptr_t>(function);
+                const auto params_bytes = reinterpret_cast<std::uint8_t*>(params);
+                if (function_address == g_observed_sync_channel_function.load())
+                {
+                    const auto channel = *reinterpret_cast<std::uint8_t*>(params_bytes);
+                    const auto* array = reinterpret_cast<const sdk::TArray<std::uint8_t>*>(params_bytes + 0x8);
+                    const int bytes = array ? std::max(0, array->Num) : 0;
+                    g_observed_sync_channel_last_channel.store(static_cast<int>(channel));
+                    g_observed_sync_channel_calls.fetch_add(1);
+                    g_observed_sync_channel_bytes.fetch_add(bytes);
+                }
+                if (function_address == g_observed_sync_compressed_channel_function.load())
+                {
+                    const auto channel = *reinterpret_cast<std::uint8_t*>(params_bytes);
+                    const auto* array = reinterpret_cast<const sdk::TArray<std::uint8_t>*>(params_bytes + 0x8);
+                    const int compressed_bytes = array ? std::max(0, array->Num) : 0;
+                    const int uncompressed_bytes = *reinterpret_cast<const int*>(params_bytes + 0x18);
+                    g_observed_sync_compressed_channel_last_channel.store(static_cast<int>(channel));
+                    g_observed_sync_compressed_channel_calls.fetch_add(1);
+                    g_observed_sync_compressed_channel_bytes.fetch_add(compressed_bytes);
+                    g_observed_sync_compressed_channel_uncompressed_bytes.fetch_add(std::max(0, uncompressed_bytes));
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
         if (!g_inside_process_event_hook)
         {
             g_inside_process_event_hook = true;
@@ -11243,7 +12202,7 @@ namespace
         }
         if (line.find("\"type\":\"capabilities\"") != std::string::npos)
         {
-            std::string commands = "[\"ping\",\"capabilities\",\"paint_full_route\",\"cancel_paint\",\"shutdown\"]";
+            std::string commands = "[\"ping\",\"capabilities\",\"paint_full_route\",\"paint_replication_probe\",\"cancel_paint\",\"shutdown\"]";
             return std::string("{\"success\":true,\"stage\":\"capabilities\",\"applied\":0,\"failures\":0,") +
                    "\"message\":\"ok\",\"timing_ms\":{}," +
                    "\"metadata\":{\"commands\":" + commands + "," +
@@ -11284,6 +12243,10 @@ namespace
                                      ",\"cancelled_queued_paint_jobs\":" + std::to_string(cancelled_queued));
         }
         if (line.find("\"type\":\"paint_full_route\"") != std::string::npos)
+        {
+            return paint_full_route_native(line);
+        }
+        if (line.find("\"type\":\"paint_replication_probe\"") != std::string::npos)
         {
             return paint_full_route_native(line);
         }
