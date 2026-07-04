@@ -38,6 +38,19 @@ public sealed class LocalizationCatalog
     public static bool IsSupported(string? locale) =>
         SupportedLocales.Any(item => string.Equals(item.Code, locale, StringComparison.OrdinalIgnoreCase));
 
+    public static string DetectSystemLanguage()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+
+        if (IsSupported(culture.Name))
+            return culture.Name;
+
+        if (IsSupported(culture.TwoLetterISOLanguageName))
+            return culture.TwoLetterISOLanguageName;
+
+        return "en";
+    }
+
     public static LocalizationCatalog Load()
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("MecchaCamouflage.Core.Localization.Strings.json")

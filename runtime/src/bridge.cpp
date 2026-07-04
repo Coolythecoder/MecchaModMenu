@@ -41,9 +41,9 @@ namespace
     constexpr int ProcessEventVtableIndex = 0x4C;
     constexpr UINT PaintDispatchMessage = WM_APP + 0x4D43;
     constexpr int ServerPaintBatchStrokeLimit = 50;
-    constexpr int ServerPaintBatchStrokeLimitMax = 100;
-    constexpr int ServerPaintBatchDelayMs = 100;
-    constexpr int MeshFirstServerBatchMinDelayMs = 1;
+    constexpr int ServerPaintBatchStrokeLimitMax = 50;
+    constexpr int ServerPaintBatchDelayMs = 150;
+    constexpr int MeshFirstServerBatchMinDelayMs = 150;
     constexpr int MeshFirstFastApplyStrokesPerTick = 0;
     constexpr int MeshFirstFastApplyRenderTargetWritesPerFrame = 0;
     constexpr int MeshFirstServerTextureSyncPollMs = 50;
@@ -8233,8 +8233,8 @@ namespace
         const bool preview_only = json_bool_field(request, "preview_only", false);
         const bool unpreview_only = json_bool_field(request, "unpreview_only", false);
         const bool research_artifacts = json_bool_field(request, "research_artifacts", false);
-        const double tuning_stroke_size_texels = clamp_range(json_number_field(request, "stroke_size_texels", 6.0), 1.0, 12.0);
-        const double tuning_coverage_step_texels = clamp_range(json_number_field(request, "coverage_step_texels", 6.0), 1.0, 12.0);
+        const double tuning_stroke_size_texels = clamp_range(json_number_field(request, "stroke_size_texels", 9.0), 1.0, 12.0);
+        const double tuning_coverage_step_texels = clamp_range(json_number_field(request, "coverage_step_texels", 9.0), 1.0, 12.0);
         const double tuning_side_source_max_uv = clamp_range(json_number_field(request, "side_source_max_uv", 0.08), 0.001, 0.50);
         const double tuning_front_back_source_max_uv = clamp_range(json_number_field(request, "front_back_source_max_uv", 0.45), 0.001, 2.00);
         const bool tuning_auto_material_properties = json_bool_field(request, "auto_material_properties", true);
@@ -8246,7 +8246,7 @@ namespace
         const double fill_metallic = clamp_range(json_number_field(request, "fill_metallic", 1.0), 0.0, 1.0);
         const double fill_roughness = clamp_range(json_number_field(request, "fill_roughness", 0.0), 0.0, 1.0);
         const int tuning_server_batch_limit = json_int_field(request, "server_batch_limit", ServerPaintBatchStrokeLimit, 1, ServerPaintBatchStrokeLimitMax);
-        const int tuning_server_batch_delay_ms = json_int_field(request, "server_batch_delay_ms", ServerPaintBatchDelayMs, 0, 500);
+        const int tuning_server_batch_delay_ms = json_int_field(request, "server_batch_delay_ms", ServerPaintBatchDelayMs, 150, 500);
 
         std::string metadata = "\"route\":\"mesh_first_paint\"";
         const std::string mesh_first_pipeline =

@@ -86,6 +86,8 @@ public sealed class SettingsStore
         settings.PanelWidth = Math.Clamp(settings.PanelWidth, 960.0, 3200.0);
         settings.PanelHeight = Math.Clamp(settings.PanelHeight, 640.0, 2200.0);
         settings.Opacity = Math.Clamp(settings.Opacity, 0.35, 1.0);
+        if (string.IsNullOrWhiteSpace(settings.Language))
+            settings.Language = LocalizationCatalog.DetectSystemLanguage();
         if (!LocalizationCatalog.IsSupported(settings.Language))
             settings.Language = "en";
         settings.LogRetentionDays = Math.Clamp(settings.LogRetentionDays, 1, 90);
@@ -104,8 +106,8 @@ public sealed class SettingsStore
         settings.Paint.CoverageStepTexels = settings.Paint.StrokeSizeTexels;
         settings.Paint.SideSourceMaxUv = Math.Clamp(settings.Paint.SideSourceMaxUv, 0.001, 0.50);
         settings.Paint.FrontBackSourceMaxUv = Math.Clamp(settings.Paint.FrontBackSourceMaxUv, 0.001, 2.00);
-        settings.Paint.ServerBatchLimit = Math.Clamp(settings.Paint.ServerBatchLimit, 1, 100);
-        settings.Paint.ServerBatchDelayMs = Math.Clamp(settings.Paint.ServerBatchDelayMs, 1, 500);
+        settings.Paint.ServerBatchLimit = Math.Clamp(settings.Paint.ServerBatchLimit, 1, 50);
+        settings.Paint.ServerBatchDelayMs = Math.Clamp(settings.Paint.ServerBatchDelayMs, 150, 500);
         settings.Paint.Metallic = Math.Clamp(settings.Paint.Metallic, 0.0, 1.0);
         settings.Paint.Roughness = Math.Clamp(settings.Paint.Roughness, 0.0, 1.0);
         settings.Paint.FillMetallic = Math.Clamp(settings.Paint.FillMetallic, 0.0, 1.0);

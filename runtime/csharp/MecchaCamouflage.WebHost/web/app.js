@@ -421,8 +421,8 @@ function diffSnapshots(before, after) {
   const keys = [
     "app.language",
     "paint.brushSizeTexels",
-    "paint.serverBatchLimit",
     "paint.strokeDelayMs",
+    "paint.serverBatchLimit",
     "paint.autoMaterial",
     "paint.metallic",
     "paint.roughness",

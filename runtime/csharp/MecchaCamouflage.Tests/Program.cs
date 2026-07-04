@@ -13,6 +13,9 @@ var tests = new List<(string Name, Action Run)>
     ("front region defaults to fill", FrontRegionDefaultsToFill),
     ("bridge messages are user friendly", BridgeMessagesAreUserFriendly),
     ("settings clamp syncs coverage step to brush size", SettingsClampSyncsCoverageToBrush),
+    ("settings clamp limits batch tuning", SettingsClampLimitsBatchTuning),
+    ("settings detect supported system language", SettingsDetectSupportedSystemLanguage),
+    ("ui snapshot serializes server batch limit", UiSnapshotSerializesServerBatchLimit),
     ("hotkey validation rejects duplicates", HotkeyValidationRejectsDuplicates),
     ("host session reset restores setting default", HostSessionResetRestoresDefault),
     ("host session brush update syncs coverage step", HostSessionBrushUpdateSyncsCoverageStep),
@@ -158,6 +161,61 @@ static void SettingsClampSyncsCoverageToBrush()
 
     Assert(Math.Abs(clamped.Paint.StrokeSizeTexels - 7.5) < 0.000001, "brush size should be clamped independently");
     Assert(Math.Abs(clamped.Paint.CoverageStepTexels - clamped.Paint.StrokeSizeTexels) < 0.000001, "coverage step should follow brush size");
+}
+
+static void SettingsClampLimitsBatchTuning()
+{
+    var settings = new AppSettings();
+    settings.Paint.ServerBatchLimit = 1000;
+    settings.Paint.ServerBatchDelayMs = 1;
+
+    var clamped = SettingsStore.Clamp(settings);
+
+    Assert(clamped.Paint.ServerBatchLimit == 50, "batch size should clamp to safe max");
+    Assert(clamped.Paint.ServerBatchDelayMs == 150, "batch delay should clamp to safe min");
+}
+
+static void SettingsDetectSupportedSystemLanguage()
+{
+    var previous = System.Globalization.CultureInfo.CurrentUICulture;
+    try
+    {
+        System.Globalization.CultureInfo.CurrentUICulture = new System.Globalization.CultureInfo("ja-JP");
+        var settings = SettingsStore.Clamp(new AppSettings());
+        Assert(settings.Language == "ja", "blank language should detect supported UI culture");
+    }
+    finally
+    {
+        System.Globalization.CultureInfo.CurrentUICulture = previous;
+    }
+}
+
+static void UiSnapshotSerializesServerBatchLimit()
+{
+    var snapshot = new PaintSnapshot(
+        6.0,
+        6.0,
+        150,
+        50,
+        false,
+        0.0,
+        1.0,
+        "fill",
+        "paint",
+        "paint",
+        "#FFFFFF",
+        1.0,
+        0.0,
+        true);
+    var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    });
+    using var doc = JsonDocument.Parse(json);
+
+    Assert(doc.RootElement.TryGetProperty("serverBatchLimit", out var serverBatchLimit), "snapshot should expose serverBatchLimit for app.js");
+    Assert(serverBatchLimit.GetInt32() == 50, "serverBatchLimit should carry the configured value");
+    Assert(!doc.RootElement.TryGetProperty("batchSize", out _), "snapshot should not expose renamed batchSize");
 }
 
 static void HotkeyValidationRejectsDuplicates()

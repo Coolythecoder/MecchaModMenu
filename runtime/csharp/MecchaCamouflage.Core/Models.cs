@@ -37,15 +37,15 @@ public sealed record RgbColor(byte R, byte G, byte B)
 
 public sealed class PaintSettings
 {
-    public double StrokeSizeTexels { get; set; } = 6.0;
-    public double CoverageStepTexels { get; set; } = 6.0;
+    public double StrokeSizeTexels { get; set; } = 9.0;
+    public double CoverageStepTexels { get; set; } = 9.0;
     public double SideSourceMaxUv { get; set; } = 0.08;
     public double FrontBackSourceMaxUv { get; set; } = 0.45;
     public RegionMode FrontRegionMode { get; set; } = RegionMode.Fill;
     public RegionMode SideRegionMode { get; set; } = RegionMode.Paint;
     public RegionMode BackRegionMode { get; set; } = RegionMode.Paint;
     public int ServerBatchLimit { get; set; } = 50;
-    public int ServerBatchDelayMs { get; set; } = 100;
+    public int ServerBatchDelayMs { get; set; } = 150;
     public bool AutoMaterial { get; set; } = false;
     public double Metallic { get; set; } = 0.0;
     public double Roughness { get; set; } = 1.0;
@@ -67,7 +67,7 @@ public sealed class AppSettings
     public double PanelY { get; set; } = -1.0;
     public double PanelWidth { get; set; } = 1100.0;
     public double PanelHeight { get; set; } = 720.0;
-    public string Language { get; set; } = "en";
+    public string Language { get; set; } = "";
     public int LogRetentionDays { get; set; } = 14;
     public string GameProcessName { get; set; } = "PenguinHotel-Win64-Shipping.exe";
     public bool AlwaysOnTop { get; set; } = true;
