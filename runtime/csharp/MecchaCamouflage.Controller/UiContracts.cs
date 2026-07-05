@@ -33,9 +33,6 @@ public sealed record SettingsSnapshot(PaintSnapshot Paint, AppSnapshot App);
 public sealed record PaintSnapshot(
     double BrushSizeTexels,
     double CoverageStepTexels,
-    int StrokeDelayMs,
-    int ServerBatchLimit,
-    bool AdaptiveBatching,
     bool AutoMaterial,
     double Metallic,
     double Roughness,

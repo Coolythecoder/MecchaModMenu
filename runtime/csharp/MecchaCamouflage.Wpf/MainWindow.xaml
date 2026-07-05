@@ -99,7 +99,7 @@
               <TextBlock x:Name="CoverageLabel" Foreground="#D7D7D7" />
               <TextBox x:Name="CoverageTextBox" Grid.Column="1" />
             </Grid>
-            <Grid Margin="0,0,0,4">
+            <Grid Margin="0,0,0,4" Visibility="Collapsed">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="190" />
                 <ColumnDefinition Width="*" />

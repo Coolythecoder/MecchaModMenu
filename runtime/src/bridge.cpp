@@ -4876,8 +4876,9 @@ namespace
                                              std::size_t offset,
                                              std::size_t count,
                                              std::string& failure) -> bool;
-    auto sdk_generate_packed_paint_source_id() -> sdk::FGuid;
-    auto sdk_read_component_packed_source_id(std::uintptr_t component) -> sdk::FGuid;
+    auto sdk_read_component_packed_source_id(std::uintptr_t component,
+                                             sdk::FGuid& id,
+                                             std::string& failure) -> bool;
     auto sdk_call_packed_paint_batch_from_strokes(std::uintptr_t component,
                                                   std::uintptr_t relay_component,
                                                   std::uintptr_t component_function,
@@ -9755,6 +9756,9 @@ namespace
         const bool any_paint_region = enable_front || enable_side || enable_back;
         const bool preview_only = json_bool_field(request, "preview_only", false);
         const bool unpreview_only = json_bool_field(request, "unpreview_only", false);
+        const bool normal_paint_requires_packed = !preview_only && !unpreview_only;
+        const int packed_server_batch_limit = MeshFirstAdaptiveFallbackMaxOutgoingStrokesPerBatch;
+        const int packed_server_batch_seed_delay_ms = MeshFirstServerBatchMinDelayMs;
         const bool research_artifacts = json_bool_field(request, "research_artifacts", false);
         const double tuning_stroke_size_texels = clamp_range(json_number_field(request, "stroke_size_texels", 9.0), 1.0, 12.0);
         const double tuning_coverage_step_texels = clamp_range(json_number_field(request, "coverage_step_texels", 9.0), 1.0, 12.0);
@@ -9782,10 +9786,6 @@ namespace
             requested_server_batch_rpc_normalized == "serverrelaypackedstrokebatch" ||
             requested_server_batch_rpc_normalized == "server_relay_packed_stroke_batch" ||
             requested_server_batch_rpc_normalized == "relay_packed";
-        const bool requested_packed_component_route =
-            requested_packed_route == "component" ||
-            requested_server_batch_rpc_normalized == "serverpackedpaintbatch" ||
-            requested_server_batch_rpc_normalized == "server_packed_paint_batch";
         const bool experimental_send_custom_requested =
             json_bool_field(request, "experimental_send_custom", false) ||
             requested_server_batch_rpc_normalized == "sendcustomstrokebatchtoserver" ||
@@ -9805,7 +9805,8 @@ namespace
         metadata += ",\"mesh_back_color_source\":\"shared_camera_facing_source\"";
         metadata += ",\"old_dense_hittest_fallback_used\":false";
         metadata += ",\"runtime_hit_test_used\":false";
-        metadata += ",\"server_paint_batch_required\":" + std::string(json_bool(!preview_only && !unpreview_only));
+        metadata += ",\"server_paint_batch_required\":" + std::string(json_bool(normal_paint_requires_packed));
+        metadata += ",\"server_packed_paint_batch_required\":" + std::string(json_bool(normal_paint_requires_packed));
         metadata += ",\"research_artifacts_requested\":" + std::string(json_bool(research_artifacts));
         metadata += ",\"enable_front_paint\":" + std::string(json_bool(enable_front));
         metadata += ",\"enable_side_paint\":" + std::string(json_bool(enable_side));
@@ -9841,9 +9842,12 @@ namespace
         metadata += ",\"fill_color_b\":" + std::to_string(fill_color_b);
         metadata += ",\"fill_metallic\":" + std::to_string(fill_metallic);
         metadata += ",\"fill_roughness\":" + std::to_string(fill_roughness);
-        metadata += ",\"adaptive_batch_enabled\":" + std::string(json_bool(tuning_adaptive_batch_enabled));
-        metadata += ",\"server_batch_limit\":" + std::to_string(tuning_server_batch_limit);
-        metadata += ",\"server_batch_delay_ms\":" + std::to_string(tuning_server_batch_delay_ms);
+        metadata += ",\"adaptive_batch_requested_enabled\":" + std::string(json_bool(tuning_adaptive_batch_enabled));
+        metadata += ",\"adaptive_batch_enabled\":" + std::string(json_bool(normal_paint_requires_packed));
+        metadata += ",\"server_batch_limit\":" +
+                    std::to_string(normal_paint_requires_packed ? packed_server_batch_limit : tuning_server_batch_limit);
+        metadata += ",\"server_batch_delay_ms\":" +
+                    std::to_string(normal_paint_requires_packed ? packed_server_batch_seed_delay_ms : tuning_server_batch_delay_ms);
         metadata += ",\"bridge_events\":[\"mesh_profile_load\",\"pose_resolve\",\"planner_build\",\"bridge.paint_batch.request\",\"bridge.paint_batch.response\"]";
 
         if (queued_job)
@@ -9913,14 +9917,15 @@ namespace
         {
             return response_json(false, ctx.stage.c_str(), 0, 1, ctx.message, metadata);
         }
-        if (!preview_only && !unpreview_only && !ctx.server_compact_paint_batch_function)
+        if (normal_paint_requires_packed && !ctx.server_packed_paint_batch_function)
         {
             return response_json(false,
-                                 "mesh_server_compact_batch_unavailable",
+                                 "mesh_server_packed_batch_unavailable",
                                  0,
                                  1,
-                                 "ServerCompactPaintBatch is unavailable; paint cannot replay through the compact route",
-                                 metadata);
+                                 "ServerPackedPaintBatch is unavailable; paint cannot replay through the packed component route",
+                                 metadata + ",\"server_packed_paint_batch_function\":\"" +
+                                     hex_address(ctx.server_packed_paint_batch_function) + "\",\"replay_blocked\":true");
         }
         if (unpreview_only)
         {
@@ -10835,8 +10840,13 @@ namespace
         metadata += ",\"planner_strokes_side\":" + std::to_string(replay_side);
         metadata += ",\"planner_strokes_back\":" + std::to_string(replay_back);
         metadata += ",\"planner_strokes_total\":" + std::to_string(strokes.size());
-        const int effective_server_batch_delay_ms = std::max(MeshFirstServerBatchMinDelayMs, tuning_server_batch_delay_ms);
-        const int estimated_batches = (static_cast<int>(strokes.size()) + std::max(1, tuning_server_batch_limit) - 1) / std::max(1, tuning_server_batch_limit);
+        const int effective_replay_server_batch_limit =
+            normal_paint_requires_packed ? packed_server_batch_limit : tuning_server_batch_limit;
+        const int effective_server_batch_delay_ms =
+            normal_paint_requires_packed ? packed_server_batch_seed_delay_ms
+                                         : std::max(MeshFirstServerBatchMinDelayMs, tuning_server_batch_delay_ms);
+        const int estimated_batches = (static_cast<int>(strokes.size()) + std::max(1, effective_replay_server_batch_limit) - 1) /
+                                      std::max(1, effective_replay_server_batch_limit);
         const int estimated_replay_ms = std::max(0, estimated_batches - 1) * effective_server_batch_delay_ms;
         metadata += ",\"server_batch_estimated_calls\":" + std::to_string(estimated_batches);
         metadata += ",\"estimated_replay_ms\":" + std::to_string(estimated_replay_ms);
@@ -10848,53 +10858,62 @@ namespace
         metadata += ",\"replay_local_anchors\":" + std::to_string(replay_local_anchors);
         metadata += ",\"replay_triangle_anchors\":" + std::to_string(replay_triangle_anchors);
         const bool compact_batch_available = ctx.server_compact_paint_batch_function != 0;
-        const bool compact_batch_compatible = sdk_strokes_are_compact_compatible(strokes);
+        const bool packed_batch_compatible = sdk_strokes_are_compact_compatible(strokes);
         const bool compact_batch_replication_enabled =
             read_object_u8_property(ref, ctx.component, "bUseCompactPaintReplication", 0) != 0;
         const bool send_custom_batch_available = ctx.send_custom_stroke_batch_function != 0;
         const bool packed_component_available = ctx.server_packed_paint_batch_function != 0;
         const bool packed_relay_available = ctx.server_relay_packed_stroke_batch_function != 0 && live_uobject(ctx.relay_component);
-        const bool use_packed_relay_route = !requested_packed_component_route;
-        const bool packed_selected_route_available = use_packed_relay_route ? packed_relay_available : packed_component_available;
+        const bool use_packed_relay_route = false;
+        sdk::FGuid packed_source_id{};
+        std::string packed_source_id_failure = normal_paint_requires_packed ? "not_checked" : "not_required";
+        bool packed_source_id_available = false;
+        if (normal_paint_requires_packed && packed_component_available && packed_batch_compatible)
+        {
+            packed_source_id_available = sdk_read_component_packed_source_id(ctx.component,
+                                                                             packed_source_id,
+                                                                             packed_source_id_failure);
+        }
         const bool use_packed_server_batch =
-            !preview_only && experimental_packed_requested && compact_batch_compatible && packed_selected_route_available;
-        const bool use_send_custom_server_batch =
-            !preview_only && !use_packed_server_batch && send_custom_batch_available && experimental_send_custom_requested;
-        const bool use_compact_server_batch =
-            !preview_only && !use_packed_server_batch && !use_send_custom_server_batch && compact_batch_available &&
-            compact_batch_compatible && compact_batch_replication_enabled;
-        const int effective_replay_server_batch_limit =
-            use_packed_server_batch
-                ? std::min(tuning_server_batch_limit, MeshFirstAdaptiveFallbackMaxOutgoingStrokesPerBatch)
-                : tuning_server_batch_limit;
+            normal_paint_requires_packed && packed_component_available && packed_batch_compatible && packed_source_id_available;
+        const bool use_send_custom_server_batch = false;
+        const bool use_compact_server_batch = false;
         std::string packed_ignored_reason = "none";
         if (!use_packed_server_batch)
         {
-            if (!experimental_packed_requested)
-            {
-                packed_ignored_reason = "not_requested";
-            }
-            else if (preview_only)
+            if (preview_only)
             {
                 packed_ignored_reason = "preview_only";
             }
-            else if (!compact_batch_compatible)
+            else if (unpreview_only)
+            {
+                packed_ignored_reason = "unpreview_only";
+            }
+            else if (!packed_component_available)
+            {
+                packed_ignored_reason = "component_route_unavailable";
+            }
+            else if (!packed_batch_compatible)
             {
                 packed_ignored_reason = "incompatible_strokes";
             }
-            else if (!packed_selected_route_available)
+            else if (!packed_source_id_available)
             {
-                packed_ignored_reason = use_packed_relay_route ? "relay_route_unavailable" : "component_route_unavailable";
+                packed_ignored_reason = "source_id_unavailable";
             }
             else
             {
-                packed_ignored_reason = "not_selected";
+                packed_ignored_reason = "not_required";
             }
         }
         std::string send_custom_ignored_reason = "none";
         if (!use_send_custom_server_batch)
         {
-            if (!experimental_send_custom_requested)
+            if (normal_paint_requires_packed)
+            {
+                send_custom_ignored_reason = "packed_component_route_required";
+            }
+            else if (!experimental_send_custom_requested)
             {
                 send_custom_ignored_reason = "not_requested";
             }
@@ -10912,68 +10931,65 @@ namespace
             }
         }
         metadata += ",\"server_batch_rpc\":\"" +
-                    std::string(use_packed_server_batch
-                                    ? (use_packed_relay_route ? "ServerRelayPackedStrokeBatch" : "ServerPackedPaintBatch")
+                    std::string(normal_paint_requires_packed
+                                    ? "ServerPackedPaintBatch"
                                     : (use_send_custom_server_batch
                                            ? "SendCustomStrokeBatchToServer"
                                            : (use_compact_server_batch ? "ServerCompactPaintBatch" : "none"))) + "\"";
-        metadata += ",\"server_paint_batch_used\":" + std::string(json_bool(!preview_only));
+        metadata += ",\"server_paint_batch_used\":" + std::string(json_bool(normal_paint_requires_packed));
         metadata += ",\"server_paint_batch_single_stroke_mode\":" +
-                    std::string(json_bool(!preview_only && tuning_server_batch_limit <= 1));
+                    std::string(json_bool(normal_paint_requires_packed && effective_replay_server_batch_limit <= 1));
         metadata += ",\"server_send_custom_stroke_batch_available\":" + std::string(json_bool(send_custom_batch_available));
         metadata += ",\"server_send_custom_stroke_batch_requested\":" + std::string(json_bool(experimental_send_custom_requested));
         metadata += ",\"server_send_custom_stroke_batch_used\":" + std::string(json_bool(use_send_custom_server_batch));
         metadata += ",\"server_send_custom_stroke_batch_ignored\":\"" + json_escape(send_custom_ignored_reason) + "\"";
         metadata += ",\"server_send_custom_stroke_batch_function\":\"" + hex_address(ctx.send_custom_stroke_batch_function) + "\"";
         metadata += ",\"server_compact_paint_batch_available\":" + std::string(json_bool(compact_batch_available));
-        metadata += ",\"server_compact_paint_batch_compatible\":" + std::string(json_bool(compact_batch_compatible));
+        metadata += ",\"server_compact_paint_batch_compatible\":" + std::string(json_bool(packed_batch_compatible));
         metadata += ",\"server_compact_paint_replication_enabled\":" + std::string(json_bool(compact_batch_replication_enabled));
         metadata += ",\"server_compact_paint_batch_used\":" + std::string(json_bool(use_compact_server_batch));
         metadata += ",\"server_compact_paint_batch_ignored\":" + std::string(json_bool(!use_compact_server_batch));
+        metadata += ",\"server_compact_paint_batch_ignored_reason\":\"" +
+                    std::string(normal_paint_requires_packed ? "packed_component_route_required" : "not_required") + "\"";
         metadata += ",\"server_packed_paint_batch_available\":" + std::string(json_bool(packed_component_available));
         metadata += ",\"server_relay_packed_stroke_batch_available\":" + std::string(json_bool(packed_relay_available));
         metadata += ",\"server_packed_paint_batch_function\":\"" + hex_address(ctx.server_packed_paint_batch_function) + "\"";
         metadata += ",\"server_relay_packed_stroke_batch_function\":\"" + hex_address(ctx.server_relay_packed_stroke_batch_function) + "\"";
         metadata += ",\"server_packed_paint_batch_used\":" + std::string(json_bool(use_packed_server_batch));
-        metadata += ",\"server_packed_paint_batch_route\":\"" + std::string(use_packed_relay_route ? "relay" : "component") + "\"";
+        metadata += ",\"server_packed_paint_batch_route\":\"component\"";
         metadata += ",\"server_packed_source_id_offset\":\"" + hex_address(RuntimePaintableComponentPackedSourceIdOffset) + "\"";
+        metadata += ",\"server_packed_source_id_available\":" + std::string(json_bool(packed_source_id_available));
+        metadata += ",\"server_packed_source_id_failure\":\"" + json_escape(packed_source_id_failure) + "\"";
         metadata += ",\"server_packed_batch_limit_cap\":" + std::to_string(MeshFirstAdaptiveFallbackMaxOutgoingStrokesPerBatch);
+        metadata += ",\"server_batch_limit_requested\":" + std::to_string(tuning_server_batch_limit);
+        metadata += ",\"server_batch_limit_ignored_for_packed\":" + std::string(json_bool(normal_paint_requires_packed));
         metadata += ",\"server_batch_limit_effective\":" + std::to_string(effective_replay_server_batch_limit);
         metadata += ",\"server_packed_paint_batch_ignored\":\"" + json_escape(packed_ignored_reason) + "\"";
-        if (!preview_only && experimental_packed_requested && !use_packed_server_batch)
+        if (normal_paint_requires_packed && !packed_component_available)
         {
             return response_json(false,
                                  "mesh_server_packed_batch_unavailable",
                                  0,
                                  1,
-                                 "Packed paint batch route is unavailable or incompatible: " + packed_ignored_reason,
+                                 "ServerPackedPaintBatch is unavailable; paint cannot replay through the packed component route",
                                  metadata + ",\"replay_blocked\":true");
         }
-        if (!preview_only && !use_packed_server_batch && !use_send_custom_server_batch && !compact_batch_available)
+        if (normal_paint_requires_packed && !packed_batch_compatible)
         {
             return response_json(false,
-                                 "mesh_server_compact_batch_unavailable",
+                                 "mesh_server_packed_batch_incompatible",
                                  0,
                                  1,
-                                 "ServerCompactPaintBatch is unavailable; paint cannot replay through the compact route",
+                                 "ServerPackedPaintBatch requires skeletal triangle anchors for every stroke",
                                  metadata + ",\"replay_blocked\":true");
         }
-        if (!preview_only && !use_packed_server_batch && !use_send_custom_server_batch && !compact_batch_compatible)
+        if (normal_paint_requires_packed && !packed_source_id_available)
         {
             return response_json(false,
-                                 "mesh_server_compact_batch_incompatible",
+                                 "mesh_server_packed_source_id_unavailable",
                                  0,
                                  1,
-                                 "ServerCompactPaintBatch requires skeletal triangle anchors for every stroke",
-                                 metadata + ",\"replay_blocked\":true");
-        }
-        if (!preview_only && !use_packed_server_batch && !use_send_custom_server_batch && !compact_batch_replication_enabled)
-        {
-            return response_json(false,
-                                 "mesh_server_compact_replication_disabled",
-                                 0,
-                                 1,
-                                 "bUseCompactPaintReplication is disabled on the current paint component",
+                                 "ServerPackedPaintBatch source id is unavailable: " + packed_source_id_failure,
                                  metadata + ",\"replay_blocked\":true");
         }
         const auto replication_manager = ref.find_first_instance("RuntimePaintReplicationManager");
@@ -11245,8 +11261,7 @@ namespace
             async_job->queued = queued_job;
             async_job->component = ctx.component;
             async_job->relay_component = ctx.relay_component;
-            async_job->server_paint_batch_function =
-                use_send_custom_server_batch ? ctx.send_custom_stroke_batch_function : ctx.server_paint_batch_function;
+            async_job->server_paint_batch_function = ctx.server_paint_batch_function;
             async_job->server_compact_paint_batch_function = ctx.server_compact_paint_batch_function;
             async_job->server_packed_paint_batch_function = ctx.server_packed_paint_batch_function;
             async_job->server_relay_packed_stroke_batch_function = ctx.server_relay_packed_stroke_batch_function;
@@ -11266,11 +11281,11 @@ namespace
             async_job->server_compact_paint_batch_enabled = use_compact_server_batch;
             async_job->server_packed_paint_batch_enabled = use_packed_server_batch;
             async_job->server_packed_paint_batch_use_relay = use_packed_relay_route;
-            async_job->server_packed_paint_source_id = sdk_read_component_packed_source_id(ctx.component);
+            async_job->server_packed_paint_source_id = packed_source_id;
             async_job->server_send_custom_stroke_batch_enabled = use_send_custom_server_batch;
             async_job->server_batch_rpc =
                 use_packed_server_batch
-                    ? (use_packed_relay_route ? "ServerRelayPackedStrokeBatch" : "ServerPackedPaintBatch")
+                    ? "ServerPackedPaintBatch"
                     : (use_send_custom_server_batch ? "SendCustomStrokeBatchToServer" : "ServerCompactPaintBatch");
             async_job->local_visual_sync_enabled = true;
             async_job->strokes = std::move(strokes);
@@ -11293,7 +11308,7 @@ namespace
                 replication_before.manager_max_outgoing_network_batches_per_second;
             async_job->replication_manager_coalesce_outgoing_strokes =
                 replication_before.manager_coalesce_outgoing_strokes;
-            async_job->adaptive_batch_enabled = tuning_adaptive_batch_enabled;
+            async_job->adaptive_batch_enabled = normal_paint_requires_packed;
             async_job->adaptive_requested_batch_limit = effective_replay_server_batch_limit;
             async_job->adaptive_requested_delay_ms = effective_server_batch_delay_ms;
             mesh_first_update_adaptive_model(async_job, replication_before);
@@ -11326,7 +11341,7 @@ namespace
                 g_mesh_first_batch_job = async_job;
             }
             write_bridge_progress("mesh_server_batch_begin",
-                                  "mesh-first ServerPaintBatch stream prepared",
+                                  "mesh-first " + async_job->server_batch_rpc + " stream prepared",
                                   0,
                                   static_cast<int>(async_job->strokes.size()),
                                   0.0,
@@ -12836,35 +12851,35 @@ namespace
         bytes.insert(bytes.end(), raw, raw + sizeof(value));
     }
 
-    auto sdk_generate_packed_paint_source_id() -> sdk::FGuid
-    {
-        static std::atomic<std::uint32_t> sequence{1};
-        LARGE_INTEGER counter{};
-        QueryPerformanceCounter(&counter);
-        const auto tick = GetTickCount64();
-        sdk::FGuid id{};
-        id.A = static_cast<std::uint32_t>(counter.LowPart ^ GetCurrentProcessId());
-        id.B = static_cast<std::uint32_t>(counter.HighPart ^ (tick & 0xffffffffu));
-        id.C = static_cast<std::uint32_t>((tick >> 32) ^ sequence.fetch_add(1));
-        id.D = static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(&sequence) >> 4) ^ counter.LowPart);
-        return id;
-    }
-
     auto sdk_guid_is_zero(const sdk::FGuid& id) -> bool
     {
         return id.A == 0 && id.B == 0 && id.C == 0 && id.D == 0;
     }
 
-    auto sdk_read_component_packed_source_id(std::uintptr_t component) -> sdk::FGuid
+    auto sdk_read_component_packed_source_id(std::uintptr_t component,
+                                             sdk::FGuid& id,
+                                             std::string& failure) -> bool
     {
-        sdk::FGuid id{};
-        if (live_uobject(component))
+        id = {};
+        if (!live_uobject(component))
         {
-            safe_copy(&id,
-                      reinterpret_cast<const void*>(component + RuntimePaintableComponentPackedSourceIdOffset),
-                      sizeof(id));
+            failure = "paint_component_unavailable";
+            return false;
         }
-        return sdk_guid_is_zero(id) ? sdk_generate_packed_paint_source_id() : id;
+        if (!safe_copy(&id,
+                       reinterpret_cast<const void*>(component + RuntimePaintableComponentPackedSourceIdOffset),
+                       sizeof(id)))
+        {
+            failure = "source_id_read_failed";
+            return false;
+        }
+        if (sdk_guid_is_zero(id))
+        {
+            failure = "source_id_zero";
+            return false;
+        }
+        failure = "ok";
+        return true;
     }
 
     auto sdk_write_compact_barycentric(double value, std::uint8_t& high, std::uint8_t& low) -> void

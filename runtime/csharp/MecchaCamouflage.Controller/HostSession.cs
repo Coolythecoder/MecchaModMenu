@@ -10,9 +10,6 @@ public sealed class HostSession
     [
         "paint.brushSizeTexels",
         "paint.coverageStepTexels",
-        "paint.adaptiveBatching",
-        "paint.serverBatchLimit",
-        "paint.strokeDelayMs",
         "paint.autoMaterial",
         "paint.metallic",
         "paint.roughness",
@@ -165,8 +162,6 @@ public sealed class HostSession
             case "geometry":
                 next.Paint.StrokeSizeTexels = defaults.Paint.StrokeSizeTexels;
                 next.Paint.CoverageStepTexels = defaults.Paint.StrokeSizeTexels;
-                next.Paint.ServerBatchLimit = defaults.Paint.ServerBatchLimit;
-                next.Paint.ServerBatchDelayMs = defaults.Paint.ServerBatchDelayMs;
                 break;
             case "paint.material":
             case "material":
@@ -356,6 +351,12 @@ public sealed class HostSession
             return "The saved preview belongs to a different mesh.";
         if (lower is "mesh_local_visual_sync_failed")
             return "Paint completed, but local preview failed.";
+        if (lower is "mesh_server_packed_batch_unavailable" || lower.Contains("serverpackedpaintbatch is unavailable"))
+            return "Packed multiplayer paint sync is unavailable.";
+        if (lower is "mesh_server_packed_batch_incompatible" || lower.Contains("serverpackedpaintbatch requires"))
+            return "Paint failed because strokes could not be packed.";
+        if (lower is "mesh_server_packed_source_id_unavailable" || lower.Contains("source id is unavailable"))
+            return "Packed multiplayer paint source id is unavailable.";
         if (lower is "mesh_server_batch_failed")
             return "Paint failed while sending strokes.";
 
@@ -409,9 +410,6 @@ public sealed class HostSession
             new PaintSnapshot(
                 paint.StrokeSizeTexels,
                 paint.CoverageStepTexels,
-                paint.ServerBatchDelayMs,
-                paint.ServerBatchLimit,
-                paint.AdaptiveBatching,
                 paint.AutoMaterial,
                 paint.Metallic,
                 paint.Roughness,
@@ -492,8 +490,7 @@ public sealed class HostSession
         var map = ResetKeys.ToDictionary(key => key, key => !SettingEquals(settings, defaults, key), StringComparer.OrdinalIgnoreCase);
         var sections = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
         {
-            ["paint.geometry"] = map["paint.brushSizeTexels"] || map["paint.coverageStepTexels"] ||
-                                  map["paint.adaptiveBatching"] || map["paint.serverBatchLimit"] || map["paint.strokeDelayMs"],
+            ["paint.geometry"] = map["paint.brushSizeTexels"] || map["paint.coverageStepTexels"],
             ["paint.material"] = map["paint.autoMaterial"] || map["paint.metallic"] || map["paint.roughness"],
             ["regions"] = map["paint.frontRegionMode"] || map["paint.sideRegionMode"] || map["paint.backRegionMode"],
             ["fill.material"] = map["paint.fillColor"] || map["paint.fillMetallic"] || map["paint.fillRoughness"],
@@ -507,9 +504,6 @@ public sealed class HostSession
     {
         "paint.brushSizeTexels" => Nearly(left.Paint.StrokeSizeTexels, right.Paint.StrokeSizeTexels),
         "paint.coverageStepTexels" => Nearly(left.Paint.CoverageStepTexels, right.Paint.CoverageStepTexels),
-        "paint.adaptiveBatching" => left.Paint.AdaptiveBatching == right.Paint.AdaptiveBatching,
-        "paint.serverBatchLimit" => left.Paint.ServerBatchLimit == right.Paint.ServerBatchLimit,
-        "paint.strokeDelayMs" => left.Paint.ServerBatchDelayMs == right.Paint.ServerBatchDelayMs,
         "paint.autoMaterial" => left.Paint.AutoMaterial == right.Paint.AutoMaterial,
         "paint.metallic" => Nearly(left.Paint.Metallic, right.Paint.Metallic),
         "paint.roughness" => Nearly(left.Paint.Roughness, right.Paint.Roughness),
@@ -539,9 +533,6 @@ public sealed class HostSession
                 settings.Paint.StrokeSizeTexels = defaults.Paint.StrokeSizeTexels;
                 settings.Paint.CoverageStepTexels = defaults.Paint.StrokeSizeTexels;
                 break;
-            case "paint.strokeDelayMs": settings.Paint.ServerBatchDelayMs = defaults.Paint.ServerBatchDelayMs; break;
-            case "paint.adaptiveBatching": settings.Paint.AdaptiveBatching = defaults.Paint.AdaptiveBatching; break;
-            case "paint.serverBatchLimit": settings.Paint.ServerBatchLimit = defaults.Paint.ServerBatchLimit; break;
             case "paint.autoMaterial": settings.Paint.AutoMaterial = defaults.Paint.AutoMaterial; break;
             case "paint.metallic": settings.Paint.Metallic = defaults.Paint.Metallic; break;
             case "paint.roughness": settings.Paint.Roughness = defaults.Paint.Roughness; break;
@@ -572,9 +563,6 @@ public sealed class HostSession
                 settings.Paint.StrokeSizeTexels = value.GetDouble();
                 settings.Paint.CoverageStepTexels = settings.Paint.StrokeSizeTexels;
                 break;
-            case "paint.strokeDelayMs": settings.Paint.ServerBatchDelayMs = value.GetInt32(); break;
-            case "paint.adaptiveBatching": settings.Paint.AdaptiveBatching = value.GetBoolean(); break;
-            case "paint.serverBatchLimit": settings.Paint.ServerBatchLimit = value.GetInt32(); break;
             case "paint.autoMaterial": settings.Paint.AutoMaterial = value.GetBoolean(); break;
             case "paint.metallic": settings.Paint.Metallic = value.GetDouble(); break;
             case "paint.roughness": settings.Paint.Roughness = value.GetDouble(); break;

@@ -5,7 +5,7 @@ using MecchaCamouflage.Core;
 var tests = new List<(string Name, Action Run)>
 {
     ("legacy false region migrates to fill", LegacyFalseRegionMigratesToFill),
-    ("payload includes fill material and region modes", PayloadIncludesFillMaterial),
+    ("payload includes packed route and fill material", PayloadIncludesPackedRouteAndFillMaterial),
     ("locales have complete keys", LocalesHaveCompleteKeys),
     ("color parser accepts rrggbb", ColorParserAcceptsHex),
     ("runtime cleanup removes old hash dirs", RuntimeCleanupRemovesOldHashDirs),
@@ -13,9 +13,9 @@ var tests = new List<(string Name, Action Run)>
     ("front region defaults to fill", FrontRegionDefaultsToFill),
     ("bridge messages are user friendly", BridgeMessagesAreUserFriendly),
     ("settings clamp syncs coverage step to brush size", SettingsClampSyncsCoverageToBrush),
-    ("settings clamp limits batch tuning", SettingsClampLimitsBatchTuning),
+    ("settings clamp preserves legacy batch compatibility", SettingsClampPreservesLegacyBatchCompatibility),
     ("settings detect supported system language", SettingsDetectSupportedSystemLanguage),
-    ("ui snapshot serializes server batch limit", UiSnapshotSerializesServerBatchLimit),
+    ("ui snapshot hides legacy batch tuning", UiSnapshotHidesLegacyBatchTuning),
     ("hotkey validation rejects duplicates", HotkeyValidationRejectsDuplicates),
     ("host session reset restores setting default", HostSessionResetRestoresDefault),
     ("host session brush update syncs coverage step", HostSessionBrushUpdateSyncsCoverageStep),
@@ -64,7 +64,7 @@ static void LegacyFalseRegionMigratesToFill()
     Assert(settings.Paint.BackRegionMode == RegionMode.Fill, "back should migrate to fill");
 }
 
-static void PayloadIncludesFillMaterial()
+static void PayloadIncludesPackedRouteAndFillMaterial()
 {
     var settings = new AppSettings();
     settings.Paint.FrontRegionMode = RegionMode.Fill;
@@ -76,6 +76,8 @@ static void PayloadIncludesFillMaterial()
 
     var payload = BridgePayloadBuilder.BuildPaintPayload(settings, 42, "Game.exe", new PaintRequestOptions());
     using var doc = JsonDocument.Parse(payload);
+    Assert(doc.RootElement.GetProperty("server_batch_rpc").GetString() == "packed", "payload should request packed server route");
+    Assert(doc.RootElement.GetProperty("packed_route").GetString() == "component", "payload should request component packed route");
     var tuning = doc.RootElement.GetProperty("tuning");
     Assert(tuning.GetProperty("front_region_mode").GetString() == "fill", "front mode missing");
     Assert(tuning.GetProperty("side_region_mode").GetString() == "skip", "side mode missing");
@@ -84,7 +86,9 @@ static void PayloadIncludesFillMaterial()
     Assert(Math.Abs(tuning.GetProperty("fill_color_r").GetDouble() - (241.0 / 255.0)) < 0.00001, "fill red not normalized");
     Assert(tuning.GetProperty("enable_front_paint").GetBoolean() == false, "compat front bool wrong");
     Assert(tuning.GetProperty("enable_back_paint").GetBoolean(), "compat back bool wrong");
-    Assert(tuning.GetProperty("adaptive_batch_enabled").GetBoolean(), "adaptive batching should be enabled by default");
+    Assert(!tuning.TryGetProperty("adaptive_batch_enabled", out _), "payload should not send legacy adaptive tuning");
+    Assert(!tuning.TryGetProperty("server_batch_limit", out _), "payload should not send legacy batch limit tuning");
+    Assert(!tuning.TryGetProperty("server_batch_delay_ms", out _), "payload should not send legacy batch delay tuning");
 }
 
 static void LocalesHaveCompleteKeys()
@@ -164,7 +168,7 @@ static void SettingsClampSyncsCoverageToBrush()
     Assert(Math.Abs(clamped.Paint.CoverageStepTexels - clamped.Paint.StrokeSizeTexels) < 0.000001, "coverage step should follow brush size");
 }
 
-static void SettingsClampLimitsBatchTuning()
+static void SettingsClampPreservesLegacyBatchCompatibility()
 {
     var settings = new AppSettings();
     settings.Paint.ServerBatchLimit = 1000;
@@ -172,8 +176,8 @@ static void SettingsClampLimitsBatchTuning()
 
     var clamped = SettingsStore.Clamp(settings);
 
-    Assert(clamped.Paint.ServerBatchLimit == 50, "batch size should clamp to safe max");
-    Assert(clamped.Paint.ServerBatchDelayMs == 150, "batch delay should clamp to safe min");
+    Assert(clamped.Paint.ServerBatchLimit == 50, "legacy batch size should still clamp for config compatibility");
+    Assert(clamped.Paint.ServerBatchDelayMs == 150, "legacy batch delay should still clamp for config compatibility");
 }
 
 static void SettingsDetectSupportedSystemLanguage()
@@ -191,14 +195,11 @@ static void SettingsDetectSupportedSystemLanguage()
     }
 }
 
-static void UiSnapshotSerializesServerBatchLimit()
+static void UiSnapshotHidesLegacyBatchTuning()
 {
     var snapshot = new PaintSnapshot(
         6.0,
         6.0,
-        150,
-        50,
-        true,
         false,
         0.0,
         1.0,
@@ -215,10 +216,9 @@ static void UiSnapshotSerializesServerBatchLimit()
     });
     using var doc = JsonDocument.Parse(json);
 
-    Assert(doc.RootElement.TryGetProperty("serverBatchLimit", out var serverBatchLimit), "snapshot should expose serverBatchLimit for app.js");
-    Assert(serverBatchLimit.GetInt32() == 50, "serverBatchLimit should carry the configured value");
-    Assert(doc.RootElement.TryGetProperty("adaptiveBatching", out var adaptiveBatching), "snapshot should expose adaptiveBatching for app.js");
-    Assert(adaptiveBatching.GetBoolean(), "adaptiveBatching should carry the configured value");
+    Assert(!doc.RootElement.TryGetProperty("serverBatchLimit", out _), "snapshot should not expose serverBatchLimit for editing");
+    Assert(!doc.RootElement.TryGetProperty("adaptiveBatching", out _), "snapshot should not expose adaptiveBatching for editing");
+    Assert(!doc.RootElement.TryGetProperty("strokeDelayMs", out _), "snapshot should not expose strokeDelayMs for editing");
     Assert(!doc.RootElement.TryGetProperty("batchSize", out _), "snapshot should not expose renamed batchSize");
 }
 
