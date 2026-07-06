@@ -17,7 +17,6 @@ var tests = new List<(string Name, Action Run)>
     ("front region defaults to fill", FrontRegionDefaultsToFill),
     ("bridge messages are user friendly", BridgeMessagesAreUserFriendly),
     ("settings clamp syncs coverage step to brush size", SettingsClampSyncsCoverageToBrush),
-    ("settings clamp preserves legacy batch compatibility", SettingsClampPreservesLegacyBatchCompatibility),
     ("settings detect supported system language", SettingsDetectSupportedSystemLanguage),
     ("ui snapshot hides legacy batch tuning", UiSnapshotHidesLegacyBatchTuning),
     ("hotkey validation rejects duplicates", HotkeyValidationRejectsDuplicates),
@@ -242,7 +241,6 @@ static void BridgeMessagesAreUserFriendly()
     var alreadyRunning = HostSession.FriendlyBridgeMessage("mesh-first paint is already running");
     var completed = HostSession.FriendlyBridgeMessage("mesh-first paint completed");
     var alreadyFriendlyCompleted = HostSession.FriendlyBridgeMessage("Paint completed.");
-    var sent = HostSession.FriendlyBridgeMessage("paint sent through ServerPaintBatch one stroke at a time");
     var preview = HostSession.FriendlyBridgeMessage("local preview material texture imported");
     var noPreview = HostSession.FriendlyBridgeMessage("mesh_unpreview_snapshot_unavailable");
     var contextChanged = HostSession.FriendlyBridgeMessage("mesh_paint_context_changed");
@@ -252,7 +250,6 @@ static void BridgeMessagesAreUserFriendly()
     Assert(alreadyRunning == "Paint: already running.", "already-running message should be friendly");
     Assert(completed == "Paint: completed.", "completed message should be friendly");
     Assert(alreadyFriendlyCompleted == "Paint: completed.", "already-friendly completed message should be normalized");
-    Assert(sent == "Paint: completed.", "server paint sent message should be friendly");
     Assert(preview == "Preview: applied.", "preview message should be friendly");
     Assert(noPreview == "Preview: no active preview to restore.", "missing preview snapshot should be a guard warning");
     Assert(contextChanged == "Paint: stopped because the game paint component changed.", "paint context change should be friendly");
@@ -271,18 +268,6 @@ static void SettingsClampSyncsCoverageToBrush()
 
     Assert(Math.Abs(clamped.Paint.StrokeSizeTexels - 7.5) < 0.000001, "brush size should be clamped independently");
     Assert(Math.Abs(clamped.Paint.CoverageStepTexels - clamped.Paint.StrokeSizeTexels) < 0.000001, "coverage step should follow brush size");
-}
-
-static void SettingsClampPreservesLegacyBatchCompatibility()
-{
-    var settings = new AppSettings();
-    settings.Paint.ServerBatchLimit = 1000;
-    settings.Paint.ServerBatchDelayMs = 1;
-
-    var clamped = SettingsStore.Clamp(settings);
-
-    Assert(clamped.Paint.ServerBatchLimit == 50, "legacy batch size should still clamp for config compatibility");
-    Assert(clamped.Paint.ServerBatchDelayMs == 150, "legacy batch delay should still clamp for config compatibility");
 }
 
 static void SettingsDetectSupportedSystemLanguage()

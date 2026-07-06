@@ -1,7 +1,8 @@
 # Runtime Dead-Code Candidate Classification
 
-This is the first classification pass from `make review-dead-code` after
-commit `66b7cae`.
+This document tracks dead-code classification and cleanup status. The first
+classification pass was generated from `make review-dead-code` after commit
+`66b7cae`.
 
 No native runtime code is deleted in this pass. The goal is to separate real
 delete candidates from dynamic/reflection/research code that only looks unused
@@ -9,17 +10,17 @@ to static search.
 
 ## Summary
 
-Highest-confidence cleanup candidates are outside the active packed paint path:
+Highest-confidence cleanup candidates were outside the active packed paint path:
 
-- legacy WPF controller project, if WebHost is the only supported UI
+- legacy WPF controller project
 - unused localization strings for removed batch/adaptive controls
 - legacy config write/edit surface for `adaptive_batching`,
   `server_batch_limit`, and `server_batch_delay_ms`
-- old non-packed native paint RPC dispatch, after beta packed-route validation
+- old non-packed native paint RPC dispatch
 
-The native bridge still has no "delete now" candidate that is safe without a
-focused follow-up diff. Most obvious hits are either production paint,
-reflection layout, dynamic IPC entrypoints, or research probes.
+Cleanup has removed the production old-RPC dispatch, but event-watch and
+research inventory patterns may still mention old route names so regressions can
+be detected.
 
 ## Keep: Dynamic Entries
 
@@ -68,9 +69,9 @@ for multiplayer and game-update investigations:
 Rule: keep them out of normal UI and normal paint decisions, but do not delete
 until their investigation value is replaced by a better tool.
 
-## Candidate: WPF Controller Project
+## Removed: WPF Controller Project
 
-Classification: `DELETE_CANDIDATE`, pending support decision.
+Classification: removed.
 
 Evidence:
 
@@ -86,15 +87,14 @@ Risk:
 - low for release artifact if WebHost is the only supported controller
 - medium for developers if anyone still runs the WPF project manually
 
-Next action:
+Result:
 
-- confirm WPF is no longer supported
-- either delete `runtime/csharp/MecchaCamouflage.Wpf/`, or move it to an
-  explicit legacy/archive area outside the release path
+- deleted `runtime/csharp/MecchaCamouflage.Wpf/`
+- canonical build still publishes WebHost only
 
-## Candidate: Removed Batch/Adaptive Localization Keys
+## Removed: Batch/Adaptive Localization Keys
 
-Classification: `DELETE_CANDIDATE`, after WPF decision.
+Classification: removed.
 
 Keys:
 
@@ -112,14 +112,14 @@ Risk:
 - low after WPF removal
 - medium before WPF removal because WPF still has legacy controls
 
-Next action:
+Result:
 
-- remove keys from every locale only after the last UI consumer is gone
-- update locale completeness tests in the same diff
+- removed these keys from every locale
+- locale completeness test still passes
 
-## Candidate: Legacy Settings Edit/Write Surface
+## Removed: Legacy Settings Edit/Write Surface
 
-Classification: `DELETE_CANDIDATE`, after one compatibility window.
+Classification: removed from the current settings model and config writer.
 
 Fields:
 
@@ -131,7 +131,7 @@ Fields:
   - `server_batch_limit`
   - `server_batch_delay_ms`
 
-Current state:
+Previous state:
 
 - old values are not sent in the normal paint payload
 - Web UI snapshot no longer exposes `adaptiveBatching` or `serverBatchLimit`
@@ -143,16 +143,17 @@ Risk:
 - medium. Removing read compatibility can silently discard old configs.
 - low to stop writing old keys once a release has migrated users.
 
-Next action:
+Result:
 
-- first stop exposing or editing the fields anywhere
-- then stop writing legacy keys while still reading them
-- later remove model fields and clamp tests
+- removed the model fields
+- stopped reading and writing the old config keys
+- removed the legacy clamp test
+- progress display still accepts bridge progress fields with similar names
+  because those are runtime telemetry, not user settings
 
-## Candidate: Legacy Native Non-Packed Paint RPC
+## Removed: Legacy Native Non-Packed Paint RPC Dispatch
 
-Classification: `LEGACY_FALLBACK` now, `DELETE_CANDIDATE` after beta packed
-route validation.
+Classification: production dispatch removed.
 
 Code families:
 
@@ -167,22 +168,21 @@ Code families:
 Evidence:
 
 - normal paint requires the packed component route
-- `use_send_custom_server_batch` is forced false
-- `use_compact_server_batch` is forced false
 - failure to prepare packed route stops paint instead of falling back
 
-Why not delete yet:
+Result:
 
-- these functions are still useful as research/rollback reference while beta.3
-  multiplayer verification is active
-- compact struct layout is part of the known game RPC map
-- event-watch/probe metadata still compares old and new routes
+- removed production context/job fields for old route function pointers
+- removed `ServerPaintBatch` / `ServerCompactPaintBatch` dispatch helpers
+- removed compact paint payload generation helpers
+- removed old compact/server batch SDK parameter structs
+- made paint component discovery prefer `ServerPackedPaintBatch`
+- trimmed normal metadata and probe candidates to packed routes
 
-Next action:
+Remaining intentional references:
 
-- after community confirmation, remove production fallback branches first
-- keep reflected route names in research docs/scripts if still useful
-- only then remove compact structs and SDK layout assertions
+- event-watch can still observe old route names if the game calls them
+- review inventory still searches old route names as regression indicators
 
 ## Candidate: Internal `adaptive_*` Names
 

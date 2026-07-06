@@ -617,9 +617,6 @@ namespace
                  "replication_max_strokes_per_tick",
                  "replication_estimated_ticks_to_drain",
                  "server_batch_rpc",
-                 "server_send_custom_static_pacing",
-                 "server_compact_paint_batch_enabled",
-                 "server_compact_paint_batch_available",
                  "server_packed_paint_batch_enabled",
                  "server_packed_paint_batch_use_relay",
              })
@@ -1659,133 +1656,6 @@ namespace
         return structure;
     }
 
-    auto array_inner_property_for_struct_fields(Reflection& ref,
-                                                std::uintptr_t array_prop,
-                                                std::initializer_list<const char*> field_names) -> std::uintptr_t
-    {
-        const std::uintptr_t candidate_offsets[]{
-            0x68,
-            0x70,
-            0x78,
-            0x80,
-            0x88,
-            0x90,
-            0x98,
-            0xA0,
-            0xA8,
-        };
-        for (const auto offset : candidate_offsets)
-        {
-            const auto inner = safe_read<std::uintptr_t>(array_prop + offset);
-            if (!inner)
-            {
-                continue;
-            }
-            const auto structure = struct_type(ref, inner, field_names);
-            if (!structure)
-            {
-                continue;
-            }
-            bool has_all_fields = true;
-            for (const auto* field_name : field_names)
-            {
-                if (!field_name || !find_property_any(ref, structure, {field_name}))
-                {
-                    has_all_fields = false;
-                    break;
-                }
-            }
-            if (has_all_fields)
-            {
-                return inner;
-            }
-        }
-        return 0;
-    }
-
-    auto reflected_field_offset(Reflection& ref, std::uintptr_t structure, const char* field_name) -> int
-    {
-        const auto prop = find_property_any(ref, structure, {field_name});
-        return prop ? prop_offset(prop) : -1;
-    }
-
-    auto reflected_field_size(Reflection& ref, std::uintptr_t structure, const char* field_name) -> int
-    {
-        const auto prop = find_property_any(ref, structure, {field_name});
-        return prop ? prop_element_size(prop) : -1;
-    }
-
-    auto paint_stroke_reflection_metadata(Reflection& ref, std::uintptr_t server_batch_function) -> std::string
-    {
-        if (!server_batch_function)
-        {
-            return ",\"paint_stroke_reflection_ok\":false,\"paint_stroke_reflection_failure\":\"server_batch_unavailable\"";
-        }
-        const auto batch_prop = ref.find_property(server_batch_function, "Batch");
-        if (!batch_prop)
-        {
-            return ",\"paint_stroke_reflection_ok\":false,\"paint_stroke_reflection_failure\":\"batch_param_unavailable\"";
-        }
-        const auto batch_struct = struct_type(ref, batch_prop, {"Strokes"});
-        const auto strokes_prop = find_property_any(ref, batch_struct, {"Strokes"});
-        if (!batch_struct || !strokes_prop)
-        {
-            return ",\"paint_stroke_reflection_ok\":false,\"paint_stroke_reflection_failure\":\"strokes_array_unavailable\"";
-        }
-        const auto stroke_inner = array_inner_property_for_struct_fields(ref, strokes_prop, {"Uv", "WorldPosition", "BrushSettings", "ChannelData"});
-        const auto stroke_struct = struct_type(ref, stroke_inner, {"Uv", "WorldPosition", "BrushSettings", "ChannelData"});
-        if (!stroke_inner || !stroke_struct)
-        {
-            return ",\"paint_stroke_reflection_ok\":false,\"paint_stroke_reflection_failure\":\"stroke_struct_unavailable\"" +
-                   std::string(",\"paint_stroke_reflected_batch_offset\":") + std::to_string(prop_offset(batch_prop)) +
-                   ",\"paint_stroke_reflected_strokes_offset\":" + std::to_string(prop_offset(strokes_prop));
-        }
-        const int reflected_size = prop_element_size(stroke_inner);
-        const int uv_offset = reflected_field_offset(ref, stroke_struct, "Uv");
-        const int world_offset = reflected_field_offset(ref, stroke_struct, "WorldPosition");
-        const int has_world_offset = reflected_field_offset(ref, stroke_struct, "bHasWorldPosition");
-        const int local_offset = reflected_field_offset(ref, stroke_struct, "LocalPosition");
-        const int has_local_offset = reflected_field_offset(ref, stroke_struct, "bHasLocalPosition");
-        const int has_triangle_offset = reflected_field_offset(ref, stroke_struct, "bHasSkeletalTriangleAnchor");
-        const int triangle_index_offset = reflected_field_offset(ref, stroke_struct, "SkeletalTriangleIndex");
-        const int bary_offset = reflected_field_offset(ref, stroke_struct, "SkeletalTriangleBarycentric");
-        const int brush_offset = reflected_field_offset(ref, stroke_struct, "BrushSettings");
-        const int channel_offset = reflected_field_offset(ref, stroke_struct, "ChannelData");
-        const int target_offset = reflected_field_offset(ref, stroke_struct, "TargetChannel");
-        const bool static_layout_matches =
-            reflected_size == static_cast<int>(sizeof(sdk::FPaintStroke)) &&
-            uv_offset == static_cast<int>(offsetof(sdk::FPaintStroke, Uv)) &&
-            world_offset == static_cast<int>(offsetof(sdk::FPaintStroke, WorldPosition)) &&
-            has_world_offset == static_cast<int>(offsetof(sdk::FPaintStroke, bHasWorldPosition)) &&
-            local_offset == static_cast<int>(offsetof(sdk::FPaintStroke, LocalPosition)) &&
-            has_local_offset == static_cast<int>(offsetof(sdk::FPaintStroke, bHasLocalPosition)) &&
-            has_triangle_offset == static_cast<int>(offsetof(sdk::FPaintStroke, bHasSkeletalTriangleAnchor)) &&
-            triangle_index_offset == static_cast<int>(offsetof(sdk::FPaintStroke, SkeletalTriangleIndex)) &&
-            bary_offset == static_cast<int>(offsetof(sdk::FPaintStroke, SkeletalTriangleBarycentric)) &&
-            brush_offset == static_cast<int>(offsetof(sdk::FPaintStroke, BrushSettings)) &&
-            channel_offset == static_cast<int>(offsetof(sdk::FPaintStroke, ChannelData)) &&
-            target_offset == static_cast<int>(offsetof(sdk::FPaintStroke, TargetChannel));
-        return ",\"paint_stroke_reflection_ok\":true"
-               ",\"paint_stroke_static_layout_matches\":" + std::string(static_layout_matches ? "true" : "false") +
-               ",\"paint_stroke_reflected_size\":" + std::to_string(reflected_size) +
-               ",\"paint_stroke_static_size\":" + std::to_string(sizeof(sdk::FPaintStroke)) +
-               ",\"paint_stroke_reflected_batch_offset\":" + std::to_string(prop_offset(batch_prop)) +
-               ",\"paint_stroke_reflected_strokes_offset\":" + std::to_string(prop_offset(strokes_prop)) +
-               ",\"paint_stroke_reflected_strokes_size\":" + std::to_string(prop_element_size(strokes_prop)) +
-               ",\"paint_stroke_reflected_uv_offset\":" + std::to_string(uv_offset) +
-               ",\"paint_stroke_reflected_world_offset\":" + std::to_string(world_offset) +
-               ",\"paint_stroke_reflected_has_world_offset\":" + std::to_string(has_world_offset) +
-               ",\"paint_stroke_reflected_local_offset\":" + std::to_string(local_offset) +
-               ",\"paint_stroke_reflected_has_local_offset\":" + std::to_string(has_local_offset) +
-               ",\"paint_stroke_reflected_has_triangle_offset\":" + std::to_string(has_triangle_offset) +
-               ",\"paint_stroke_reflected_triangle_index_offset\":" + std::to_string(triangle_index_offset) +
-               ",\"paint_stroke_reflected_bary_offset\":" + std::to_string(bary_offset) +
-               ",\"paint_stroke_reflected_brush_offset\":" + std::to_string(brush_offset) +
-               ",\"paint_stroke_reflected_channel_offset\":" + std::to_string(channel_offset) +
-               ",\"paint_stroke_reflected_target_offset\":" + std::to_string(target_offset) +
-               ",\"paint_stroke_reflected_bary_size\":" + std::to_string(reflected_field_size(ref, stroke_struct, "SkeletalTriangleBarycentric"));
-    }
-
     auto early_hex_address(std::uintptr_t value) -> std::string
     {
         char buffer[32]{};
@@ -2708,8 +2578,8 @@ namespace
             }
             const auto cls = lower_copy(ref.class_name(obj));
             const bool paint_component = contains_text(cls, "runtimepaint") || contains_text(cls, "paint");
-            const bool server_ready = ref.find_function(obj, "ServerPaintBatch") != 0;
-            if (paint_component && server_ready)
+            const bool packed_ready = ref.find_function(obj, "ServerPackedPaintBatch") != 0;
+            if (paint_component && packed_ready)
             {
                 ++candidate_count;
                 const auto owner = read_owner(obj);
@@ -2811,7 +2681,7 @@ namespace
             }
             const auto cls = lower_copy(ref.class_name(obj));
             if (!(contains_text(cls, "runtimepaint") || contains_text(cls, "paint")) ||
-                !ref.find_function(obj, "ServerPaintBatch"))
+                !ref.find_function(obj, "ServerPackedPaintBatch"))
             {
                 return false;
             }
@@ -3187,7 +3057,7 @@ namespace
                 {
                     return 1;
                 }
-                return static_cast<int>(sizeof(sdk::FCompactPaintStroke));
+                return 0x38;
             }
             if (contains_text(function_name, "StrokeBatch") || contains_text(function_name, "PaintBatch") ||
                 function_name == "ServerPaintBatch" || function_name == "FlushRecordedStrokesToServer")
@@ -3385,11 +3255,8 @@ namespace
         sdk::FVector body_world_position{};
         std::uintptr_t component{0};
         std::uintptr_t relay_component{0};
-        std::uintptr_t server_paint_batch_function{0};
-        std::uintptr_t server_compact_paint_batch_function{0};
         std::uintptr_t server_packed_paint_batch_function{0};
         std::uintptr_t server_relay_packed_stroke_batch_function{0};
-        std::uintptr_t send_custom_stroke_batch_function{0};
         std::uintptr_t local_paint_at_uv_function{0};
     };
 
@@ -3909,18 +3776,14 @@ namespace
                ",\"component_class\":\"" + json_escape(ref.class_name(ctx.component)) + "\"" +
                ",\"relay_component\":\"" + hex_address(ctx.relay_component) + "\"" +
                ",\"relay_component_class\":\"" + json_escape(ref.class_name(ctx.relay_component)) + "\"" +
-               ",\"function_server_paint_batch_available\":" + std::string(json_bool(ctx.server_paint_batch_function != 0)) +
-               ",\"function_server_paint_batch\":\"" + hex_address(ctx.server_paint_batch_function) + "\"" +
-               ",\"function_server_compact_paint_batch_available\":" + std::string(json_bool(ctx.server_compact_paint_batch_function != 0)) +
-               ",\"function_server_compact_paint_batch\":\"" + hex_address(ctx.server_compact_paint_batch_function) + "\"" +
                ",\"function_server_packed_paint_batch_available\":" + std::string(json_bool(ctx.server_packed_paint_batch_function != 0)) +
                ",\"function_server_packed_paint_batch\":\"" + hex_address(ctx.server_packed_paint_batch_function) + "\"" +
                ",\"function_server_relay_packed_stroke_batch_available\":" + std::string(json_bool(ctx.server_relay_packed_stroke_batch_function != 0)) +
                ",\"function_server_relay_packed_stroke_batch\":\"" + hex_address(ctx.server_relay_packed_stroke_batch_function) + "\"" +
                ",\"function_paint_at_uv_with_brush_available\":" + std::string(json_bool(ctx.local_paint_at_uv_function != 0)) +
                ",\"function_paint_at_uv_with_brush\":\"" + hex_address(ctx.local_paint_at_uv_function) + "\"" +
-               ",\"param_schema\":\"FPaintStroke{Uv@0,WorldPosition@16,bHasWorldPosition@40,BrushSettings@104,ChannelData@144,TargetChannel@176};ServerPaintBatch{Batch@0}\"" +
-               std::string(",\"sdk_replication_api\":\"component_server_paint_batch\"") +
+               ",\"param_schema\":\"PackedPaintBatch{PackedData@0,StrokeCount@16}\"" +
+               std::string(",\"sdk_replication_api\":\"component_server_packed_paint_batch\"") +
                ",\"multiplayer_replicated\":true";
     }
 
@@ -4069,11 +3932,8 @@ namespace
                 ctx.relay_component = relay;
             }
         }
-        ctx.server_paint_batch_function = ref.find_function(ctx.component, "ServerPaintBatch");
-        ctx.server_compact_paint_batch_function = ref.find_function(ctx.component, "ServerCompactPaintBatch");
         ctx.server_packed_paint_batch_function = ref.find_function(ctx.component, "ServerPackedPaintBatch");
         ctx.server_relay_packed_stroke_batch_function = ref.find_function(ctx.relay_component, "ServerRelayPackedStrokeBatch");
-        ctx.send_custom_stroke_batch_function = ref.find_function(ctx.component, "SendCustomStrokeBatchToServer");
         ctx.local_paint_at_uv_function = ref.find_function(ctx.component, "PaintAtUVWithBrush");
         ctx.ok = true;
         ctx.stage = "sdk_ready";
@@ -4866,28 +4726,12 @@ namespace
                                      double barycentric_a,
                                      double barycentric_b,
                                      double barycentric_c) -> sdk::FPaintStroke;
-    auto sdk_call_paint_batch_function(std::uintptr_t component,
-                                       std::uintptr_t function,
-                                       const std::vector<sdk::FPaintStroke>& strokes,
-                                       std::size_t offset,
-                                       std::size_t count,
-                                       std::string& failure) -> bool;
-    auto sdk_strokes_are_compact_compatible(const std::vector<sdk::FPaintStroke>& strokes) -> bool;
+    auto sdk_strokes_are_packed_compatible(const std::vector<sdk::FPaintStroke>& strokes) -> bool;
     auto sdk_call_paint_at_uv_with_brush(std::uintptr_t component,
                                          std::uintptr_t function,
                                          const sdk::FPaintStroke& stroke,
                                          std::string& failure) -> bool;
     auto sdk_write_number_property_by_name(Reflection& ref, std::uintptr_t object, const char* name, double value) -> bool;
-    auto sdk_call_server_paint_batch(const SdkContext& ctx,
-                                     const std::vector<sdk::FPaintStroke>& strokes,
-                                     std::size_t offset,
-                                     std::size_t count,
-                                     std::string& failure) -> bool;
-    auto sdk_call_server_compact_paint_batch(const SdkContext& ctx,
-                                             const std::vector<sdk::FPaintStroke>& strokes,
-                                             std::size_t offset,
-                                             std::size_t count,
-                                             std::string& failure) -> bool;
     auto sdk_read_component_packed_source_id(std::uintptr_t component,
                                              sdk::FGuid& id,
                                              std::string& failure) -> bool;
@@ -8742,18 +8586,13 @@ namespace
         std::uintptr_t component{0};
         std::uintptr_t relay_component{0};
         std::uintptr_t k2_get_pawn_function{0};
-        std::uintptr_t server_paint_batch_function{0};
-        std::uintptr_t server_compact_paint_batch_function{0};
         std::uintptr_t server_packed_paint_batch_function{0};
         std::uintptr_t server_relay_packed_stroke_batch_function{0};
         std::uintptr_t local_paint_at_uv_function{0};
-        bool server_compact_paint_batch_enabled{false};
-        bool server_compact_paint_batch_available{false};
         bool server_packed_paint_batch_enabled{false};
         bool server_packed_paint_batch_use_relay{true};
         sdk::FGuid server_packed_paint_source_id{};
-        bool server_send_custom_stroke_batch_enabled{false};
-        std::string server_batch_rpc{"ServerPaintBatch"};
+        std::string server_batch_rpc{"ServerPackedPaintBatch"};
         std::vector<sdk::FPaintStroke> strokes{};
         std::string metadata{};
         MeshFirstChannelChecksum albedo_before{};
@@ -9023,10 +8862,6 @@ namespace
         {
             return mesh_first_adaptive_requested_delay(job);
         }
-        if (job->server_send_custom_stroke_batch_enabled)
-        {
-            return mesh_first_adaptive_requested_delay(job);
-        }
         if (job->adaptive_resolved_pacing_ms > 0)
         {
             return std::clamp(job->adaptive_resolved_pacing_ms, 1, MeshFirstAdaptiveMaxDelayMs);
@@ -9247,8 +9082,6 @@ namespace
         out += ",\"adaptive_pressure_level\":\"" + json_escape(job ? job->adaptive_pressure_level : "unknown") + "\"";
         out += ",\"adaptive_backoff_count\":" + std::to_string(job ? job->adaptive_backoff_count : 0);
         out += ",\"adaptive_queue_wait_count\":" + std::to_string(job ? job->adaptive_backoff_count : 0);
-        out += ",\"server_send_custom_static_pacing\":" +
-               std::string(json_bool(job && job->server_send_custom_stroke_batch_enabled));
         out += ",\"adaptive_queue_gate_limit\":" + std::to_string(mesh_first_adaptive_queue_gate_limit(job));
         out += ",\"adaptive_batch_queue_gate_limit\":" +
                std::to_string(mesh_first_adaptive_batch_queue_gate_limit(job));
@@ -9691,13 +9524,7 @@ namespace
         out += ",\"server_batch_limit\":" + std::to_string(server_batch_limit);
         out += ",\"server_batch_delay_ms\":" + std::to_string(server_batch_delay_ms);
         out += mesh_first_adaptive_metadata(job);
-        out += ",\"server_batch_rpc\":\"" + json_escape(job ? job->server_batch_rpc : "ServerPaintBatch") + "\"";
-        out += ",\"server_send_custom_static_pacing\":" +
-               std::string(json_bool(job && job->server_send_custom_stroke_batch_enabled));
-        out += ",\"server_compact_paint_batch_enabled\":" +
-               std::string(json_bool(job && job->server_compact_paint_batch_enabled));
-        out += ",\"server_compact_paint_batch_available\":" +
-               std::string(json_bool(job && job->server_compact_paint_batch_available));
+        out += ",\"server_batch_rpc\":\"" + json_escape(job ? job->server_batch_rpc : "ServerPackedPaintBatch") + "\"";
         out += ",\"server_packed_paint_batch_enabled\":" +
                std::string(json_bool(job && job->server_packed_paint_batch_enabled));
         out += ",\"server_packed_paint_batch_use_relay\":" +
@@ -9814,19 +9641,12 @@ namespace
         const std::string requested_server_batch_rpc = json_string_field(request, "server_batch_rpc", "");
         const std::string requested_server_batch_rpc_normalized = lower_copy(requested_server_batch_rpc);
         const std::string requested_packed_route = lower_copy(json_string_field(request, "packed_route", "component"));
-        const bool experimental_packed_requested =
+        const bool packed_route_requested =
             json_bool_field(request, "experimental_packed", false) ||
+            requested_server_batch_rpc_normalized.empty() ||
             requested_server_batch_rpc_normalized == "packed" ||
             requested_server_batch_rpc_normalized == "serverpackedpaintbatch" ||
-            requested_server_batch_rpc_normalized == "server_packed_paint_batch" ||
-            requested_server_batch_rpc_normalized == "serverrelaypackedstrokebatch" ||
-            requested_server_batch_rpc_normalized == "server_relay_packed_stroke_batch" ||
-            requested_server_batch_rpc_normalized == "relay_packed";
-        const bool experimental_send_custom_requested =
-            json_bool_field(request, "experimental_send_custom", false) ||
-            requested_server_batch_rpc_normalized == "sendcustomstrokebatchtoserver" ||
-            requested_server_batch_rpc_normalized == "send_custom_stroke_batch_to_server" ||
-            requested_server_batch_rpc_normalized == "send_custom";
+            requested_server_batch_rpc_normalized == "server_packed_paint_batch";
 
         std::string metadata = "\"route\":\"mesh_first_paint\"";
         const std::string mesh_first_pipeline =
@@ -9861,8 +9681,7 @@ namespace
                                                                (side_region_mode == MeshFirstRegionMode::Skip ? 1 : 0) +
                                                                (back_region_mode == MeshFirstRegionMode::Skip ? 1 : 0));
         metadata += ",\"server_batch_rpc_requested\":\"" + json_escape(requested_server_batch_rpc) + "\"";
-        metadata += ",\"experimental_send_custom_requested\":" + std::string(json_bool(experimental_send_custom_requested));
-        metadata += ",\"experimental_packed_requested\":" + std::string(json_bool(experimental_packed_requested));
+        metadata += ",\"packed_route_requested_valid\":" + std::string(json_bool(packed_route_requested));
         metadata += ",\"packed_route_requested\":\"" + json_escape(requested_packed_route) + "\"";
         metadata += ",\"stroke_size_texels\":" + std::to_string(tuning_stroke_size_texels);
         metadata += ",\"coverage_step_texels\":" + std::to_string(tuning_coverage_step_texels);
@@ -9948,7 +9767,6 @@ namespace
 
         metadata += ",";
         metadata += sdk_context_metadata(ref, ctx);
-        metadata += paint_stroke_reflection_metadata(ref, ctx.server_paint_batch_function);
         if (!ctx.ok)
         {
             return response_json(false, ctx.stage.c_str(), 0, 1, ctx.message, metadata);
@@ -10893,11 +10711,7 @@ namespace
         metadata += ",\"replay_world_anchors\":" + std::to_string(replay_world_anchors);
         metadata += ",\"replay_local_anchors\":" + std::to_string(replay_local_anchors);
         metadata += ",\"replay_triangle_anchors\":" + std::to_string(replay_triangle_anchors);
-        const bool compact_batch_available = ctx.server_compact_paint_batch_function != 0;
-        const bool packed_batch_compatible = sdk_strokes_are_compact_compatible(strokes);
-        const bool compact_batch_replication_enabled =
-            read_object_u8_property(ref, ctx.component, "bUseCompactPaintReplication", 0) != 0;
-        const bool send_custom_batch_available = ctx.send_custom_stroke_batch_function != 0;
+        const bool packed_batch_compatible = sdk_strokes_are_packed_compatible(strokes);
         const bool packed_component_available = ctx.server_packed_paint_batch_function != 0;
         const bool packed_relay_available = ctx.server_relay_packed_stroke_batch_function != 0 && live_uobject(ctx.relay_component);
         const bool use_packed_relay_route = false;
@@ -10912,8 +10726,6 @@ namespace
         }
         const bool use_packed_server_batch =
             normal_paint_requires_packed && packed_component_available && packed_batch_compatible && packed_source_id_available;
-        const bool use_send_custom_server_batch = false;
-        const bool use_compact_server_batch = false;
         std::string packed_ignored_reason = "none";
         if (!use_packed_server_batch)
         {
@@ -10942,51 +10754,10 @@ namespace
                 packed_ignored_reason = "not_required";
             }
         }
-        std::string send_custom_ignored_reason = "none";
-        if (!use_send_custom_server_batch)
-        {
-            if (normal_paint_requires_packed)
-            {
-                send_custom_ignored_reason = "packed_component_route_required";
-            }
-            else if (!experimental_send_custom_requested)
-            {
-                send_custom_ignored_reason = "not_requested";
-            }
-            else if (preview_only)
-            {
-                send_custom_ignored_reason = "preview_only";
-            }
-            else if (!send_custom_batch_available)
-            {
-                send_custom_ignored_reason = "unavailable";
-            }
-            else
-            {
-                send_custom_ignored_reason = "not_selected";
-            }
-        }
-        metadata += ",\"server_batch_rpc\":\"" +
-                    std::string(normal_paint_requires_packed
-                                    ? "ServerPackedPaintBatch"
-                                    : (use_send_custom_server_batch
-                                           ? "SendCustomStrokeBatchToServer"
-                                           : (use_compact_server_batch ? "ServerCompactPaintBatch" : "none"))) + "\"";
+        metadata += ",\"server_batch_rpc\":\"" + std::string(normal_paint_requires_packed ? "ServerPackedPaintBatch" : "none") + "\"";
         metadata += ",\"server_paint_batch_used\":" + std::string(json_bool(normal_paint_requires_packed));
         metadata += ",\"server_paint_batch_single_stroke_mode\":" +
                     std::string(json_bool(normal_paint_requires_packed && effective_replay_server_batch_limit <= 1));
-        metadata += ",\"server_send_custom_stroke_batch_available\":" + std::string(json_bool(send_custom_batch_available));
-        metadata += ",\"server_send_custom_stroke_batch_requested\":" + std::string(json_bool(experimental_send_custom_requested));
-        metadata += ",\"server_send_custom_stroke_batch_used\":" + std::string(json_bool(use_send_custom_server_batch));
-        metadata += ",\"server_send_custom_stroke_batch_ignored\":\"" + json_escape(send_custom_ignored_reason) + "\"";
-        metadata += ",\"server_send_custom_stroke_batch_function\":\"" + hex_address(ctx.send_custom_stroke_batch_function) + "\"";
-        metadata += ",\"server_compact_paint_batch_available\":" + std::string(json_bool(compact_batch_available));
-        metadata += ",\"server_compact_paint_batch_compatible\":" + std::string(json_bool(packed_batch_compatible));
-        metadata += ",\"server_compact_paint_replication_enabled\":" + std::string(json_bool(compact_batch_replication_enabled));
-        metadata += ",\"server_compact_paint_batch_used\":" + std::string(json_bool(use_compact_server_batch));
-        metadata += ",\"server_compact_paint_batch_ignored\":" + std::string(json_bool(!use_compact_server_batch));
-        metadata += ",\"server_compact_paint_batch_ignored_reason\":\"" +
-                    std::string(normal_paint_requires_packed ? "packed_component_route_required" : "not_required") + "\"";
         metadata += ",\"server_packed_paint_batch_available\":" + std::string(json_bool(packed_component_available));
         metadata += ",\"server_relay_packed_stroke_batch_available\":" + std::string(json_bool(packed_relay_available));
         metadata += ",\"server_packed_paint_batch_function\":\"" + hex_address(ctx.server_packed_paint_batch_function) + "\"";
@@ -11063,9 +10834,7 @@ namespace
                                         ? (use_packed_relay_route
                                                ? "server_relay_packed_replay_with_local_lockstep"
                                                : "server_packed_replay_with_local_lockstep")
-                                        : (use_send_custom_server_batch
-                                               ? "send_custom_multicast_replay_with_local_lockstep"
-                                               : "compact_server_replay_with_local_lockstep")) + "\"";
+                                        : "blocked") + "\"";
             if (!ctx.local_paint_at_uv_function)
             {
                 return response_json(false,
@@ -11110,14 +10879,7 @@ namespace
                     std::string(json_bool(sync_compressed_channel_function != 0));
         metadata += ",\"function_multicast_sync_compressed_channel_data\":\"" + hex_address(sync_compressed_channel_function) + "\"";
         const std::vector<const char*> component_paint_replication_candidates{
-            "ServerCompactPaint",
-            "ServerCompactPaintBatch",
             "ServerPackedPaintBatch",
-            "SendCustomStrokeBatchToServer",
-            "MulticastCompactPaint",
-            "MulticastCompactPaintBatch",
-            "MulticastCompactPaintBatchToOthers",
-            "MulticastCompactPaintToOthers",
             "MulticastPackedPaintBatch",
             "MulticastPackedPaintBatchToOthers",
         };
@@ -11300,8 +11062,6 @@ namespace
             async_job->component = ctx.component;
             async_job->relay_component = ctx.relay_component;
             async_job->k2_get_pawn_function = ctx.k2_get_pawn_function;
-            async_job->server_paint_batch_function = ctx.server_paint_batch_function;
-            async_job->server_compact_paint_batch_function = ctx.server_compact_paint_batch_function;
             async_job->server_packed_paint_batch_function = ctx.server_packed_paint_batch_function;
             async_job->server_relay_packed_stroke_batch_function = ctx.server_relay_packed_stroke_batch_function;
             async_job->local_paint_at_uv_function = ctx.local_paint_at_uv_function;
@@ -11316,16 +11076,10 @@ namespace
             async_job->replication_pressure_function = live_uobject(replication_manager)
                                                            ? ref.find_function(replication_manager, "GetReplicationPressure")
                                                            : 0;
-            async_job->server_compact_paint_batch_available = ctx.server_compact_paint_batch_function != 0;
-            async_job->server_compact_paint_batch_enabled = use_compact_server_batch;
             async_job->server_packed_paint_batch_enabled = use_packed_server_batch;
             async_job->server_packed_paint_batch_use_relay = use_packed_relay_route;
             async_job->server_packed_paint_source_id = packed_source_id;
-            async_job->server_send_custom_stroke_batch_enabled = use_send_custom_server_batch;
-            async_job->server_batch_rpc =
-                use_packed_server_batch
-                    ? "ServerPackedPaintBatch"
-                    : (use_send_custom_server_batch ? "SendCustomStrokeBatchToServer" : "ServerCompactPaintBatch");
+            async_job->server_batch_rpc = "ServerPackedPaintBatch";
             async_job->local_visual_sync_enabled = true;
             async_job->strokes = std::move(strokes);
             async_job->metadata = metadata + ",\"server_batch_schedule\":\"timer_drained\"";
@@ -12257,28 +12011,22 @@ namespace
         SdkContext ctx{};
         ctx.component = job->component;
         ctx.relay_component = job->relay_component;
-        ctx.server_paint_batch_function = job->server_paint_batch_function;
-        ctx.server_compact_paint_batch_function = job->server_compact_paint_batch_function;
         ctx.server_packed_paint_batch_function = job->server_packed_paint_batch_function;
         ctx.server_relay_packed_stroke_batch_function = job->server_relay_packed_stroke_batch_function;
         std::string batch_failure{};
         ++job->server_batch_calls;
         const auto rpc_started = std::chrono::steady_clock::now();
-        const bool batch_ok = job->server_packed_paint_batch_enabled
-                                  ? sdk_call_packed_paint_batch_from_strokes(ctx.component,
-                                                                             ctx.relay_component,
-                                                                             ctx.server_packed_paint_batch_function,
-                                                                             ctx.server_relay_packed_stroke_batch_function,
-                                                                             job->server_packed_paint_batch_use_relay,
-                                                                             job->strokes,
-                                                                             chunk_offset,
-                                                                             count,
-                                                                             job->server_packed_paint_source_id,
-                                                                             job->texture_size,
-                                                                             batch_failure)
-                                  : (job->server_compact_paint_batch_enabled
-                                         ? sdk_call_server_compact_paint_batch(ctx, job->strokes, chunk_offset, count, batch_failure)
-                                         : sdk_call_server_paint_batch(ctx, job->strokes, chunk_offset, count, batch_failure));
+        const bool batch_ok = sdk_call_packed_paint_batch_from_strokes(ctx.component,
+                                                                       ctx.relay_component,
+                                                                       ctx.server_packed_paint_batch_function,
+                                                                       ctx.server_relay_packed_stroke_batch_function,
+                                                                       job->server_packed_paint_batch_use_relay,
+                                                                       job->strokes,
+                                                                       chunk_offset,
+                                                                       count,
+                                                                       job->server_packed_paint_source_id,
+                                                                       job->texture_size,
+                                                                       batch_failure);
         job->adaptive_last_rpc_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - rpc_started).count();
         if (!batch_ok)
@@ -12618,11 +12366,6 @@ namespace
         std::string failure{};
     };
 
-    auto sdk_has_replicated_api(const SdkContext& ctx) -> bool
-    {
-        return ctx.server_paint_batch_function != 0;
-    }
-
     // =============================================================================
     // Section: Paint replication pressure and packed paint RPC route
     // Risk: very high. ServerPackedPaintBatch is the normal multiplayer path.
@@ -12775,16 +12518,9 @@ namespace
         metadata += sdk_replication_snapshot_metadata("global_replication", sdk_capture_replication_snapshot(ref, paint_component));
 
         const std::vector<const char*> component_paint_replication_candidates{
-            "ServerCompactPaint",
-            "ServerCompactPaintBatch",
             "ServerPackedPaintBatch",
-            "MulticastCompactPaint",
-            "MulticastCompactPaintBatch",
-            "MulticastCompactPaintBatchToOthers",
-            "MulticastCompactPaintToOthers",
             "MulticastPackedPaintBatch",
             "MulticastPackedPaintBatchToOthers",
-            "ServerPaintBatch",
         };
         const std::vector<const char*> manager_replication_candidates{
             "GetQueuedStrokeCount",
@@ -12985,49 +12721,6 @@ namespace
         return true;
     }
 
-    auto sdk_write_compact_barycentric(double value, std::uint8_t& high, std::uint8_t& low) -> void
-    {
-        const auto packed = sdk_unit_to_u16(value);
-        high = static_cast<std::uint8_t>((packed >> 8) & 0xff);
-        low = static_cast<std::uint8_t>(packed & 0xff);
-    }
-
-    auto sdk_make_compact_paint_stroke(const sdk::FPaintStroke& stroke,
-                                       sdk::FCompactPaintStroke& compact,
-                                       std::string& failure) -> bool
-    {
-        if (!stroke.bHasSkeletalTriangleAnchor || stroke.SkeletalTriangleIndex < 0)
-        {
-            failure = "compact_paint_requires_skeletal_triangle_anchor";
-            return false;
-        }
-        compact = {};
-        compact.SkeletalTriangleIndex = stroke.SkeletalTriangleIndex;
-        sdk_write_compact_barycentric(stroke.SkeletalTriangleBarycentric.X,
-                                      compact.BarycentricXHigh,
-                                      compact.BarycentricXLow);
-        sdk_write_compact_barycentric(stroke.SkeletalTriangleBarycentric.Y,
-                                      compact.BarycentricYHigh,
-                                      compact.BarycentricYLow);
-        sdk_write_compact_barycentric(stroke.SkeletalTriangleBarycentric.Z,
-                                      compact.BarycentricZHigh,
-                                      compact.BarycentricZLow);
-        compact.Radius = stroke.BrushSettings.Radius;
-        compact.AlbedoColor.R = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.R);
-        compact.AlbedoColor.G = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.G);
-        compact.AlbedoColor.B = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.B);
-        compact.AlbedoColor.A = sdk_unit_to_byte(stroke.ChannelData.AlbedoColor.A);
-        compact.Metallic = sdk_unit_to_byte(stroke.ChannelData.Metallic);
-        compact.Roughness = sdk_unit_to_byte(stroke.ChannelData.Roughness);
-        compact.TargetChannel = stroke.TargetChannel;
-        compact.EffectiveBrushWorldRadius = stroke.EffectiveBrushWorldRadius;
-        compact.EffectiveSubdivisionLevel = stroke.EffectiveSubdivisionLevel;
-        compact.EffectiveSubdivisionPixelSize = stroke.EffectiveSubdivisionPixelSize;
-        compact.EffectiveTemplateResolution = stroke.EffectiveTemplateResolution;
-        compact.ReplicationSourceId = stroke.ReplicationSourceId;
-        return true;
-    }
-
     auto sdk_make_packed_paint_data(const std::vector<sdk::FPaintStroke>& strokes,
                                     std::size_t offset,
                                     std::size_t count,
@@ -13092,32 +12785,7 @@ namespace
         return true;
     }
 
-    auto sdk_make_compact_paint_strokes(const std::vector<sdk::FPaintStroke>& strokes,
-                                        std::size_t offset,
-                                        std::size_t count,
-                                        std::vector<sdk::FCompactPaintStroke>& compact,
-                                        std::string& failure) -> bool
-    {
-        if (offset > strokes.size() || count > strokes.size() - offset)
-        {
-            failure = "compact_paint_range_invalid";
-            return false;
-        }
-        compact.clear();
-        compact.resize(count);
-        for (std::size_t i = 0; i < count; ++i)
-        {
-            if (!sdk_make_compact_paint_stroke(strokes[offset + i], compact[i], failure))
-            {
-                failure += " index=" + std::to_string(offset + i);
-                compact.clear();
-                return false;
-            }
-        }
-        return true;
-    }
-
-    auto sdk_strokes_are_compact_compatible(const std::vector<sdk::FPaintStroke>& strokes) -> bool
+    auto sdk_strokes_are_packed_compatible(const std::vector<sdk::FPaintStroke>& strokes) -> bool
     {
         if (strokes.empty())
         {
@@ -13126,95 +12794,6 @@ namespace
         return std::all_of(strokes.begin(), strokes.end(), [](const sdk::FPaintStroke& stroke) {
             return stroke.bHasSkeletalTriangleAnchor && stroke.SkeletalTriangleIndex >= 0;
         });
-    }
-
-    auto sdk_call_paint_batch_function(std::uintptr_t component,
-                                       std::uintptr_t function,
-                                       const std::vector<sdk::FPaintStroke>& strokes,
-                                       std::size_t offset,
-                                       std::size_t count,
-                                       std::string& failure) -> bool
-    {
-        if (!function || count == 0)
-        {
-            failure = "server_paint_batch_unavailable";
-            return false;
-        }
-        if (!live_uobject(component))
-        {
-            failure = "paint_component_unavailable";
-            return false;
-        }
-        sdk::RuntimePaintableComponent_ServerPaintBatch params{};
-        params.Batch.Strokes.Data = const_cast<sdk::FPaintStroke*>(strokes.data() + offset);
-        params.Batch.Strokes.Num = static_cast<std::int32_t>(count);
-        params.Batch.Strokes.Max = static_cast<std::int32_t>(count);
-        if (!process_event(component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_call_compact_paint_batch_function(std::uintptr_t component,
-                                               std::uintptr_t function,
-                                               const std::vector<sdk::FPaintStroke>& strokes,
-                                               std::size_t offset,
-                                               std::size_t count,
-                                               std::string& failure) -> bool
-    {
-        if (!function || count == 0)
-        {
-            failure = "server_compact_paint_batch_unavailable";
-            return false;
-        }
-        if (!live_uobject(component))
-        {
-            failure = "paint_component_unavailable";
-            return false;
-        }
-        std::vector<sdk::FCompactPaintStroke> compact{};
-        if (!sdk_make_compact_paint_strokes(strokes, offset, count, compact, failure))
-        {
-            return false;
-        }
-        sdk::RuntimePaintableComponent_ServerCompactPaintBatch params{};
-        params.Batch.Strokes.Data = compact.data();
-        params.Batch.Strokes.Num = static_cast<std::int32_t>(compact.size());
-        params.Batch.Strokes.Max = static_cast<std::int32_t>(compact.size());
-        if (!process_event(component, function, reinterpret_cast<std::uint8_t*>(&params), failure))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    auto sdk_call_server_paint_batch(const SdkContext& ctx,
-                                     const std::vector<sdk::FPaintStroke>& strokes,
-                                     std::size_t offset,
-                                     std::size_t count,
-                                     std::string& failure) -> bool
-    {
-        return sdk_call_paint_batch_function(ctx.component,
-                                             ctx.server_paint_batch_function,
-                                             strokes,
-                                             offset,
-                                             count,
-                                             failure);
-    }
-
-    auto sdk_call_server_compact_paint_batch(const SdkContext& ctx,
-                                             const std::vector<sdk::FPaintStroke>& strokes,
-                                             std::size_t offset,
-                                             std::size_t count,
-                                             std::string& failure) -> bool
-    {
-        return sdk_call_compact_paint_batch_function(ctx.component,
-                                                     ctx.server_compact_paint_batch_function,
-                                                     strokes,
-                                                     offset,
-                                                     count,
-                                                     failure);
     }
 
     struct RuntimePaintableComponent_ServerPackedPaintBatchParams
@@ -15246,7 +14825,6 @@ namespace
         std::string metadata = "\"route\":\"paint_replication_probe\"";
         metadata += ",";
         metadata += sdk_context_metadata(ref, ctx);
-        metadata += paint_stroke_reflection_metadata(ref, ctx.server_paint_batch_function);
 
         const auto replication_manager = ref.find_first_instance("RuntimePaintReplicationManager");
         metadata += ",\"paint_replication_manager\":\"" + hex_address(replication_manager) + "\"";
@@ -15267,13 +14845,7 @@ namespace
                                           ref.find_function(ctx.relay_component, "RelayTextureSyncToServer") != 0));
 
         const std::vector<const char*> component_paint_replication_candidates{
-            "ServerCompactPaint",
-            "ServerCompactPaintBatch",
             "ServerPackedPaintBatch",
-            "MulticastCompactPaint",
-            "MulticastCompactPaintBatch",
-            "MulticastCompactPaintBatchToOthers",
-            "MulticastCompactPaintToOthers",
             "MulticastPackedPaintBatch",
             "MulticastPackedPaintBatchToOthers",
         };

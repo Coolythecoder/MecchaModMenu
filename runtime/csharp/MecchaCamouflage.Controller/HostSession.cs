@@ -6,6 +6,9 @@ namespace MecchaCamouflage.Controller;
 
 public sealed class HostSession
 {
+    private const int DefaultPackedBatchLimit = 20;
+    private const int DefaultPackedPacingMs = 150;
+
     private static readonly string[] ResetKeys =
     [
         "paint.brushSizeTexels",
@@ -432,8 +435,8 @@ public sealed class HostSession
                 : Math.Clamp(progress.Progress * 100.0, 0.0, 100.0);
             eta = FormatEta(progress);
             elapsed = FormatDuration(progress.PaintElapsedMs);
-            batch = FormatBatch(progress, Settings);
-            delay = FormatDelay(progress, Settings);
+            batch = FormatBatch(progress);
+            delay = FormatDelay(progress);
             timingLabel = TimingLabel(progress);
             queue = FormatQueue(progress);
         }
@@ -477,9 +480,9 @@ public sealed class HostSession
                 settings.StopHotkey));
     }
 
-    private static string FormatBatch(ProgressSnapshot progress, AppSettings settings)
+    private static string FormatBatch(ProgressSnapshot progress)
     {
-        var effectiveBatch = EffectiveBatch(progress, settings);
+        var effectiveBatch = EffectiveBatch(progress);
         if (progress.AdaptiveBatchEnabled && effectiveBatch > 0)
         {
             var max = progress.AdaptiveResolvedBatchLimit > 0 ? progress.AdaptiveResolvedBatchLimit : progress.AdaptiveRequestedBatchLimit;
@@ -489,31 +492,31 @@ public sealed class HostSession
         return batch > 0 ? batch.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-";
     }
 
-    private static string FormatDelay(ProgressSnapshot progress, AppSettings settings)
+    private static string FormatDelay(ProgressSnapshot progress)
     {
-        var delay = EffectiveDelay(progress, settings);
+        var delay = EffectiveDelay(progress);
         return delay >= 0 ? $"{delay}ms" : "-";
     }
 
     private static string TimingLabel(ProgressSnapshot progress) =>
         progress.AdaptiveBatchEnabled ? "pacing" : "delay";
 
-    private static int EffectiveBatch(ProgressSnapshot progress, AppSettings settings)
+    private static int EffectiveBatch(ProgressSnapshot progress)
     {
         if (progress.AdaptiveBatchEnabled && progress.AdaptiveBatchLimit > 0)
             return progress.AdaptiveBatchLimit;
         if (progress.ServerBatchLimit > 0)
             return progress.ServerBatchLimit;
-        return settings.Paint.ServerBatchLimit;
+        return DefaultPackedBatchLimit;
     }
 
-    private static int EffectiveDelay(ProgressSnapshot progress, AppSettings settings)
+    private static int EffectiveDelay(ProgressSnapshot progress)
     {
         if (progress.AdaptiveBatchEnabled && progress.AdaptiveDelayMs > 0)
             return progress.AdaptiveDelayMs;
         if (progress.ServerBatchDelayMs > 0)
             return progress.ServerBatchDelayMs;
-        return settings.Paint.ServerBatchDelayMs;
+        return DefaultPackedPacingMs;
     }
 
     private static string FormatQueue(ProgressSnapshot progress)
@@ -755,7 +758,7 @@ public sealed class HostSession
             ? Math.Clamp(progress.Step * 100.0 / progress.TotalSteps, 0.0, 100.0)
             : Math.Clamp(progress.Progress * 100.0, 0.0, 100.0);
         var rounded = (int)Math.Round(percent);
-        return $"Paint: {rounded}% {ProgressBar(rounded)} | batch {FormatBatch(progress, Settings)} | {TimingLabel(progress)} {FormatDelay(progress, Settings)} | queue {FormatQueue(progress)} | ETA {FormatEta(progress)} | elapsed {FormatDuration(progress.PaintElapsedMs)}";
+        return $"Paint: {rounded}% {ProgressBar(rounded)} | batch {FormatBatch(progress)} | {TimingLabel(progress)} {FormatDelay(progress)} | queue {FormatQueue(progress)} | ETA {FormatEta(progress)} | elapsed {FormatDuration(progress.PaintElapsedMs)}";
     }
 
     private static string ProgressBar(int percent)

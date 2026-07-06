@@ -55,9 +55,6 @@ public sealed class SettingsStore
         paint.FrontRegionMode = ReadRegionMode(root, "front_region_mode", "enable_front_paint", paint.FrontRegionMode);
         paint.SideRegionMode = ReadRegionMode(root, "side_region_mode", "enable_side_paint", paint.SideRegionMode);
         paint.BackRegionMode = ReadRegionMode(root, "back_region_mode", "enable_back_paint", paint.BackRegionMode);
-        paint.AdaptiveBatching = ReadBool(root, "adaptive_batching", ReadBool(root, "adaptive_batch_enabled", paint.AdaptiveBatching));
-        paint.ServerBatchLimit = ReadInt(root, "server_batch_limit", paint.ServerBatchLimit);
-        paint.ServerBatchDelayMs = ReadInt(root, "server_batch_delay_ms", paint.ServerBatchDelayMs);
         paint.AutoMaterial = ReadBool(root, "auto_material", ReadBool(root, "auto_material_properties", paint.AutoMaterial));
         paint.Metallic = ReadDouble(root, "metallic", paint.Metallic);
         paint.Roughness = ReadDouble(root, "roughness", paint.Roughness);
@@ -107,8 +104,6 @@ public sealed class SettingsStore
         settings.Paint.CoverageStepTexels = settings.Paint.StrokeSizeTexels;
         settings.Paint.SideSourceMaxUv = Math.Clamp(settings.Paint.SideSourceMaxUv, 0.001, 0.50);
         settings.Paint.FrontBackSourceMaxUv = Math.Clamp(settings.Paint.FrontBackSourceMaxUv, 0.001, 2.00);
-        settings.Paint.ServerBatchLimit = Math.Clamp(settings.Paint.ServerBatchLimit, 1, 50);
-        settings.Paint.ServerBatchDelayMs = Math.Clamp(settings.Paint.ServerBatchDelayMs, 150, 500);
         settings.Paint.Metallic = Math.Clamp(settings.Paint.Metallic, 0.0, 1.0);
         settings.Paint.Roughness = Math.Clamp(settings.Paint.Roughness, 0.0, 1.0);
         settings.Paint.FillMetallic = Math.Clamp(settings.Paint.FillMetallic, 0.0, 1.0);
@@ -140,9 +135,6 @@ public sealed class SettingsStore
         front_region_mode = RegionModeText(settings.Paint.FrontRegionMode),
         side_region_mode = RegionModeText(settings.Paint.SideRegionMode),
         back_region_mode = RegionModeText(settings.Paint.BackRegionMode),
-        adaptive_batching = settings.Paint.AdaptiveBatching,
-        server_batch_limit = settings.Paint.ServerBatchLimit,
-        server_batch_delay_ms = settings.Paint.ServerBatchDelayMs,
         auto_material = settings.Paint.AutoMaterial,
         auto_material_properties = settings.Paint.AutoMaterial,
         metallic = settings.Paint.Metallic,
