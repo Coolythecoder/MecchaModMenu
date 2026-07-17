@@ -552,7 +552,7 @@ static void ModuleCatalogLoadsValidV1Manifest()
           "version": "1.2.3",
           "description": "A data-only SDK test module.",
           "entry": "ui/index.html",
-          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.websocket", "storage.read", "storage.write", "memory.read", "memory.write"]
+          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.beacon", "network.websocket", "storage.read", "storage.write", "memory.read", "memory.write"]
         }
         """,
         "ui/index.html");
@@ -573,7 +573,7 @@ static void ModuleCatalogLoadsValidV1Manifest()
     Assert(module.Permissions.SequenceEqual(new[]
         {
             "snapshot.read", "paint.preview", "paint.restore",
-            "network.http", "network.https", "network.websocket",
+            "network.http", "network.https", "network.beacon", "network.websocket",
             "storage.read", "storage.write", "memory.read", "memory.write"
         }),
         "descriptor should expose only declared, allowlisted permissions");
@@ -581,7 +581,7 @@ static void ModuleCatalogLoadsValidV1Manifest()
     var expectedPermissions = new HashSet<string>(StringComparer.Ordinal)
     {
         "snapshot.read", "paint.start", "paint.preview", "paint.restore", "paint.stop",
-        "network.http", "network.https", "network.websocket",
+        "network.http", "network.https", "network.beacon", "network.websocket",
         "storage.read", "storage.write", "memory.read", "memory.write"
     };
     Assert(expectedPermissions.SetEquals(ModuleSdkV1.AllowedPermissions), "API v1 permission allowlist changed unexpectedly");
@@ -605,20 +605,19 @@ static void ModuleCatalogLoadsValidV1Manifest()
            !ModuleSdkV1.IsValidDataKey("Counter") &&
            !ModuleSdkV1.IsValidDataKey("process:0x1234"),
         "module data keys should be bounded logical names rather than paths, pointers, or addresses");
-    Assert(ModuleSdkV1.ConnectSourcePolicy([]) == "'none'",
-        "modules without a network grant must keep connect-src closed");
-    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpsPermission]) == "https:",
-        "the secure HTTP permission should only enable HTTPS connections");
-    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpPermission]) == "http: https:",
-        "the HTTP permission should support cleartext requests and secure redirects");
-    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkWebSocketPermission]) == "ws: wss:",
-        "the WebSocket permission should support ws and wss connections");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([]) == "http: https: ws: wss:",
+        "every accepted module should receive broad browser networking without a manifest grant");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpsPermission]) == "http: https: ws: wss:" &&
+           ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpPermission]) == "http: https: ws: wss:" &&
+           ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkWebSocketPermission]) == "http: https: ws: wss:" &&
+           ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkBeaconPermission]) == "http: https: ws: wss:",
+        "legacy network metadata must not narrow a module's broad connection policy");
     Assert(ModuleSdkV1.ConnectSourcePolicy([
             ModuleSdkV1.NetworkHttpPermission,
             ModuleSdkV1.NetworkHttpsPermission,
             ModuleSdkV1.NetworkWebSocketPermission
         ]) == "http: https: ws: wss:",
-        "combined network permissions should produce a stable, deduplicated connect-src policy");
+        "combined network metadata should produce the same stable broad policy");
     Assert(ModuleSdkV1.IdComparer.Equals("sample.module", "SAMPLE.MODULE"),
         "module ids must be unique without case-based aliases");
     var sampleHost = ModuleSdkV1.VirtualHostName("sample.module");
@@ -996,7 +995,7 @@ static void ModuleSdkExampleIsValid()
 
     var exampleHtml = File.ReadAllText(Path.Combine(target, "index.html"));
     Assert(!exampleHtml.Contains("Content-Security-Policy", StringComparison.OrdinalIgnoreCase),
-        "the SDK example must not ship an author policy that intersects away declared network permissions");
+        "the SDK example must not ship an author policy that intersects away broad host networking");
     Assert(exampleHtml.Contains("event.source !== window.parent", StringComparison.Ordinal) &&
            exampleHtml.Contains("sdkRequest(\"storage.get\"", StringComparison.Ordinal) &&
            exampleHtml.Contains("sdkRequest(\"storage.set\"", StringComparison.Ordinal) &&
@@ -1021,16 +1020,42 @@ static void ModuleSdkExampleIsValid()
     var networkResult = ModuleCatalog.ScanDirectory(temp.Path);
     var stagingDirectory = Path.Combine(temp.Path, "staged-example");
     Assert(networkResult.Modules.Count == 1,
-        "the network-enabled SDK example should remain a valid package");
+        "the SDK example should accept legacy network metadata for package compatibility");
     Assert(ModuleCatalog.TryStagePackage(
             networkResult.Modules[0],
             stagingDirectory,
             out _,
             out var diagnostic),
-        "the SDK example should accept a documented HTTPS permission and host policy: " + diagnostic?.Message);
+        "the SDK example should stage with legacy network metadata and the broad host policy: " + diagnostic?.Message);
     var stagedHtml = File.ReadAllText(Path.Combine(stagingDirectory, "index.html"));
-    Assert(stagedHtml.Contains("connect-src https:", StringComparison.Ordinal),
-        "the network-enabled SDK example should receive the declared HTTPS connection policy");
+    Assert(stagedHtml.Contains("connect-src http: https: ws: wss:", StringComparison.Ordinal),
+        "every staged SDK module should receive broad browser networking");
+
+    using var broadTemp = new TempDirectory("module-sdk-broad-network-test");
+    var broadModuleDirectory = CreateModulePackage(
+        broadTemp.Path,
+        "network-only",
+        """
+        {"schema_version":1,"api_version":1,"id":"network-only","name":"Network Only","version":"1.0.0","entry":"index.html","permissions":[]}
+        """);
+    File.WriteAllText(
+        Path.Combine(broadModuleDirectory, "index.html"),
+        "<!doctype html><html><head><title>Network only</title></head><body></body></html>",
+        new UTF8Encoding(false));
+    var broadResult = ModuleCatalog.ScanDirectory(broadTemp.Path);
+    Assert(broadResult.Modules.Count == 1 && broadResult.Diagnostics.Count == 0 &&
+           broadResult.Modules[0].Permissions.Count == 0,
+        "the documented zero-permission network-only manifest should pass production validation");
+    var broadStagingDirectory = Path.Combine(broadTemp.Path, "staged-network-only");
+    Assert(ModuleCatalog.TryStagePackage(
+            broadResult.Modules[0],
+            broadStagingDirectory,
+            out _,
+            out diagnostic),
+        "the zero-permission network-only module should stage successfully: " + diagnostic?.Message);
+    var broadHtml = File.ReadAllText(Path.Combine(broadStagingDirectory, "index.html"));
+    Assert(broadHtml.Contains("connect-src http: https: ws: wss:", StringComparison.Ordinal),
+        "a real zero-permission staged module should receive broad browser networking");
 }
 
 static void ModuleDataServicePersistsStorageAndClearsSessionMemory()
@@ -1876,11 +1901,20 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
     Assert(moduleCatalog.Contains("ModuleSdkV1.ContentSecurityPolicy(module.Permissions)", StringComparison.Ordinal) &&
            moduleCatalog.Contains("ModuleDocumentSecurity.TryInjectContentSecurityPolicy", StringComparison.Ordinal) &&
            mainForm.Contains("CoreWebView2WebResourceContext.XmlHttpRequest", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceContext.Fetch", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceContext.EventSource", StringComparison.Ordinal) &&
            mainForm.Contains("CoreWebView2WebResourceContext.Websocket", StringComparison.Ordinal) &&
-           !mainForm.Contains("CoreWebView2WebResourceContext.Ping", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceContext.Ping", StringComparison.Ordinal) &&
+           !mainForm.Contains("AllowsHttpRequest", StringComparison.Ordinal) &&
+           !mainForm.Contains("ModuleSdkV1.NetworkHttpPermission", StringComparison.Ordinal) &&
+           !mainForm.Contains("ModuleSdkV1.NetworkHttpsPermission", StringComparison.Ordinal) &&
+           !mainForm.Contains("ModuleSdkV1.NetworkWebSocketPermission", StringComparison.Ordinal) &&
+           !mainForm.Contains("ModuleSdkV1.NetworkBeaconPermission", StringComparison.Ordinal) &&
+           !mainForm.Contains("module.Permissions", StringComparison.Ordinal) &&
+           mainForm.Contains("--allow-running-insecure-content", StringComparison.Ordinal) &&
            moduleSdk.Contains("worker-src 'none'", StringComparison.Ordinal) &&
            !mainForm.Contains("TryReadValidatedModuleEntry", StringComparison.Ordinal),
-        "staged module documents should receive a permission-derived CSP while remote assets, workers, Beacon, and ping stay closed");
+        "staged module documents should receive broad connection CSP while remote assets and workers stay closed");
     Assert(mainForm.Contains("FrameNavigationStarting", StringComparison.Ordinal) &&
            mainForm.Contains("allowedModuleFrame", StringComparison.Ordinal) &&
            mainForm.Contains("session.ModuleEntryUrl(module)", StringComparison.Ordinal) &&

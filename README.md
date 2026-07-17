@@ -82,7 +82,7 @@ The folder name must match the manifest `id`.
 
 The HTML entry must be UTF-8 and contain an explicit `<head>` before any
 executable markup. The host serves an isolated runtime snapshot and injects
-UTF-8, no-referrer, and permission-derived security metadata at the start of
+UTF-8, no-referrer, and host-owned security metadata at the start of
 that head before the document runs.
 
 Reference packaged scripts, styles, images, and other assets with relative URLs
@@ -176,23 +176,22 @@ Only declare permissions your module uses:
 | `paint.preview` | `paint.preview` |
 | `paint.restore` | `paint.restore` |
 | `paint.stop` | `paint.stop` |
-| `network.https` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTPS only |
-| `network.http` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTP or HTTPS |
-| `network.websocket` | `WebSocket` connections over `ws:` or `wss:` |
 | `storage.read` | `sdk.storage.get` and `sdk.storage.list` for persistent module data |
 | `storage.write` | `sdk.storage.set` and `sdk.storage.delete` for persistent module data |
 | `memory.read` | `sdk.memory.get` and `sdk.memory.list` for this app session |
 | `memory.write` | `sdk.memory.set` and `sdk.memory.delete` for this app session |
 
 There is no generic native-command, filesystem, or process permission. Paint
-actions use the current settings configured in Meccha Mod Menu. Network access
-is denied unless the matching permission is declared. For example:
+actions use the current settings configured in Meccha Mod Menu. All accepted
+modules have broad HTTP, HTTPS, WS, WSS, `fetch`, XHR, EventSource,
+`navigator.sendBeacon()`, and hyperlink `ping` access without a network manifest
+permission. For a network-only module, this is valid:
 
 ```json
-"permissions": ["snapshot.read", "network.https", "network.websocket"]
+"permissions": []
 ```
 
-With those permissions, module JavaScript can use the listed browser APIs:
+Module JavaScript can use the standard browser APIs directly:
 
 ```js
 const response = await fetch("https://api.example.com/paint");
@@ -200,16 +199,21 @@ const data = await response.json();
 
 const socket = new WebSocket("wss://api.example.com/live");
 socket.addEventListener("message", event => console.log(event.data));
+
+const queued = navigator.sendBeacon(
+  "https://api.example.com/session-end",
+  JSON.stringify({ reason: "module-hidden" })
+);
 ```
 
-The permissions do not expose `navigator.sendBeacon()` or hyperlink ping
-requests.
+Beacon and hyperlink `ping` are fire-and-forget POST requests: responses are not
+exposed to the module, and a `true` `sendBeacon()` result means queued rather
+than delivered.
 
 The remote server must allow the module's origin for CORS and WebSocket Origin
 checks. Use `location.origin` to see the module's isolated origin; do not assume
-it is `https://meccha.localhost`. Modules run from an HTTPS origin, so browser
-mixed-content rules may still block plaintext `http:` and `ws:` endpoints even
-when `network.http` or `network.websocket` is declared. Prefer HTTPS and WSS.
+it is `https://meccha.localhost`. Plaintext HTTP and WS are enabled, but they are
+neither private nor tamper-resistant. Prefer HTTPS and WSS.
 
 All modules share the app's WebView profile. Their unrelated `*.localhost`
 origins remain separate, but a credentialed request can use cookie or
@@ -256,7 +260,7 @@ snapshot shape, validation rules, and trust model.
 - `module.json` is limited to 64 KiB. A package may contain up to 256 files and
   128 subdirectories, with a total size up to 32 MiB. Individual assets are
   limited to 8 MiB and the HTML entry to 4 MiB.
-- Network permissions enable connection APIs only. Remote scripts and images,
+- Broad network access covers connection APIs only. Remote scripts and images,
   file access, form submissions, workers, and plug-ins remain blocked; keep
   those resources inside the validated module package.
 - Package asset references must be relative rather than root-relative so they

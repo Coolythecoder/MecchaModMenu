@@ -12,7 +12,7 @@ the [`example`](example/) directory into the modules directory, then choose
 
 The HTML entry must be UTF-8 and contain an explicit `<head>` before any
 executable markup. The host serves an isolated runtime snapshot and injects
-UTF-8, no-referrer, and permission-derived security metadata at the start of
+UTF-8, no-referrer, and host-owned security metadata at the start of
 that head before the document runs.
 
 ## Manifest
@@ -50,20 +50,17 @@ API v1 permissions are:
 | `paint.preview` | `paint.preview` |
 | `paint.restore` | `paint.restore` |
 | `paint.stop` | `paint.stop` |
-| `network.https` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTPS only |
-| `network.http` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTP or HTTPS |
-| `network.websocket` | `WebSocket` connections over `ws:` or `wss:` |
 | `storage.read` | `storage.get` and `storage.list` for persistent module data |
 | `storage.write` | `storage.set` and `storage.delete` for persistent module data |
 | `memory.read` | `memory.get` and `memory.list` for session module data |
 | `memory.write` | `memory.set` and `memory.delete` for session module data |
 
 There is deliberately no generic native-command, filesystem, or process
-permission. Network access is limited to the browser connection APIs covered by
-the declared network permissions.
-
-`navigator.sendBeacon()` and hyperlink ping requests are not exposed by any API
-v1 permission.
+permission. Browser networking is broad for every accepted module: HTTP,
+HTTPS, WS, WSS, `fetch`, XHR, EventSource, `navigator.sendBeacon()`, and
+hyperlink `ping` need no manifest permission. The `network.http`,
+`network.https`, `network.websocket`, and `network.beacon` values remain
+accepted as no-op network metadata, but they do not narrow or expand access.
 
 ## Package asset URLs
 
@@ -256,11 +253,9 @@ never accept addresses or pointers and never access the native bridge.
 
 ## Network APIs
 
-Declare every type of connection the module needs in `module.json`. Use
-`network.https` for HTTPS-only `fetch`, `XMLHttpRequest`, and `EventSource`
-traffic. Use `network.http` instead when the module must be permitted to attempt
-either HTTP or HTTPS. WebSockets require the separate `network.websocket`
-permission for both `ws:` and `wss:` URLs.
+Every validated module receives broad browser connection access. Network APIs
+do not need a host message or a network entry in `permissions`; command and data
+permissions remain enforced normally.
 
 ```json
 {
@@ -270,12 +265,11 @@ permission for both `ws:` and `wss:` URLs.
   "name": "Online Paint Tools",
   "version": "1.0.0",
   "entry": "index.html",
-  "permissions": ["network.https", "network.websocket"]
+  "permissions": []
 }
 ```
 
-The permitted APIs use their standard browser interfaces; no host message is
-needed:
+Use the standard browser interfaces:
 
 ```js
 const response = await fetch("https://api.example.com/palettes", {
@@ -287,6 +281,32 @@ const palettes = await response.json();
 const socket = new WebSocket("wss://api.example.com/updates");
 socket.addEventListener("open", () => socket.send("subscribe"));
 socket.addEventListener("message", event => console.log(event.data));
+
+const queued = navigator.sendBeacon(
+  "https://api.example.com/session-end",
+  JSON.stringify({ reason: "module-hidden" })
+);
+if (!queued) console.warn("The browser did not queue the beacon");
+```
+
+A packaged hyperlink can request browser-managed auditing directly:
+
+```html
+<a href="#saved" ping="https://api.example.com/link-audit">Save preset</a>
+```
+
+Both transports are fire-and-forget POST requests. Module code cannot read the
+response. A `true` return from `sendBeacon()` means the browser accepted the
+payload for delivery; it is not a server acknowledgement. Hyperlink pings are
+sent only when the browser activates the link. Target servers must accept the
+browser-selected request shape and content type.
+Cross-origin Beacon payloads with a non-safelisted content type can trigger a
+CORS preflight, which the receiving server must accept before the POST.
+
+A network-only module can omit permissions entirely:
+
+```json
+"permissions": []
 ```
 
 Each module has its own stable, isolated HTTPS origin. For cross-origin fetch,
@@ -299,8 +319,8 @@ and must accept that module origin during the handshake.
 All module frames use the same WebView profile. The modules have distinct,
 unrelated `*.localhost` hostnames, so a host-only cookie for one module origin is
 not a cookie for another module origin. Cookies and authentication state for a
-remote target domain are profile state, however. A network-permitted module can
-therefore include target-domain state that another module used, subject to the
+remote target domain are profile state, however. Any module can therefore
+include target-domain state that another module used, subject to the
 browser's SameSite and third-party-cookie rules. Cross-origin `fetch` needs
 `credentials: "include"`, XHR needs `withCredentials = true`, and EventSource
 needs its credentials option when that behavior is intended.
@@ -311,29 +331,29 @@ already have reached the server even when the response is unreadable. A failed
 preflight can stop the corresponding non-simple request, but the server must
 still enforce authentication, authorization, and CSRF protections itself.
 
-The permissions allow the host to pass matching connections; they do not turn
-off Chromium/WebView2 security rules. Because a module is served from HTTPS,
-mixed-content policy may still block plaintext `http:` fetches and `ws:`
-connections. Prefer HTTPS and WSS. `network.http` is broader than
-`network.https`, but it is not a mixed-content bypass.
+The host enables Chromium's plaintext connection path so `http:` and `ws:`
+transports are not rejected as mixed content. This does not make cleartext
+transport private or tamper-resistant. Prefer HTTPS and WSS whenever the server
+supports them.
+Browser CORS, cookie, redirect, DNS, TLS, and server-side rules still apply.
 
-These permissions cover connection APIs only. Remote scripts, images, and
-files; form submissions; workers; and plug-ins remain blocked. Package scripts,
-images, and other static assets inside the validated module directory.
+Broad network access covers the listed connection and fire-and-forget APIs only.
+Remote scripts, images, and files; form submissions; workers; and plug-ins remain
+blocked. Package scripts, images, and other static assets inside the validated
+module directory.
 
 ## Trust model
 
 Module HTML and JavaScript are local user-installed code. Install only packages
 you trust. Each accepted package receives a separate virtual origin. The host
-allows only the connection APIs covered by the module's declared network
-permissions and continues to block file access and remote subresources. Module
+allows the listed connection APIs broadly and continues to block file access
+and remote subresources. Module
 documents also receive a host-enforced content security policy: packaged local
 scripts, styles, images, fonts, and media are supported, while remote scripts,
 images, and files, workers, forms, and plug-ins are disabled. The host denies
 browser permission requests, prevents modules from framing the privileged main
 interface, rejects direct WebView messages from a module origin, and checks the
-declared permission before relaying an API request or allowing a network
-connection.
+declared permission before relaying command or data API requests.
 
 The host also derives each storage namespace from the registered frame rather
 than accepting a module ID or filesystem path from request data. Modules cannot

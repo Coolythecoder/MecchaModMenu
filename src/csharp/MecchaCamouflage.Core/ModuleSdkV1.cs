@@ -36,6 +36,7 @@ public static class ModuleSdkV1
     public const string PaintStopPermission = "paint.stop";
     public const string NetworkHttpPermission = "network.http";
     public const string NetworkHttpsPermission = "network.https";
+    public const string NetworkBeaconPermission = "network.beacon";
     public const string NetworkWebSocketPermission = "network.websocket";
     public const string StorageReadPermission = "storage.read";
     public const string StorageWritePermission = "storage.write";
@@ -51,6 +52,7 @@ public static class ModuleSdkV1
         PaintStopPermission,
         NetworkHttpPermission,
         NetworkHttpsPermission,
+        NetworkBeaconPermission,
         NetworkWebSocketPermission,
         StorageReadPermission,
         StorageWritePermission,
@@ -90,30 +92,14 @@ public static class ModuleSdkV1
     }
 
     /// <summary>
-    /// Builds the CSP connect-src value for one already-validated module. The HTTP
-    /// capability includes HTTPS so redirects and secure upgrades keep working;
-    /// modules that only need secure requests can request network.https instead.
+    /// Builds the CSP connect-src value for one already-validated module. Browser
+    /// networking is broad for every accepted module; network permission names
+    /// remain valid manifest metadata but do not narrow this policy.
     /// </summary>
     public static string ConnectSourcePolicy(IEnumerable<string> permissions)
     {
         ArgumentNullException.ThrowIfNull(permissions);
-        var values = permissions.ToHashSet(StringComparer.Ordinal);
-        var sources = new List<string>(4);
-        if (values.Contains(NetworkHttpPermission))
-        {
-            sources.Add("http:");
-            sources.Add("https:");
-        }
-        else if (values.Contains(NetworkHttpsPermission))
-        {
-            sources.Add("https:");
-        }
-        if (values.Contains(NetworkWebSocketPermission))
-        {
-            sources.Add("ws:");
-            sources.Add("wss:");
-        }
-        return sources.Count == 0 ? "'none'" : string.Join(' ', sources);
+        return "http: https: ws: wss:";
     }
 
     /// <summary>

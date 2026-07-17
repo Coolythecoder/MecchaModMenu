@@ -293,25 +293,16 @@ public sealed class MainForm : Form
         var isHttps = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
         if (isHttp || isHttps)
         {
-            var isConnectionApi = context is CoreWebView2WebResourceContext.XmlHttpRequest or
+            return context is CoreWebView2WebResourceContext.XmlHttpRequest or
                 CoreWebView2WebResourceContext.Fetch or
-                CoreWebView2WebResourceContext.EventSource;
-            if (!isConnectionApi)
-                return false;
-            return moduleVirtualHostModules.Values.Any(module =>
-                module.Permissions.Contains(ModuleSdkV1.NetworkHttpPermission, StringComparer.Ordinal) ||
-                (isHttps && module.Permissions.Contains(
-                    ModuleSdkV1.NetworkHttpsPermission,
-                    StringComparer.Ordinal)));
+                CoreWebView2WebResourceContext.EventSource or
+                CoreWebView2WebResourceContext.Ping;
         }
 
         var isWebSocket = string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase);
         return isWebSocket &&
-            context == CoreWebView2WebResourceContext.Websocket &&
-            moduleVirtualHostModules.Values.Any(module => module.Permissions.Contains(
-                ModuleSdkV1.NetworkWebSocketPermission,
-                StringComparer.Ordinal));
+            context == CoreWebView2WebResourceContext.Websocket;
     }
 
     private static bool IsBlockedExternalScheme(string scheme) =>
@@ -601,7 +592,10 @@ public sealed class MainForm : Form
     private static CoreWebView2EnvironmentOptions CreateEvergreenEnvironmentOptions() => new()
     {
         ReleaseChannels = CoreWebView2ReleaseChannels.Stable,
-        ExclusiveUserDataFolderAccess = false
+        ExclusiveUserDataFolderAccess = false,
+        // Plain HTTP and WS are broad SDK capabilities. Chromium otherwise
+        // rejects them as mixed content before the host request filter can run.
+        AdditionalBrowserArguments = "--allow-running-insecure-content"
     };
 
     private static string? TryGetEvergreenRuntimeVersion()
