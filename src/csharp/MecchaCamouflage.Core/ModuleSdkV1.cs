@@ -29,6 +29,9 @@ public static class ModuleSdkV1
     public const string PaintPreviewPermission = "paint.preview";
     public const string PaintRestorePermission = "paint.restore";
     public const string PaintStopPermission = "paint.stop";
+    public const string NetworkHttpPermission = "network.http";
+    public const string NetworkHttpsPermission = "network.https";
+    public const string NetworkWebSocketPermission = "network.websocket";
 
     private static readonly string[] PermissionValues =
     [
@@ -36,7 +39,10 @@ public static class ModuleSdkV1
         PaintStartPermission,
         PaintPreviewPermission,
         PaintRestorePermission,
-        PaintStopPermission
+        PaintStopPermission,
+        NetworkHttpPermission,
+        NetworkHttpsPermission,
+        NetworkWebSocketPermission
     ];
 
     public static StringComparer IdComparer { get; } = StringComparer.OrdinalIgnoreCase;
@@ -44,6 +50,45 @@ public static class ModuleSdkV1
 
     public static bool IsAllowedPermission(string? permission) =>
         permission is not null && PermissionValues.Contains(permission, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Builds the CSP connect-src value for one already-validated module. The HTTP
+    /// capability includes HTTPS so redirects and secure upgrades keep working;
+    /// modules that only need secure requests can request network.https instead.
+    /// </summary>
+    public static string ConnectSourcePolicy(IEnumerable<string> permissions)
+    {
+        ArgumentNullException.ThrowIfNull(permissions);
+        var values = permissions.ToHashSet(StringComparer.Ordinal);
+        var sources = new List<string>(4);
+        if (values.Contains(NetworkHttpPermission))
+        {
+            sources.Add("http:");
+            sources.Add("https:");
+        }
+        else if (values.Contains(NetworkHttpsPermission))
+        {
+            sources.Add("https:");
+        }
+        if (values.Contains(NetworkWebSocketPermission))
+        {
+            sources.Add("ws:");
+            sources.Add("wss:");
+        }
+        return sources.Count == 0 ? "'none'" : string.Join(' ', sources);
+    }
+
+    /// <summary>
+    /// Builds the complete host-owned policy for one validated module snapshot.
+    /// Keeping this next to the permission contract prevents staging callers from
+    /// applying a policy derived from stale manifest data.
+    /// </summary>
+    public static string ContentSecurityPolicy(IEnumerable<string> permissions) =>
+        "default-src 'self'; base-uri 'none'; connect-src " +
+        ConnectSourcePolicy(permissions) +
+        "; object-src 'none'; form-action 'none'; frame-src 'self'; worker-src 'none'; " +
+        "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; font-src 'self' data:; media-src 'self'";
 
     /// <summary>
     /// Returns a stable, DNS-safe origin for one accepted module. Keeping every module on a
@@ -54,7 +99,9 @@ public static class ModuleSdkV1
         if (!IsValidId(id))
             throw new ArgumentException("A valid module id is required.", nameof(id));
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(id));
-        return $"m-{Convert.ToHexString(digest.AsSpan(0, 16)).ToLowerInvariant()}.meccha-modules.localhost";
+        // Each module gets a direct child of the localhost public suffix. Avoiding a
+        // shared intermediate parent prevents Domain cookies from spanning modules.
+        return $"m-{Convert.ToHexString(digest.AsSpan(0, 16)).ToLowerInvariant()}.localhost";
     }
 
     public static bool IsValidId(string? id)

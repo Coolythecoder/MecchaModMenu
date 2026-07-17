@@ -54,7 +54,8 @@ public sealed class HostSession
         Settings = Store.Load();
         PresetStore = new PaintPresetStore(Paths.RootDirectory);
         paintPresets = PresetStore.Load();
-        Modules = ModuleCatalog.Scan(Paths);
+        ModuleSourceCatalog = ModuleCatalog.Scan(Paths);
+        Modules = ModuleSourceCatalog;
         Log = new RuntimeLog(Paths);
         Runtime = new RuntimeBridgeService(Paths, Log);
     }
@@ -63,17 +64,20 @@ public sealed class HostSession
     public AppPaths Paths { get; }
     public SettingsStore Store { get; }
     public PaintPresetStore PresetStore { get; }
+    public ModuleCatalogResult ModuleSourceCatalog { get; private set; }
     public ModuleCatalogResult Modules { get; private set; }
     public RuntimeLog Log { get; }
     public RuntimeBridgeService Runtime { get; }
     public AppSettings Settings { get; private set; }
     public bool PaintRunning { get; private set; }
+    public string ModuleHostGeneration => moduleCatalogGeneration;
     private readonly SemaphoreSlim bridgeWarmupGate = new(1, 1);
     private readonly object paintStateGate = new();
     private DateTimeOffset nextBridgeWarmupAttempt;
     private DateTimeOffset currentPaintStartedAt = DateTimeOffset.MinValue;
     private bool finalProgressLogged;
     private bool currentProgressIsServerPaint;
+    private string moduleCatalogGeneration = Guid.NewGuid().ToString("N");
     private bool nativePaintMayBeRunning;
     private PaintCancelState cancelState;
     private int nextPaintGeneration;
@@ -717,12 +721,33 @@ public sealed class HostSession
 
     public HostCommandResult ReloadModules()
     {
-        Modules = ModuleCatalog.Scan(Paths);
+        ModuleSourceCatalog = ModuleCatalog.Scan(Paths);
+        Modules = ModuleSourceCatalog;
+        moduleCatalogGeneration = Guid.NewGuid().ToString("N");
         foreach (var diagnostic in Modules.Diagnostics)
             Log.Warn($"Module {diagnostic.ModuleId ?? "catalog"}: {diagnostic.Message}");
         return new HostCommandResult(
             true,
             $"Modules: loaded {Modules.Modules.Count}; rejected {Modules.Diagnostics.Count}.");
+    }
+
+    public string BeginModuleHostGeneration()
+    {
+        moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+        return moduleCatalogGeneration;
+    }
+
+    public void ApplyHostedModules(
+        IEnumerable<ModuleDescriptor> modules,
+        IEnumerable<ModuleCatalogDiagnostic> stagingDiagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(modules);
+        ArgumentNullException.ThrowIfNull(stagingDiagnostics);
+        var accepted = modules.ToArray();
+        var diagnostics = ModuleSourceCatalog.Diagnostics.Concat(stagingDiagnostics).ToArray();
+        Modules = new ModuleCatalogResult(
+            Array.AsReadOnly(accepted),
+            Array.AsReadOnly(diagnostics));
     }
 
     public void OpenModulesDirectory()
@@ -966,12 +991,12 @@ public sealed class HostSession
             Localization.All);
     }
 
-    private static string ModuleEntryUrl(ModuleDescriptor module)
+    public string ModuleEntryUrl(ModuleDescriptor module)
     {
         var encodedEntry = string.Join(
             '/',
             module.Entry.Split('/').Select(Uri.EscapeDataString));
-        return $"https://{ModuleSdkV1.VirtualHostName(module.Id)}/{encodedEntry}";
+        return $"https://{ModuleSdkV1.VirtualHostName(module.Id)}/{moduleCatalogGeneration}/{encodedEntry}";
     }
 
     private static SettingsSnapshot ToSnapshot(AppSettings settings)

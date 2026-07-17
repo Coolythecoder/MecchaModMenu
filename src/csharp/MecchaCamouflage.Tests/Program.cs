@@ -32,6 +32,10 @@ var tests = new List<(string Name, Action Run)>
     ("settings clamp batch sliders", SettingsClampBatchSliders),
     ("module directory is global across app versions", ModuleDirectoryIsGlobalAcrossVersions),
     ("module catalog loads a valid API v1 manifest", ModuleCatalogLoadsValidV1Manifest),
+    ("module document policy is injected before authored content", ModuleDocumentPolicyIsInjectedFirst),
+    ("module runtime staging isolates and secures packages", ModuleRuntimeStagingIsolatesAndSecuresPackages),
+    ("module runtime staging rejects post-scan package mutations", ModuleRuntimeStagingRejectsPostScanPackageMutations),
+    ("module entry URL rotates its generation path on reload", ModuleEntryUrlRotatesGenerationPathOnReload),
     ("module catalog rejects unsafe manifests without blocking valid modules", ModuleCatalogRejectsUnsafeManifestsNonfatally),
     ("module catalog enforces file and link boundaries", ModuleCatalogEnforcesFileAndLinkBoundaries),
     ("module SDK example is a valid package", ModuleSdkExampleIsValid),
@@ -514,9 +518,13 @@ static void ModuleDirectoryIsGlobalAcrossVersions()
         "modules should live directly under the persistent application root");
     Assert(!first.ModulesDirectory.StartsWith(first.VersionRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
         "the global module catalog must not be nested under one version");
+    Assert(first.ModuleHostDirectory.StartsWith(first.RuntimeDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+           first.ModuleHostDirectory != second.ModuleHostDirectory,
+        "secured module host snapshots should be scoped to one application version runtime");
 
     first.EnsureBaseDirectories();
     Assert(Directory.Exists(first.ModulesDirectory), "base-directory setup should create the module directory");
+    Assert(Directory.Exists(first.ModuleHostDirectory), "base-directory setup should create the secured module host directory");
 }
 
 static void ModuleCatalogLoadsValidV1Manifest()
@@ -534,7 +542,7 @@ static void ModuleCatalogLoadsValidV1Manifest()
           "version": "1.2.3",
           "description": "A data-only SDK test module.",
           "entry": "ui/index.html",
-          "permissions": ["snapshot.read", "paint.preview", "paint.restore"]
+          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.websocket"]
         }
         """,
         "ui/index.html");
@@ -552,30 +560,252 @@ static void ModuleCatalogLoadsValidV1Manifest()
     Assert(module.ModuleDirectory == Path.GetFullPath(moduleDirectory), "descriptor should expose the validated package root");
     Assert(module.EntryPath == Path.GetFullPath(Path.Combine(moduleDirectory, "ui", "index.html")),
         "descriptor should resolve the entry within the package root");
-    Assert(module.Permissions.SequenceEqual(new[] { "snapshot.read", "paint.preview", "paint.restore" }),
+    Assert(module.Permissions.SequenceEqual(new[]
+        {
+            "snapshot.read", "paint.preview", "paint.restore",
+            "network.http", "network.https", "network.websocket"
+        }),
         "descriptor should expose only declared, allowlisted permissions");
 
     var expectedPermissions = new HashSet<string>(StringComparer.Ordinal)
     {
-        "snapshot.read", "paint.start", "paint.preview", "paint.restore", "paint.stop"
+        "snapshot.read", "paint.start", "paint.preview", "paint.restore", "paint.stop",
+        "network.http", "network.https", "network.websocket"
     };
     Assert(expectedPermissions.SetEquals(ModuleSdkV1.AllowedPermissions), "API v1 permission allowlist changed unexpectedly");
     Assert(!ModuleSdkV1.IsAllowedPermission("native.command"), "arbitrary native command permission must not exist");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([]) == "'none'",
+        "modules without a network grant must keep connect-src closed");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpsPermission]) == "https:",
+        "the secure HTTP permission should only enable HTTPS connections");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpPermission]) == "http: https:",
+        "the HTTP permission should support cleartext requests and secure redirects");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkWebSocketPermission]) == "ws: wss:",
+        "the WebSocket permission should support ws and wss connections");
+    Assert(ModuleSdkV1.ConnectSourcePolicy([
+            ModuleSdkV1.NetworkHttpPermission,
+            ModuleSdkV1.NetworkHttpsPermission,
+            ModuleSdkV1.NetworkWebSocketPermission
+        ]) == "http: https: ws: wss:",
+        "combined network permissions should produce a stable, deduplicated connect-src policy");
     Assert(ModuleSdkV1.IdComparer.Equals("sample.module", "SAMPLE.MODULE"),
         "module ids must be unique without case-based aliases");
     var sampleHost = ModuleSdkV1.VirtualHostName("sample.module");
     Assert(sampleHost == ModuleSdkV1.VirtualHostName("sample.module"),
         "a module id should map to one deterministic virtual host");
     Assert(sampleHost != ModuleSdkV1.VirtualHostName("another.module") &&
-           sampleHost.EndsWith(".meccha-modules.localhost", StringComparison.Ordinal) &&
+           sampleHost.EndsWith(".localhost", StringComparison.Ordinal) &&
+           sampleHost.Count(character => character == '.') == 1 &&
            sampleHost.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '.'),
-        "distinct module ids should receive distinct DNS-safe subdomains");
+        "distinct module ids should receive unrelated DNS-safe localhost origins");
     Assert(ModuleSdkV1.IsValidRelativeHtmlEntry("ui/index.html"), "portable nested HTML entries should be valid");
     Assert(!ModuleSdkV1.IsValidRelativeHtmlEntry("../index.html") &&
            !ModuleSdkV1.IsValidRelativeHtmlEntry("ui\\index.html") &&
            !ModuleSdkV1.IsValidRelativeHtmlEntry("C:/index.html") &&
            !ModuleSdkV1.IsValidRelativeHtmlEntry("ui/module.js"),
         "rooted, traversal, platform-specific, and non-HTML entries must be rejected");
+}
+
+static void ModuleDocumentPolicyIsInjectedFirst()
+{
+    const string policy = "default-src 'self'; connect-src 'none'; script-src 'unsafe-inline'";
+    var source = Encoding.UTF8.GetBytes(
+        "<!doctype html><!-- package --><html lang=\"en\"><head><script>fetch('https://example.com')</script></head><body></body></html>");
+    Assert(ModuleDocumentSecurity.TryInjectContentSecurityPolicy(source, policy, out var secured),
+        "a valid UTF-8 module document with an explicit head should accept host policy injection");
+    Assert(secured.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }),
+        "the secured document should carry an unambiguous UTF-8 preamble");
+    var html = Encoding.UTF8.GetString(secured);
+    var charsetOffset = html.IndexOf("<meta charset=\"utf-8\">", StringComparison.Ordinal);
+    var referrerOffset = html.IndexOf("<meta name=\"referrer\" content=\"no-referrer\">", StringComparison.Ordinal);
+    var policyOffset = html.IndexOf("http-equiv=\"Content-Security-Policy\"", StringComparison.Ordinal);
+    var authoredScriptOffset = html.IndexOf("<script>", StringComparison.Ordinal);
+    Assert(charsetOffset >= 0 && charsetOffset < referrerOffset && referrerOffset < policyOffset &&
+           policyOffset < authoredScriptOffset,
+        "host UTF-8, referrer, and security policy metadata must precede module-authored executable content");
+    Assert(html.Contains(WebUtility.HtmlEncode(policy), StringComparison.Ordinal),
+        "the injected policy should retain its directives as HTML attribute content");
+
+    var deceptive = Encoding.UTF8.GetBytes(
+        "<!doctype html><!-- <head> --><html><script></script><head></head></html>");
+    Assert(!ModuleDocumentSecurity.TryInjectContentSecurityPolicy(deceptive, policy, out _),
+        "a document that places executable markup before its head must fail closed");
+    Assert(!ModuleDocumentSecurity.TryInjectContentSecurityPolicy([0xC3, 0x28], policy, out _),
+        "a non-UTF-8 module entry must fail closed");
+}
+
+static void ModuleRuntimeStagingIsolatesAndSecuresPackages()
+{
+    using var temp = new TempDirectory("module-runtime-staging-test");
+    var modulesDirectory = Path.Combine(temp.Path, "modules");
+    Directory.CreateDirectory(modulesDirectory);
+    var moduleDirectory = CreateModulePackage(
+        modulesDirectory,
+        "staged.module",
+        """
+        {"schema_version":1,"api_version":1,"id":"staged.module","name":"Staged","version":"1.0.0","entry":"ui/index.html","permissions":["network.https"]}
+        """,
+        "ui/index.html");
+    var sourceEntry = Path.Combine(moduleDirectory, "ui", "index.html");
+    const string originalHtml = "<!doctype html><html><head><script>fetch('https://example.com')</script></head><body>héllo</body></html>";
+    File.WriteAllText(sourceEntry, originalHtml, new UTF8Encoding(false));
+    var assetPath = Path.Combine(moduleDirectory, "assets", "value.txt");
+    Directory.CreateDirectory(Path.GetDirectoryName(assetPath)!);
+    File.WriteAllText(assetPath, "original");
+
+    var catalog = ModuleCatalog.ScanDirectory(modulesDirectory);
+    Assert(catalog.Modules.Count == 1 && catalog.Diagnostics.Count == 0,
+        "the staging fixture should begin as one accepted package");
+    var destination = Path.Combine(temp.Path, "generation-one", "staged.module");
+    var policy = ModuleSdkV1.ContentSecurityPolicy(catalog.Modules[0].Permissions);
+    Assert(ModuleCatalog.TryStagePackage(
+            catalog.Modules[0],
+            destination,
+            out var stagedModule,
+            out var diagnostic),
+        "a validated package should stage successfully: " + diagnostic?.Message);
+    Assert(stagedModule is not null && stagedModule.ModuleDirectory == Path.GetFullPath(destination),
+        "successful staging should return the descriptor derived from the immutable snapshot");
+
+    var stagedEntry = Path.Combine(destination, "ui", "index.html");
+    var stagedHtml = File.ReadAllText(stagedEntry, Encoding.UTF8);
+    Assert(stagedHtml.Contains("<meta charset=\"utf-8\">", StringComparison.Ordinal) &&
+           stagedHtml.Contains(WebUtility.HtmlEncode(policy), StringComparison.Ordinal) &&
+           stagedHtml.IndexOf("Content-Security-Policy", StringComparison.Ordinal) <
+               stagedHtml.IndexOf("<script>", StringComparison.Ordinal),
+        "the staged entry should contain host-owned metadata before authored script");
+    Assert(File.ReadAllText(Path.Combine(destination, "assets", "value.txt")) == "original",
+        "ordinary package assets should be copied into the isolated generation");
+    Assert(File.ReadAllText(sourceEntry, Encoding.UTF8) == originalHtml,
+        "runtime staging must not modify the user-owned package");
+
+    File.WriteAllText(sourceEntry, "<!doctype html><html><head></head><body>changed</body></html>");
+    File.Delete(assetPath);
+    Assert(File.ReadAllText(stagedEntry, Encoding.UTF8).Contains("héllo", StringComparison.Ordinal) &&
+           File.Exists(Path.Combine(destination, "assets", "value.txt")),
+        "source edits after staging must not change the served runtime snapshot");
+
+    var secondDestination = Path.Combine(temp.Path, "generation-two", "staged.module");
+    Assert(ModuleCatalog.TryStagePackage(catalog.Modules[0], secondDestination, out _, out diagnostic),
+        "a fresh generation should stage the updated valid package: " + diagnostic?.Message);
+    Assert(!File.Exists(Path.Combine(secondDestination, "assets", "value.txt")),
+        "a fresh generation must not retain an asset deleted from the source package");
+}
+
+static void ModuleRuntimeStagingRejectsPostScanPackageMutations()
+{
+    using var temp = new TempDirectory("module-runtime-staging-mutation-test");
+    var modulesDirectory = Path.Combine(temp.Path, "modules");
+    Directory.CreateDirectory(modulesDirectory);
+    const string originalManifest =
+        "{\"schema_version\":1,\"api_version\":1,\"id\":\"mutable.module\",\"name\":\"Mutable\",\"version\":\"1.0.0\",\"entry\":\"index.html\",\"permissions\":[\"network.https\"]}";
+    var moduleDirectory = CreateModulePackage(
+        modulesDirectory,
+        "mutable.module",
+        originalManifest);
+    var entryPath = Path.Combine(moduleDirectory, "index.html");
+    File.WriteAllText(
+        entryPath,
+        "<!doctype html><html><head></head><body>mutable</body></html>",
+        new UTF8Encoding(false));
+    var assetPath = Path.Combine(moduleDirectory, "payload.bin");
+    File.WriteAllBytes(assetPath, [0x2A]);
+
+    var catalog = ModuleCatalog.ScanDirectory(modulesDirectory);
+    Assert(catalog.Modules.Count == 1 && catalog.Diagnostics.Count == 0,
+        "the mutation fixture should be accepted before its source package changes");
+    var descriptor = catalog.Modules[0];
+    using (var oversized = new FileStream(assetPath, FileMode.Open, FileAccess.Write, FileShare.None))
+        oversized.SetLength(ModuleSdkV1.MaxAssetBytes + 1);
+    var oversizedDestination = Path.Combine(temp.Path, "oversized-generation", descriptor.Id);
+    Assert(!ModuleCatalog.TryStagePackage(
+               descriptor,
+               oversizedDestination,
+               out _,
+               out var diagnostic) &&
+           diagnostic is not null &&
+           !Directory.Exists(oversizedDestination),
+        "runtime staging must recheck actual asset sizes and remove a partial oversized snapshot");
+
+    File.WriteAllBytes(assetPath, [0x2A]);
+    File.WriteAllText(
+        Path.Combine(moduleDirectory, "module.json"),
+        originalManifest.Replace(
+            "[\"network.https\"]",
+            "[\"network.https\",\"network.websocket\"]",
+            StringComparison.Ordinal));
+    var manifestMutationDestination = Path.Combine(temp.Path, "manifest-mutation-generation", descriptor.Id);
+    Assert(!ModuleCatalog.TryStagePackage(
+               descriptor,
+               manifestMutationDestination,
+               out _,
+               out diagnostic) &&
+           diagnostic is not null &&
+           !Directory.Exists(manifestMutationDestination),
+        "runtime staging must reject a manifest whose permissions changed after catalog validation");
+
+    File.WriteAllText(Path.Combine(moduleDirectory, "module.json"), originalManifest);
+    File.WriteAllBytes(entryPath, [0xC3, 0x28]);
+    var entryMutationDestination = Path.Combine(temp.Path, "entry-mutation-generation", descriptor.Id);
+    Assert(!ModuleCatalog.TryStagePackage(
+               descriptor,
+               entryMutationDestination,
+               out _,
+               out diagnostic) &&
+           diagnostic is not null &&
+           diagnostic.Code == "entry_security_policy" &&
+           !Directory.Exists(entryMutationDestination),
+        "runtime staging must reject and clean up an entry that became unsafe after catalog validation");
+}
+
+static void ModuleEntryUrlRotatesGenerationPathOnReload()
+{
+    using var home = new TempHome();
+    var session = new HostSession("module-entry-generation-path-test");
+    var module = new ModuleDescriptor(
+        ModuleSdkV1.SchemaVersion,
+        ModuleSdkV1.ApiVersion,
+        "generation.module",
+        "Generation",
+        "1.0.0",
+        "",
+        session.Paths.VersionRoot,
+        "ui/index.html",
+        Path.Combine(session.Paths.VersionRoot, "ui", "index.html"),
+        []);
+
+    var firstUrl = session.ModuleEntryUrl(module);
+    Assert(firstUrl == session.ModuleEntryUrl(module),
+        "a module entry URL must remain stable within one catalog generation");
+    Assert(Uri.TryCreate(firstUrl, UriKind.Absolute, out var parsedFirstUri),
+        "the first generated module entry URL should be absolute");
+    var firstUri = parsedFirstUri!;
+
+    var secondReload = session.ReloadModules();
+    Assert(secondReload.Success, "reloading modules should rotate the generation token");
+    var secondUrl = session.ModuleEntryUrl(module);
+    Assert(Uri.TryCreate(secondUrl, UriKind.Absolute, out var parsedSecondUri),
+        "the reloaded module entry URL should be absolute");
+    var secondUri = parsedSecondUri!;
+
+    const string entrySuffix = "/ui/index.html";
+    Assert(firstUri.Query.Length == 0 && secondUri.Query.Length == 0,
+        "module cache generations must be encoded in the path, never in a query string");
+    Assert(firstUri.GetLeftPart(UriPartial.Authority) == secondUri.GetLeftPart(UriPartial.Authority) &&
+           firstUri.AbsolutePath.EndsWith(entrySuffix, StringComparison.Ordinal) &&
+           secondUri.AbsolutePath.EndsWith(entrySuffix, StringComparison.Ordinal),
+        "a generation transition must preserve the isolated module origin and encoded entry suffix");
+
+    var firstPrefix = firstUri.AbsolutePath[..^entrySuffix.Length];
+    var secondPrefix = secondUri.AbsolutePath[..^entrySuffix.Length];
+    Assert(firstPrefix.Length > 1 && secondPrefix.Length > 1 && firstPrefix != secondPrefix,
+        "ReloadModules must rotate the generation path prefix even when the manifest is unchanged");
+    Assert(ContainsGuidGenerationSegment(firstPrefix) && ContainsGuidGenerationSegment(secondPrefix),
+        "each module URL path prefix should contain its host-owned 32-hex generation identifier");
+
+    static bool ContainsGuidGenerationSegment(string prefix) =>
+        prefix.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(segment =>
+            segment.Length == 32 && segment.All(value => char.IsAsciiHexDigit(value)));
 }
 
 static void ModuleCatalogRejectsUnsafeManifestsNonfatally()
@@ -727,6 +957,30 @@ static void ModuleSdkExampleIsValid()
     Assert(result.Diagnostics.Count == 0, "the documented SDK example should pass the production catalog validator; diagnostics=" +
         string.Join(',', result.Diagnostics.Select(diagnostic => diagnostic.Code + ":" + diagnostic.Message)));
     Assert(result.Modules.Count == 1 && result.Modules[0].Id == "example", "the SDK example should load as the example module");
+
+    var exampleHtml = File.ReadAllText(Path.Combine(target, "index.html"));
+    Assert(!exampleHtml.Contains("Content-Security-Policy", StringComparison.OrdinalIgnoreCase),
+        "the SDK example must not ship an author policy that intersects away declared network permissions");
+    var manifestPath = Path.Combine(target, "module.json");
+    File.WriteAllText(
+        manifestPath,
+        File.ReadAllText(manifestPath).Replace(
+            "\"snapshot.read\"",
+            "\"snapshot.read\", \"network.https\"",
+            StringComparison.Ordinal));
+    var networkResult = ModuleCatalog.ScanDirectory(temp.Path);
+    var stagingDirectory = Path.Combine(temp.Path, "staged-example");
+    Assert(networkResult.Modules.Count == 1,
+        "the network-enabled SDK example should remain a valid package");
+    Assert(ModuleCatalog.TryStagePackage(
+            networkResult.Modules[0],
+            stagingDirectory,
+            out _,
+            out var diagnostic),
+        "the SDK example should accept a documented HTTPS permission and host policy: " + diagnostic?.Message);
+    var stagedHtml = File.ReadAllText(Path.Combine(stagingDirectory, "index.html"));
+    Assert(stagedHtml.Contains("connect-src https:", StringComparison.Ordinal),
+        "the network-enabled SDK example should receive the declared HTTPS connection policy");
 }
 
 static void PaintPresetStoreRoundTripsPaintSettings()
@@ -1254,11 +1508,21 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
     var app = File.ReadAllText(Path.Combine(
         repository,
         "src", "csharp", "MecchaCamouflage.WebHost", "web", "app.js"));
+    var moduleCatalog = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.Controller", "ModuleCatalog.cs"));
+    var hostSession = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.Controller", "HostSession.cs"));
+    var moduleSdk = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.Core", "ModuleSdkV1.cs"));
 
     Assert(mainForm.Contains("ModuleSdkV1.VirtualHostName(module.Id)", StringComparison.Ordinal) &&
-           mainForm.Contains("module.ModuleDirectory", StringComparison.Ordinal) &&
+           mainForm.Contains("ModuleCatalog.TryStagePackage", StringComparison.Ordinal) &&
+           mainForm.Contains("staged.Directory", StringComparison.Ordinal) &&
            !mainForm.Contains("ModuleAssetsHostName", StringComparison.Ordinal),
-        "accepted modules should receive separate per-package virtual hosts instead of one shared origin");
+        "accepted modules should receive separate virtual hosts mapped only to secured runtime snapshots");
     Assert(mainForm.Contains("AddWebResourceRequestedFilter", StringComparison.Ordinal) &&
            mainForm.Contains("CoreWebView2WebResourceRequestSourceKinds.All", StringComparison.Ordinal) &&
            mainForm.Contains("HandleWebResourceRequested", StringComparison.Ordinal) &&
@@ -1267,15 +1531,29 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
     Assert(mainForm.Contains("PermissionRequested", StringComparison.Ordinal) &&
            mainForm.Contains("CoreWebView2PermissionState.Deny", StringComparison.Ordinal),
         "embedded modules should not receive browser device or profile permissions");
-    Assert(mainForm.Contains("connect-src 'none'", StringComparison.Ordinal) &&
-           mainForm.Contains("worker-src 'none'", StringComparison.Ordinal) &&
-           mainForm.Contains("TryReadValidatedModuleEntry", StringComparison.Ordinal) &&
-           mainForm.Contains("CoreWebView2WebResourceContext.Document", StringComparison.Ordinal),
-        "module documents should receive a host-enforced CSP that also closes WebSocket and worker egress");
+    Assert(moduleCatalog.Contains("ModuleSdkV1.ContentSecurityPolicy(module.Permissions)", StringComparison.Ordinal) &&
+           moduleCatalog.Contains("ModuleDocumentSecurity.TryInjectContentSecurityPolicy", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceContext.XmlHttpRequest", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceContext.Websocket", StringComparison.Ordinal) &&
+           !mainForm.Contains("CoreWebView2WebResourceContext.Ping", StringComparison.Ordinal) &&
+           moduleSdk.Contains("worker-src 'none'", StringComparison.Ordinal) &&
+           !mainForm.Contains("TryReadValidatedModuleEntry", StringComparison.Ordinal),
+        "staged module documents should receive a permission-derived CSP while remote assets, workers, Beacon, and ping stay closed");
     Assert(mainForm.Contains("FrameNavigationStarting", StringComparison.Ordinal) &&
            mainForm.Contains("allowedModuleFrame", StringComparison.Ordinal) &&
+           mainForm.Contains("session.ModuleEntryUrl(module)", StringComparison.Ordinal) &&
            mainForm.Contains("args.Cancel = !allowedModuleFrame", StringComparison.Ordinal),
-        "child frames should be unable to embed the privileged main interface or external pages");
+        "child frames should be restricted to the validated entry on an accepted module origin");
+    Assert(!hostSession.Contains("?hostGeneration=", StringComparison.Ordinal) &&
+           hostSession.Contains("moduleCatalogGeneration = Guid.NewGuid()", StringComparison.Ordinal) &&
+           app.Contains("url.href", StringComparison.Ordinal),
+        "module reloads should rotate a path generation and recreate an unchanged descriptor iframe");
+    Assert(mainForm.Contains("moduleNetworkTransition = true", StringComparison.Ordinal) &&
+           mainForm.Contains("mecchaUnloadExternalModulesForReload", StringComparison.Ordinal) &&
+           mainForm.Contains("session.ApplyHostedModules", StringComparison.Ordinal) &&
+           app.Contains("window.mecchaUnloadExternalModulesForReload", StringComparison.Ordinal) &&
+           app.Contains("ExternalModuleHostPattern", StringComparison.Ordinal),
+        "module reload must unload old frames, fail the network gate closed, and publish only successfully staged unrelated hosts");
     Assert(mainForm.Contains("args.OriginalSourceFrameInfo", StringComparison.Ordinal) &&
            mainForm.Contains("args.IsUserInitiated", StringComparison.Ordinal),
         "external browser launches should require a user gesture from the privileged main interface");

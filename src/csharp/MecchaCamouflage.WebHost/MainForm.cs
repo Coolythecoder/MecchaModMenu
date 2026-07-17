@@ -14,18 +14,9 @@ public sealed class MainForm : Form
     private const string ManualWebView2RuntimeUrl = "https://developer.microsoft.com/microsoft-edge/webview2/";
     private const string WebUiHostName = "meccha.localhost";
     private const string WebUiStartUri = "https://meccha.localhost/index.html";
-    private const string ModuleDocumentHeaders =
-        "Content-Type: text/html; charset=utf-8\r\n" +
-        "Cache-Control: no-store\r\n" +
-        "X-Content-Type-Options: nosniff\r\n" +
-        "Referrer-Policy: no-referrer\r\n" +
-        "Permissions-Policy: camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=()\r\n" +
-        "Content-Security-Policy: default-src 'self'; base-uri 'none'; connect-src 'none'; object-src 'none'; " +
-        "form-action 'none'; frame-ancestors https://meccha.localhost; frame-src 'self'; worker-src 'none'; " +
-        "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-        "font-src 'self' data:; media-src 'self'";
     private static readonly TimeSpan UiReadyTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan CloseCleanupTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan StaleModuleHostAge = TimeSpan.FromDays(1);
     private const int HotkeyStart = 1;
     private const int HotkeyPreview = 2;
     private const int HotkeyUnPreview = 3;
@@ -44,6 +35,7 @@ public sealed class MainForm : Form
     private readonly HashSet<string> moduleVirtualHosts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ModuleDescriptor> moduleVirtualHostModules =
         new(StringComparer.OrdinalIgnoreCase);
+    private string? moduleHostStagingDirectory;
     private WebView2? webView;
     private readonly System.Windows.Forms.Timer statusTimer = new() { Interval = 2000 };
     private CancellationTokenSource? uiReadyTimeoutCancellation;
@@ -55,6 +47,8 @@ public sealed class MainForm : Form
     private string lastHotkeyRegistrationFailure = "";
     private bool webViewRetryUsed;
     private bool webViewRecoveryInProgress;
+    private bool moduleNetworkTransition;
+    private long moduleSnapshotEpoch;
     private bool closeCleanupStarted;
     private bool closeCleanupComplete;
 
@@ -91,6 +85,7 @@ public sealed class MainForm : Form
             }
         };
         FormClosing += HandleFormClosingAsync;
+        FormClosed += (_, _) => TryDeleteModuleHostStagingDirectory(moduleHostStagingDirectory);
         ResizeEnd += (_, _) => PersistWindowSnapshot();
         Move += (_, _) => PersistWindowSnapshot();
         statusTimer.Tick += async (_, _) =>
@@ -243,7 +238,9 @@ public sealed class MainForm : Form
         var allowedModuleFrame = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
             uri.IsDefaultPort &&
             string.IsNullOrEmpty(uri.UserInfo) &&
-            moduleVirtualHosts.Contains(uri.Host);
+            moduleVirtualHostModules.TryGetValue(uri.Host, out var module) &&
+            Uri.TryCreate(session.ModuleEntryUrl(module), UriKind.Absolute, out var expectedEntry) &&
+            string.Equals(uri.AbsolutePath, expectedEntry.AbsolutePath, StringComparison.Ordinal);
         var harmlessEmptyFrame = string.Equals(uri.Scheme, "about", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase);
         args.Cancel = !allowedModuleFrame && !harmlessEmptyFrame;
@@ -268,38 +265,58 @@ public sealed class MainForm : Form
         if (allowedHttpsOrigin && string.Equals(uri.Host, WebUiHostName, StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (allowedHttpsOrigin && moduleVirtualHostModules.TryGetValue(uri.Host, out var module))
-        {
-            if (args.ResourceContext != CoreWebView2WebResourceContext.Document)
-                return;
-
-            var expectedPath = "/" + module.Entry;
-            if (!string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal) ||
-                !TryReadValidatedModuleEntry(module, out var entryBytes))
-            {
-                BlockWebResource(core, args);
-                return;
-            }
-
-            args.Response = core.Environment.CreateWebResourceResponse(
-                new MemoryStream(entryBytes, writable: false),
-                200,
-                "OK",
-                ModuleDocumentHeaders);
+        if (allowedHttpsOrigin && moduleVirtualHostModules.ContainsKey(uri.Host))
             return;
-        }
 
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase))
+        if (IsExternalModuleNetworkRequestAllowed(uri, args.ResourceContext))
+            return;
+
+        if (!IsBlockedExternalScheme(uri.Scheme))
         {
             return;
         }
 
         BlockWebResource(core, args);
     }
+
+    private bool IsExternalModuleNetworkRequestAllowed(
+        Uri uri,
+        CoreWebView2WebResourceContext context)
+    {
+        if (moduleNetworkTransition)
+            return false;
+
+        var isHttp = string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
+        var isHttps = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        if (isHttp || isHttps)
+        {
+            var isConnectionApi = context is CoreWebView2WebResourceContext.XmlHttpRequest or
+                CoreWebView2WebResourceContext.Fetch or
+                CoreWebView2WebResourceContext.EventSource;
+            if (!isConnectionApi)
+                return false;
+            return moduleVirtualHostModules.Values.Any(module =>
+                module.Permissions.Contains(ModuleSdkV1.NetworkHttpPermission, StringComparer.Ordinal) ||
+                (isHttps && module.Permissions.Contains(
+                    ModuleSdkV1.NetworkHttpsPermission,
+                    StringComparer.Ordinal)));
+        }
+
+        var isWebSocket = string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase);
+        return isWebSocket &&
+            context == CoreWebView2WebResourceContext.Websocket &&
+            moduleVirtualHostModules.Values.Any(module => module.Permissions.Contains(
+                ModuleSdkV1.NetworkWebSocketPermission,
+                StringComparer.Ordinal));
+    }
+
+    private static bool IsBlockedExternalScheme(string scheme) =>
+        string.Equals(scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(scheme, "ws", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(scheme, "wss", StringComparison.OrdinalIgnoreCase);
 
     private static void BlockWebResource(
         CoreWebView2 core,
@@ -312,62 +329,45 @@ public sealed class MainForm : Form
             "Content-Type: text/plain\r\nCache-Control: no-store");
     }
 
-    private static bool TryReadValidatedModuleEntry(
-        ModuleDescriptor module,
-        out byte[] bytes)
-    {
-        bytes = [];
-        try
-        {
-            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(module.ModuleDirectory));
-            var entryPath = Path.GetFullPath(module.EntryPath);
-            var comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-            if (!entryPath.StartsWith(root + Path.DirectorySeparatorChar, comparison))
-                return false;
-
-            FileSystemInfo current = new DirectoryInfo(root);
-            current.Refresh();
-            if (!current.Exists || IsLinkedFileSystemEntry(current))
-                return false;
-
-            var segments = module.Entry.Split('/');
-            var currentPath = root;
-            for (var index = 0; index < segments.Length; ++index)
-            {
-                currentPath = Path.Combine(currentPath, segments[index]);
-                current = index == segments.Length - 1
-                    ? new FileInfo(currentPath)
-                    : new DirectoryInfo(currentPath);
-                current.Refresh();
-                if (!current.Exists || IsLinkedFileSystemEntry(current))
-                    return false;
-            }
-
-            var info = (FileInfo)current;
-            if (info.Length > ModuleSdkV1.MaxEntryBytes)
-                return false;
-            bytes = File.ReadAllBytes(entryPath);
-            if (bytes.LongLength > ModuleSdkV1.MaxEntryBytes)
-            {
-                bytes = [];
-                return false;
-            }
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-                                   System.Security.SecurityException or NotSupportedException)
-        {
-            return false;
-        }
-    }
-
-    private static bool IsLinkedFileSystemEntry(FileSystemInfo info) =>
-        info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0;
-
     private void RefreshModuleVirtualHostMappings(CoreWebView2 core)
     {
+        var stagingParent = session.Paths.ModuleHostDirectory;
+        Directory.CreateDirectory(stagingParent);
+        CleanupStaleModuleHostDirectories();
+        ++moduleSnapshotEpoch;
+        var generation = session.BeginModuleHostGeneration();
+        var nextStagingDirectory = Path.Combine(
+            stagingParent,
+            $"{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(nextStagingDirectory);
+        var stagedModules = new List<(string HostName, string Directory, ModuleDescriptor Module)>();
+        var stagingDiagnostics = new List<ModuleCatalogDiagnostic>();
+        foreach (var module in session.ModuleSourceCatalog.Modules)
+        {
+            var hostName = ModuleSdkV1.VirtualHostName(module.Id);
+            var hostDirectory = Path.Combine(nextStagingDirectory, hostName);
+            var stagedDirectory = Path.Combine(hostDirectory, generation);
+            if (!ModuleCatalog.TryStagePackage(
+                    module,
+                    stagedDirectory,
+                    out var stagedModule,
+                    out var diagnostic))
+            {
+                session.Log.Warn($"Module {module.Id}: {diagnostic?.Message ?? "runtime staging failed"}");
+                DiagnosticsState.WriteLine(
+                    "module",
+                    $"stage_failed id={module.Id} code={diagnostic?.Code ?? "unknown"}");
+                stagingDiagnostics.Add(diagnostic ?? new ModuleCatalogDiagnostic(
+                    "module_stage_failed",
+                    "The module package could not be prepared for runtime hosting.",
+                    module.ModuleDirectory,
+                    module.Id));
+                continue;
+            }
+            stagedModules.Add((hostName, hostDirectory, stagedModule!));
+        }
+
+        var previousStagingDirectory = moduleHostStagingDirectory;
         foreach (var hostName in moduleVirtualHosts)
         {
             try
@@ -382,15 +382,105 @@ public sealed class MainForm : Form
         moduleVirtualHosts.Clear();
         moduleVirtualHostModules.Clear();
 
-        foreach (var module in session.Modules.Modules)
+        foreach (var staged in stagedModules)
         {
-            var hostName = ModuleSdkV1.VirtualHostName(module.Id);
             core.SetVirtualHostNameToFolderMapping(
-                hostName,
-                module.ModuleDirectory,
+                staged.HostName,
+                staged.Directory,
                 CoreWebView2HostResourceAccessKind.DenyCors);
-            moduleVirtualHosts.Add(hostName);
-            moduleVirtualHostModules[hostName] = module;
+            moduleVirtualHosts.Add(staged.HostName);
+            moduleVirtualHostModules[staged.HostName] = staged.Module;
+        }
+        moduleHostStagingDirectory = nextStagingDirectory;
+        session.ApplyHostedModules(
+            stagedModules.Select(staged => staged.Module),
+            stagingDiagnostics);
+        TryDeleteModuleHostStagingDirectory(previousStagingDirectory);
+    }
+
+    private void CleanupStaleModuleHostDirectories()
+    {
+        var parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(
+            session.Paths.ModuleHostDirectory));
+        var cutoff = DateTime.UtcNow - StaleModuleHostAge;
+        try
+        {
+            foreach (var path in Directory.EnumerateDirectories(parent))
+            {
+                var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+                if (!IsDirectChildPath(parent, candidate) ||
+                    string.Equals(candidate, moduleHostStagingDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var info = new DirectoryInfo(candidate);
+                if (info.LastWriteTimeUtc >= cutoff || IsOwnedByRunningProcess(info.Name))
+                    continue;
+                TryDeleteModuleHostStagingDirectory(candidate);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   System.Security.SecurityException or NotSupportedException)
+        {
+            session.Log.Warn("Module runtime stale staging cleanup failed: " + ex.Message);
+        }
+    }
+
+    private static bool IsOwnedByRunningProcess(string directoryName)
+    {
+        var separator = directoryName.IndexOf('-');
+        if (separator <= 0 || !int.TryParse(directoryName.AsSpan(0, separator), out var processId))
+            return false;
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsDirectChildPath(string parent, string candidate)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return candidate.StartsWith(parent + Path.DirectorySeparatorChar, comparison) &&
+            string.Equals(Path.GetDirectoryName(candidate), parent, comparison);
+    }
+
+    private void TryDeleteModuleHostStagingDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        try
+        {
+            var parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(
+                session.Paths.ModuleHostDirectory));
+            var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            if (!IsDirectChildPath(parent, candidate))
+            {
+                session.Log.Warn("Module runtime staging cleanup refused an unexpected path.");
+                return;
+            }
+            if (Directory.Exists(candidate))
+                Directory.Delete(candidate, recursive: true);
+            if (string.Equals(moduleHostStagingDirectory, candidate, comparison))
+                moduleHostStagingDirectory = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   System.Security.SecurityException or NotSupportedException)
+        {
+            session.Log.Warn("Module runtime staging cleanup failed: " + ex.Message);
         }
     }
 
@@ -964,7 +1054,7 @@ public sealed class MainForm : Form
         switch (command.Command)
         {
             case "getSnapshot":
-                return await session.GetSnapshotAsync();
+                return await GetStableSnapshotAsync();
             case "updateSetting":
                 return HandleUpdateSetting(command.Payload);
             case "updateSettings":
@@ -985,10 +1075,43 @@ public sealed class MainForm : Form
                 session.OpenModulesDirectory();
                 return new { success = true };
             case "reloadModules":
-                var reloadResult = session.ReloadModules();
-                if (webView?.CoreWebView2 is { } core)
+            {
+                HostCommandResult reloadResult;
+                ++moduleSnapshotEpoch;
+                moduleNetworkTransition = true;
+                try
+                {
+                    var core = webView?.CoreWebView2 ??
+                        throw new InvalidOperationException("The module host is not available for a safe reload.");
+                    var unloadAcknowledgement = await core.ExecuteScriptAsync(
+                        "typeof window.mecchaUnloadExternalModulesForReload === 'function' && " +
+                        "window.mecchaUnloadExternalModulesForReload() === true");
+                    if (!string.Equals(unloadAcknowledgement, "true", StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "The module host did not acknowledge frame unloading; no modules were reloaded.");
+                    }
+                    session.ReloadModules();
                     RefreshModuleVirtualHostMappings(core);
+                    var generationJson = JsonSerializer.Serialize(session.ModuleHostGeneration);
+                    var finishAcknowledgement = await core.ExecuteScriptAsync(
+                        "typeof window.mecchaFinishExternalModulesReload === 'function' && " +
+                        $"window.mecchaFinishExternalModulesReload({generationJson}) === true");
+                    if (!string.Equals(finishAcknowledgement, "true", StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "The module host did not acknowledge the new generation; module frames remain disabled.");
+                    }
+                    reloadResult = new HostCommandResult(
+                        true,
+                        $"Modules: loaded {session.Modules.Modules.Count}; rejected {session.Modules.Diagnostics.Count}.");
+                }
+                finally
+                {
+                    moduleNetworkTransition = false;
+                }
                 return ApplyResult(reloadResult);
+            }
             case "setEditing":
                 settingsEditing = command.Payload.GetProperty("editing").GetBoolean();
                 if (!settingsEditing)
@@ -1304,12 +1427,32 @@ public sealed class MainForm : Form
         return Icon.ExtractAssociatedIcon(Application.ExecutablePath);
     }
 
+    private async Task<UiSnapshot> GetStableSnapshotAsync()
+    {
+        while (!IsDisposed && !Disposing)
+        {
+            var epoch = moduleSnapshotEpoch;
+            if (moduleNetworkTransition)
+            {
+                await Task.Delay(10);
+                continue;
+            }
+            var snapshot = await session.GetSnapshotAsync();
+            if (!moduleNetworkTransition && epoch == moduleSnapshotEpoch)
+                return snapshot;
+        }
+        throw new ObjectDisposedException(nameof(MainForm));
+    }
+
     private async Task PushSnapshotAsync()
     {
         var core = webView?.CoreWebView2;
-        if (!webReady || core is null)
+        if (!webReady || core is null || moduleNetworkTransition)
             return;
+        var epoch = moduleSnapshotEpoch;
         var snapshot = await session.GetSnapshotAsync();
+        if (moduleNetworkTransition || epoch != moduleSnapshotEpoch)
+            return;
         PostEvent("snapshotChanged", snapshot);
     }
 

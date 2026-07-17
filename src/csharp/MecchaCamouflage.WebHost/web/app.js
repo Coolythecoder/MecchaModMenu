@@ -43,11 +43,13 @@ let paintPresetSignature = "";
 let externalModuleInvalidCount = 0;
 let externalModuleCatalogDiagnostics = [];
 let lastExternalSnapshotSignature = "";
+let externalModulesSuspended = false;
+let externalModuleGeneration = "";
 const externalModules = new Map();
 const externalModuleActions = new Map();
 const externalModuleStops = new Map();
 const ExternalModuleApiVersion = 1;
-const ExternalModuleHost = "meccha-modules.localhost";
+const ExternalModuleHostPattern = /^m-[0-9a-f]{32}\.localhost$/;
 const ExternalModuleCommands = new Map([
   ["paint.start", "paint"],
   ["paint.preview", "preview"],
@@ -393,6 +395,9 @@ function selectModule(module) {
 }
 
 function reconcileExternalModules(value) {
+  if (externalModulesSuspended) {
+    return;
+  }
   const normalized = normalizeExternalModuleDescriptors(value);
   externalModuleInvalidCount = normalized.invalidCount;
   const desired = new Map(normalized.descriptors.map(descriptor => [descriptor.id, descriptor]));
@@ -434,6 +439,32 @@ function reconcileExternalModules(value) {
   }
 }
 
+window.mecchaUnloadExternalModulesForReload = () => {
+  externalModulesSuspended = true;
+  externalModuleGeneration = "";
+  for (const module of externalModules.values()) {
+    module.tab.remove();
+    module.panel.remove();
+  }
+  externalModules.clear();
+  lastExternalSnapshotSignature = "";
+  if (activeModule.startsWith("external:")) {
+    activeModule = "auto-paint";
+  }
+  renderModuleNavigation();
+  return true;
+};
+
+window.mecchaFinishExternalModulesReload = generation => {
+  if (typeof generation !== "string" || !/^[0-9a-f]{32}$/.test(generation)) {
+    return false;
+  }
+  externalModuleGeneration = generation;
+  externalModulesSuspended = false;
+  render();
+  return true;
+};
+
 function normalizeExternalModuleDescriptors(value) {
   if (value === undefined || value === null) {
     return { descriptors: [], invalidCount: 0 };
@@ -447,7 +478,10 @@ function normalizeExternalModuleDescriptors(value) {
   let invalidCount = 0;
   for (const item of value) {
     const descriptor = normalizeExternalModuleDescriptor(item);
-    if (!descriptor || ids.has(descriptor.id) || origins.has(descriptor.origin)) {
+    if (!descriptor ||
+        (externalModuleGeneration && descriptor.generation !== externalModuleGeneration) ||
+        ids.has(descriptor.id) ||
+        origins.has(descriptor.origin)) {
       invalidCount += 1;
       continue;
     }
@@ -476,10 +510,14 @@ function normalizeExternalModuleDescriptor(value) {
     return null;
   }
   if (url.protocol !== "https:" ||
-      !url.hostname.endsWith(`.${ExternalModuleHost}`) ||
+      !ExternalModuleHostPattern.test(url.hostname) ||
       url.port !== "" ||
       url.username ||
       url.password) {
+    return null;
+  }
+  const pathSegments = url.pathname.split("/").filter(Boolean);
+  if (pathSegments.length < 2 || !/^[0-9a-f]{32}$/.test(pathSegments[0])) {
     return null;
   }
   const permissions = [...new Set(value.permissions
@@ -495,6 +533,7 @@ function normalizeExternalModuleDescriptor(value) {
     entryUrl: url.href,
     origin: url.origin,
     permissions: new Set(permissions),
+    generation: pathSegments[0],
     signature
   };
 }
@@ -536,6 +575,7 @@ function createExternalModule(descriptor) {
 
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+  iframe.setAttribute("allow", "document-domain 'none'");
   iframe.title = descriptor.name;
   iframe.loading = "lazy";
   iframe.referrerPolicy = "no-referrer";

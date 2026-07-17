@@ -22,7 +22,7 @@
 - **Paint Studio** — saves presets, previews and restores paint, undoes the last
   settings change, and shows planned coverage.
 - **Module SDK v1** — loads trusted local Web modules through validated
-  manifests, isolated origins, and explicit paint permissions.
+  manifests, isolated origins, and explicit paint and network permissions.
 - **MECCHA CHAMELEON update2.8.0 support** — the current native runtime target.
 
 ## Build and run
@@ -78,6 +78,17 @@ Create this directory structure:
 ```
 
 The folder name must match the manifest `id`.
+
+The HTML entry must be UTF-8 and contain an explicit `<head>` before any
+executable markup. The host serves an isolated runtime snapshot and injects
+UTF-8, no-referrer, and permission-derived security metadata at the start of
+that head before the document runs.
+
+Reference packaged scripts, styles, images, and other assets with relative URLs
+such as `./module.js` or `assets/icon.png`. Do not use root-relative `/...`
+URLs. Each reload generation has its own entry-path prefix, and relative URLs
+retain that prefix so the fresh validated snapshot is not shadowed by cached
+assets from an earlier generation.
 
 ### 2. Add `module.json`
 
@@ -164,9 +175,43 @@ Only declare permissions your module uses:
 | `paint.preview` | `paint.preview` |
 | `paint.restore` | `paint.restore` |
 | `paint.stop` | `paint.stop` |
+| `network.https` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTPS only |
+| `network.http` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTP or HTTPS |
+| `network.websocket` | `WebSocket` connections over `ws:` or `wss:` |
 
-There is no generic native-command, filesystem, process, or network permission.
-Paint actions use the current settings configured in Meccha Mod Menu.
+There is no generic native-command, filesystem, or process permission. Paint
+actions use the current settings configured in Meccha Mod Menu. Network access
+is denied unless the matching permission is declared. For example:
+
+```json
+"permissions": ["snapshot.read", "network.https", "network.websocket"]
+```
+
+With those permissions, module JavaScript can use the listed browser APIs:
+
+```js
+const response = await fetch("https://api.example.com/paint");
+const data = await response.json();
+
+const socket = new WebSocket("wss://api.example.com/live");
+socket.addEventListener("message", event => console.log(event.data));
+```
+
+The permissions do not expose `navigator.sendBeacon()` or hyperlink ping
+requests.
+
+The remote server must allow the module's origin for CORS and WebSocket Origin
+checks. Use `location.origin` to see the module's isolated origin; do not assume
+it is `https://meccha.localhost`. Modules run from an HTTPS origin, so browser
+mixed-content rules may still block plaintext `http:` and `ws:` endpoints even
+when `network.http` or `network.websocket` is declared. Prefer HTTPS and WSS.
+
+All modules share the app's WebView profile. Their unrelated `*.localhost`
+origins remain separate, but a credentialed request can use cookie or
+authentication state held for the remote target domain, including state used by
+another module. CORS controls whether JavaScript may read a cross-origin
+response; it is not a guarantee that the request was never sent. Remote servers
+must enforce authorization and CSRF protections independently.
 
 ### 5. Load and test it
 
@@ -190,8 +235,11 @@ snapshot shape, validation rules, and trust model.
 - `module.json` is limited to 64 KiB. A package may contain up to 256 files and
   128 subdirectories, with a total size up to 32 MiB. Individual assets are
   limited to 8 MiB and the HTML entry to 4 MiB.
-- Use packaged local assets. External HTTP, HTTPS, file, and WebSocket access is
-  blocked, as are workers, forms, and plug-ins.
+- Network permissions enable connection APIs only. Remote scripts and images,
+  file access, form submissions, workers, and plug-ins remain blocked; keep
+  those resources inside the validated module package.
+- Package asset references must be relative rather than root-relative so they
+  stay under the current reload generation's cache-busting path.
 - Install only modules you trust. Permission checks and browser isolation reduce
   accidental access but do not make untrusted local code safe.
 

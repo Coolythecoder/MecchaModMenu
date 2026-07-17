@@ -17,6 +17,7 @@ public sealed class AppPaths
         ConfigPath = Path.Combine(ConfigDirectory, "config.json");
         LogDirectory = Path.Combine(VersionRoot, "logs");
         RuntimeDirectory = Path.Combine(VersionRoot, "runtime");
+        ModuleHostDirectory = Path.Combine(RuntimeDirectory, "module-hosts");
         ModulesDirectory = Path.Combine(RootDirectory, "modules");
         BridgeInstancesDirectory = Path.Combine(RootDirectory, "bridge-instances");
         BridgeStateDirectory = Path.Combine(RootDirectory, "bridge-state");
@@ -33,6 +34,7 @@ public sealed class AppPaths
     public string ConfigPath { get; }
     public string LogDirectory { get; }
     public string RuntimeDirectory { get; }
+    public string ModuleHostDirectory { get; }
     public string ModulesDirectory { get; }
     public string BridgeInstancesDirectory { get; }
     public string BridgeStateDirectory { get; }
@@ -44,6 +46,7 @@ public sealed class AppPaths
     {
         Directory.CreateDirectory(ConfigDirectory);
         Directory.CreateDirectory(LogDirectory);
+        Directory.CreateDirectory(ModuleHostDirectory);
         Directory.CreateDirectory(ModulesDirectory);
         Directory.CreateDirectory(BridgeInstancesDirectory);
         Directory.CreateDirectory(BridgeProgressDirectory);

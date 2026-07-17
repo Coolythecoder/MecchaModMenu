@@ -126,6 +126,403 @@ public static class ModuleCatalog
         return new ModuleCatalogResult(modules.AsReadOnly(), diagnostics.AsReadOnly());
     }
 
+    /// <summary>
+    /// Copies one accepted package into an isolated runtime directory and replaces its entry
+    /// with a host-secured document. Virtual hosts must map to this snapshot, never directly
+    /// to the user-editable package directory.
+    /// </summary>
+    public static bool TryStagePackage(
+        ModuleDescriptor module,
+        string destinationDirectory,
+        out ModuleDescriptor? stagedModule,
+        out ModuleCatalogDiagnostic? diagnostic)
+    {
+        ArgumentNullException.ThrowIfNull(module);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+        stagedModule = null;
+        diagnostic = null;
+        var sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(module.ModuleDirectory));
+        var destinationRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destinationDirectory));
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        try
+        {
+            if (!Directory.Exists(sourceRoot) || IsLink(new DirectoryInfo(sourceRoot)) ||
+                string.Equals(sourceRoot, destinationRoot, comparison) ||
+                IsStrictChild(sourceRoot, destinationRoot) ||
+                IsStrictChild(destinationRoot, sourceRoot))
+            {
+                diagnostic = new ModuleCatalogDiagnostic(
+                    "module_stage_path",
+                    "The module package could not be isolated in the runtime staging directory.",
+                    sourceRoot,
+                    module.Id);
+                return false;
+            }
+            if (Directory.Exists(destinationRoot) || File.Exists(destinationRoot))
+            {
+                diagnostic = new ModuleCatalogDiagnostic(
+                    "module_stage_exists",
+                    "The runtime staging destination already exists.",
+                    destinationRoot,
+                    module.Id);
+                return false;
+            }
+            if (!TryValidatePackage(sourceRoot, out var code, out var message, out var problemPath))
+            {
+                diagnostic = new ModuleCatalogDiagnostic(code, message, problemPath, module.Id);
+                return false;
+            }
+            if (!TryValidateEntryPath(sourceRoot, module.Entry, out code, out message))
+            {
+                diagnostic = new ModuleCatalogDiagnostic(code, message, module.EntryPath, module.Id);
+                return false;
+            }
+
+            Directory.CreateDirectory(destinationRoot);
+            if (!TryCopyPackageSnapshot(
+                    sourceRoot,
+                    destinationRoot,
+                    out code,
+                    out message,
+                    out problemPath))
+            {
+                TryDeleteDirectory(destinationRoot);
+                diagnostic = new ModuleCatalogDiagnostic(code, message, problemPath, module.Id);
+                return false;
+            }
+
+            if (!TryReadStagedModule(
+                    destinationRoot,
+                    out var snapshotModule,
+                    out code,
+                    out message,
+                    out problemPath))
+            {
+                TryDeleteDirectory(destinationRoot);
+                diagnostic = new ModuleCatalogDiagnostic(code, message, problemPath, module.Id);
+                return false;
+            }
+            if (!ManifestMatches(module, snapshotModule))
+            {
+                TryDeleteDirectory(destinationRoot);
+                diagnostic = new ModuleCatalogDiagnostic(
+                    "module_stage_manifest_changed",
+                    "module.json changed after catalog validation; reload modules before running it.",
+                    Path.Combine(sourceRoot, "module.json"),
+                    module.Id);
+                return false;
+            }
+            if (!TrySecureStagedEntry(snapshotModule, out code, out message, out problemPath))
+            {
+                TryDeleteDirectory(destinationRoot);
+                diagnostic = new ModuleCatalogDiagnostic(code, message, problemPath, module.Id);
+                return false;
+            }
+            stagedModule = snapshotModule;
+            return true;
+        }
+        catch (Exception ex) when (IsFileSystemException(ex))
+        {
+            TryDeleteDirectory(destinationRoot);
+            diagnostic = new ModuleCatalogDiagnostic(
+                "module_stage_io",
+                "The module package could not be copied into its isolated runtime directory: " + ex.Message,
+                sourceRoot,
+                module.Id);
+            return false;
+        }
+    }
+
+    private static bool TryCopyPackageSnapshot(
+        string sourceRoot,
+        string destinationRoot,
+        out string code,
+        out string message,
+        out string problemPath)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var pending = new Stack<string>();
+        pending.Push(sourceRoot);
+        var directoryCount = 0;
+        var fileCount = 0;
+        long totalBytes = 0;
+
+        while (pending.Count > 0)
+        {
+            var sourceDirectory = pending.Pop();
+            var relativeDirectory = Path.GetRelativePath(sourceRoot, sourceDirectory);
+            var destinationDirectory = relativeDirectory == "."
+                ? destinationRoot
+                : Path.GetFullPath(Path.Combine(destinationRoot, relativeDirectory));
+            if (!string.Equals(destinationDirectory, destinationRoot, comparison) &&
+                !IsStrictChild(destinationRoot, destinationDirectory))
+            {
+                code = "module_stage_escape";
+                message = "A module directory escaped its runtime staging directory.";
+                problemPath = sourceDirectory;
+                return false;
+            }
+            Directory.CreateDirectory(destinationDirectory);
+
+            foreach (var sourceChildDirectory in Directory.EnumerateDirectories(sourceDirectory))
+            {
+                var fullPath = Path.GetFullPath(sourceChildDirectory);
+                if (!IsStrictChild(sourceRoot, fullPath) || IsLink(new DirectoryInfo(fullPath)))
+                {
+                    code = "package_link";
+                    message = "Module packages must not contain linked or escaping directories.";
+                    problemPath = fullPath;
+                    return false;
+                }
+                ++directoryCount;
+                if (directoryCount > ModuleSdkV1.MaxPackageDirectories)
+                {
+                    code = "package_directory_limit";
+                    message = $"A module package may contain at most {ModuleSdkV1.MaxPackageDirectories} directories.";
+                    problemPath = sourceRoot;
+                    return false;
+                }
+                pending.Push(fullPath);
+            }
+
+            foreach (var sourceFile in Directory.EnumerateFiles(sourceDirectory))
+            {
+                var fullPath = Path.GetFullPath(sourceFile);
+                var sourceInfo = new FileInfo(fullPath);
+                if (!IsStrictChild(sourceRoot, fullPath) || IsLink(sourceInfo))
+                {
+                    code = "package_link";
+                    message = "Module packages must not contain linked or escaping files.";
+                    problemPath = fullPath;
+                    return false;
+                }
+                ++fileCount;
+                if (fileCount > ModuleSdkV1.MaxPackageFiles)
+                {
+                    code = "package_file_limit";
+                    message = $"A module package may contain at most {ModuleSdkV1.MaxPackageFiles} files.";
+                    problemPath = sourceRoot;
+                    return false;
+                }
+                sourceInfo.Refresh();
+                if (sourceInfo.Length > ModuleSdkV1.MaxAssetBytes)
+                {
+                    code = "package_asset_too_large";
+                    message = $"A module asset exceeds the {ModuleSdkV1.MaxAssetBytes}-byte limit.";
+                    problemPath = fullPath;
+                    return false;
+                }
+                if (sourceInfo.Length > ModuleSdkV1.MaxPackageBytes - totalBytes)
+                {
+                    code = "package_too_large";
+                    message = $"A module package exceeds the {ModuleSdkV1.MaxPackageBytes}-byte limit.";
+                    problemPath = sourceRoot;
+                    return false;
+                }
+
+                var relativeFile = Path.GetRelativePath(sourceRoot, fullPath);
+                var destinationFile = Path.GetFullPath(Path.Combine(destinationRoot, relativeFile));
+                if (!IsStrictChild(destinationRoot, destinationFile))
+                {
+                    code = "module_stage_escape";
+                    message = "A module file escaped its runtime staging directory.";
+                    problemPath = fullPath;
+                    return false;
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationFile)!);
+                if (!TryCopyBoundedFile(
+                        fullPath,
+                        destinationFile,
+                        ModuleSdkV1.MaxPackageBytes - totalBytes,
+                        out var copiedBytes,
+                        out code,
+                        out message))
+                {
+                    problemPath = fullPath;
+                    return false;
+                }
+                totalBytes += copiedBytes;
+            }
+        }
+
+        code = "";
+        message = "";
+        problemPath = "";
+        return true;
+    }
+
+    private static bool TryCopyBoundedFile(
+        string sourcePath,
+        string destinationPath,
+        long remainingPackageBytes,
+        out long copiedBytes,
+        out string code,
+        out string message)
+    {
+        copiedBytes = 0;
+        code = "";
+        message = "";
+        using var source = new FileStream(
+            sourcePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.SequentialScan);
+        using var destination = new FileStream(
+            destinationPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024,
+            FileOptions.SequentialScan);
+        var buffer = new byte[64 * 1024];
+        while (true)
+        {
+            var read = source.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+                return true;
+            if (copiedBytes > ModuleSdkV1.MaxAssetBytes - read)
+            {
+                code = "package_asset_too_large";
+                message = $"A module asset exceeds the {ModuleSdkV1.MaxAssetBytes}-byte limit.";
+                return false;
+            }
+            if (copiedBytes > remainingPackageBytes - read)
+            {
+                code = "package_too_large";
+                message = $"A module package exceeds the {ModuleSdkV1.MaxPackageBytes}-byte limit.";
+                return false;
+            }
+            destination.Write(buffer, 0, read);
+            copiedBytes += read;
+        }
+    }
+
+    private static bool TryReadStagedModule(
+        string moduleDirectory,
+        out ModuleDescriptor module,
+        out string code,
+        out string message,
+        out string problemPath)
+    {
+        module = new ModuleDescriptor(0, 0, "", "", "", "", "", "", "", []);
+        if (!TryValidatePackage(moduleDirectory, out code, out message, out problemPath))
+            return false;
+
+        var manifestPath = Path.Combine(moduleDirectory, "module.json");
+        if (!File.Exists(manifestPath) || IsLink(new FileInfo(manifestPath)))
+        {
+            code = "manifest_missing";
+            message = "The staged module package has no regular module.json.";
+            problemPath = manifestPath;
+            return false;
+        }
+        if (!TryReadBounded(manifestPath, ModuleSdkV1.MaxManifestBytes, out var manifestBytes) ||
+            !TryParseManifest(manifestBytes, out var manifest, out code, out message))
+        {
+            if (string.IsNullOrEmpty(code))
+            {
+                code = "manifest_too_large";
+                message = $"module.json exceeds the {ModuleSdkV1.MaxManifestBytes}-byte limit.";
+            }
+            problemPath = manifestPath;
+            return false;
+        }
+
+        var entryPath = Path.GetFullPath(Path.Combine(
+            moduleDirectory,
+            manifest.Entry.Replace('/', Path.DirectorySeparatorChar)));
+        if (!IsStrictChild(moduleDirectory, entryPath) ||
+            !TryValidateEntryPath(moduleDirectory, manifest.Entry, out code, out message))
+        {
+            if (string.IsNullOrEmpty(code))
+            {
+                code = "entry_escape";
+                message = "The module entry must stay inside its staged package directory.";
+            }
+            problemPath = entryPath;
+            return false;
+        }
+        if (new FileInfo(entryPath).Length > ModuleSdkV1.MaxEntryBytes)
+        {
+            code = "entry_too_large";
+            message = $"The module entry exceeds the {ModuleSdkV1.MaxEntryBytes}-byte limit.";
+            problemPath = entryPath;
+            return false;
+        }
+
+        module = new ModuleDescriptor(
+            ModuleSdkV1.SchemaVersion,
+            ModuleSdkV1.ApiVersion,
+            manifest.Id,
+            manifest.Name,
+            manifest.Version,
+            manifest.Description,
+            Path.GetFullPath(moduleDirectory),
+            manifest.Entry,
+            entryPath,
+            Array.AsReadOnly(manifest.Permissions));
+        code = "";
+        message = "";
+        problemPath = "";
+        return true;
+    }
+
+    private static bool ManifestMatches(ModuleDescriptor expected, ModuleDescriptor actual) =>
+        expected.SchemaVersion == actual.SchemaVersion &&
+        expected.ApiVersion == actual.ApiVersion &&
+        string.Equals(expected.Id, actual.Id, StringComparison.Ordinal) &&
+        string.Equals(expected.Name, actual.Name, StringComparison.Ordinal) &&
+        string.Equals(expected.Version, actual.Version, StringComparison.Ordinal) &&
+        string.Equals(expected.Description, actual.Description, StringComparison.Ordinal) &&
+        string.Equals(expected.Entry, actual.Entry, StringComparison.Ordinal) &&
+        expected.Permissions.SequenceEqual(actual.Permissions, StringComparer.Ordinal);
+
+    private static bool TrySecureStagedEntry(
+        ModuleDescriptor module,
+        out string code,
+        out string message,
+        out string problemPath)
+    {
+        problemPath = module.EntryPath;
+        if (!TryReadBounded(
+                module.EntryPath,
+                checked((int)ModuleSdkV1.MaxEntryBytes),
+                out var entryBytes) ||
+            !ModuleDocumentSecurity.TryInjectContentSecurityPolicy(
+                entryBytes,
+                ModuleSdkV1.ContentSecurityPolicy(module.Permissions),
+                out var securedEntryBytes))
+        {
+            code = "entry_security_policy";
+            message = "The module entry must be valid UTF-8 with an explicit head before executable markup.";
+            return false;
+        }
+        File.WriteAllBytes(module.EntryPath, securedEntryBytes);
+        code = "";
+        message = "";
+        problemPath = "";
+        return true;
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (IsFileSystemException(ex))
+        {
+        }
+    }
+
     private static void TryAddModule(
         string modulesRoot,
         string moduleDirectory,
