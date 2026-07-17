@@ -825,6 +825,9 @@ namespace
                         {
                             break;
                         }
+                        // Preserve the bridge's historical basis exactly. It is
+                        // intentionally not the standard 64-bit FNV offset basis,
+                        // and every recorded build identity uses this variant.
                         std::uint64_t hash = 1469598103934665603ULL;
                         for (std::uint64_t offset = 0; offset < length; ++offset)
                         {
@@ -7005,6 +7008,24 @@ namespace
         return front;
     }
 
+    auto mesh_first_contract_region(MeshFirstRegion region) -> runtime_contract::ReplayRegion
+    {
+        if (region == MeshFirstRegion::Back)
+            return runtime_contract::ReplayRegion::Back;
+        if (region == MeshFirstRegion::Side)
+            return runtime_contract::ReplayRegion::Side;
+        return runtime_contract::ReplayRegion::Front;
+    }
+
+    auto mesh_first_contract_region_mode(MeshFirstRegionMode mode) -> runtime_contract::ReplayRegionMode
+    {
+        if (mode == MeshFirstRegionMode::Fill)
+            return runtime_contract::ReplayRegionMode::Fill;
+        if (mode == MeshFirstRegionMode::Skip)
+            return runtime_contract::ReplayRegionMode::Skip;
+        return runtime_contract::ReplayRegionMode::Paint;
+    }
+
     auto mesh_first_axis_component(const sdk::FVector& value, char axis) -> double
     {
         if (axis == 'y' || axis == 'Y')
@@ -7071,7 +7092,9 @@ namespace
         double source_distance_uv{0.0};
         double source_distance_component{0.0};
         bool source_candidate{false};
+        bool source_direct_assignment{false};
         bool unsafe{false};
+        bool detail_refinement{false};
     };
 
     struct MeshFirstRuntimeTriangle
@@ -7142,9 +7165,10 @@ namespace
         const std::vector<MeshFirstRuntimeTriangle>& triangles) -> MeshFirstPackedRadiusCalibration
     {
         MeshFirstPackedRadiusCalibration out{};
-        // Exact Shipping build: USkeletalMeshComponent inherited
-        // FBoxSphereBounds3d::SphereRadius is a double at +0x138.  Native
-        // preflight RVA 0x50F6110 reads and doubles this same field.
+        // Supported Shipping builds: USkeletalMeshComponent inherited
+        // FBoxSphereBounds3d::SphereRadius is a double at +0x138.  The native
+        // preflight reads and doubles this same field (update2.8.0 RVA
+        // 0x50F5F20; prior supported Steam build RVA 0x50F6110).
         constexpr std::uintptr_t MeshBoundsSphereRadiusOffset = 0x138;
         if (!live_uobject(mesh) ||
             !safe_copy(&out.mesh_sphere_radius,
@@ -7297,6 +7321,16 @@ namespace
         double source_distance_avg_component{0.0};
         double source_distance_p95_component{0.0};
         double source_distance_max_component{0.0};
+        int detail_geometry_candidates{0};
+        int detail_safe_candidates{0};
+        int detail_eligible_candidates{0};
+        int detail_selected_samples{0};
+        int detail_unsafe_candidates{0};
+        int detail_parent_deduplicated{0};
+        int detail_cell_deduplicated{0};
+        int detail_budget{0};
+        bool detail_geometry_overflow{false};
+        bool detail_budget_limited{false};
     };
 
     auto mesh_first_sample_region_count(MeshFirstPlanStats& stats, MeshFirstRegion region) -> int&
@@ -8215,9 +8249,80 @@ namespace
         return true;
     }
 
+    auto mesh_first_sample_capture_color(const std::vector<Color>& pixels,
+                                         int width,
+                                         int height,
+                                         double x,
+                                         double y,
+                                         bool flip_x,
+                                         bool flip_y,
+                                         Color& color) -> bool
+    {
+        const auto expected_pixels = static_cast<std::size_t>(std::max(0, width)) *
+                                     static_cast<std::size_t>(std::max(0, height));
+        runtime_contract::BilinearPixelSample sample{};
+        if (pixels.size() < expected_pixels ||
+            !runtime_contract::resolve_bilinear_pixel_sample(
+                x,
+                y,
+                width,
+                height,
+                flip_x,
+                flip_y,
+                sample))
+        {
+            return false;
+        }
+
+        const auto& top_left = pixels[static_cast<std::size_t>(sample.y.lower) *
+                                          static_cast<std::size_t>(width) +
+                                      static_cast<std::size_t>(sample.x.lower)];
+        const auto& top_right = pixels[static_cast<std::size_t>(sample.y.lower) *
+                                           static_cast<std::size_t>(width) +
+                                       static_cast<std::size_t>(sample.x.upper)];
+        const auto& bottom_left = pixels[static_cast<std::size_t>(sample.y.upper) *
+                                             static_cast<std::size_t>(width) +
+                                         static_cast<std::size_t>(sample.x.lower)];
+        const auto& bottom_right = pixels[static_cast<std::size_t>(sample.y.upper) *
+                                              static_cast<std::size_t>(width) +
+                                          static_cast<std::size_t>(sample.x.upper)];
+        const auto interpolate = [&](double top_left_value,
+                                     double top_right_value,
+                                     double bottom_left_value,
+                                     double bottom_right_value) {
+            return runtime_contract::bilinear_pixel_value(top_left_value,
+                                                          top_right_value,
+                                                          bottom_left_value,
+                                                          bottom_right_value,
+                                                          sample);
+        };
+        const auto interpolate_srgb = [&](double top_left_value,
+                                          double top_right_value,
+                                          double bottom_left_value,
+                                          double bottom_right_value) {
+            return runtime_contract::bilinear_srgb_pixel_value(top_left_value,
+                                                               top_right_value,
+                                                               bottom_left_value,
+                                                               bottom_right_value,
+                                                               sample);
+        };
+        color.r = clamp01(interpolate_srgb(top_left.r, top_right.r, bottom_left.r, bottom_right.r));
+        color.g = clamp01(interpolate_srgb(top_left.g, top_right.g, bottom_left.g, bottom_right.g));
+        color.b = clamp01(interpolate_srgb(top_left.b, top_right.b, bottom_left.b, bottom_right.b));
+        color.roughness = clamp01(interpolate(top_left.roughness,
+                                              top_right.roughness,
+                                              bottom_left.roughness,
+                                              bottom_right.roughness));
+        color.metallic = clamp01(interpolate(top_left.metallic,
+                                             top_right.metallic,
+                                             bottom_left.metallic,
+                                             bottom_right.metallic));
+        return true;
+    }
+
     auto mesh_first_capture_project_color(const SdkFrontCaptureResult& capture,
-                                          const sdk::FVector& world_position,
-                                          Color& color) -> bool
+                                           const sdk::FVector& world_position,
+                                           Color& color) -> bool
     {
         const auto expected_pixels = static_cast<std::size_t>(std::max(0, capture.width)) *
                                      static_cast<std::size_t>(std::max(0, capture.height));
@@ -8279,21 +8384,17 @@ namespace
             return false;
         }
 
-        const int px = std::max(0, std::min(capture.width - 1, static_cast<int>(std::round(sx))));
-        const int py = std::max(0, std::min(capture.height - 1, static_cast<int>(std::round(sy))));
-        const int bx = capture.capture_flip_x ? (capture.width - 1 - px) : px;
-        const int by = capture.capture_flip_y ? (capture.height - 1 - py) : py;
-        const auto pixel_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(capture.width) +
-                                 static_cast<std::size_t>(bx);
-        if (pixel_index >= capture.capture_pixels.size())
+        if (!mesh_first_sample_capture_color(capture.capture_pixels,
+                                             capture.width,
+                                             capture.height,
+                                             sx,
+                                             sy,
+                                             capture.capture_flip_x,
+                                             capture.capture_flip_y,
+                                             color))
         {
             return false;
         }
-
-        color = capture.capture_pixels[pixel_index];
-        color.r = clamp01(color.r);
-        color.g = clamp01(color.g);
-        color.b = clamp01(color.b);
         color.roughness = 0.65;
         color.metallic = 0.0;
         return true;
@@ -8306,7 +8407,10 @@ namespace
                                   bool enable_side,
                                   bool enable_back,
                                   double side_source_max_uv,
-                                  MeshFirstPlanStats& stats) -> void
+                                  MeshFirstPlanStats& stats,
+                                  const std::shared_ptr<QueuedPaintJob>& queued_job = {},
+                                  std::size_t side_source_candidate_limit =
+                                      std::numeric_limits<std::size_t>::max()) -> void
     {
         const auto& source_samples = capture.samples;
         std::vector<double> uv_distances{};
@@ -8343,6 +8447,11 @@ namespace
         };
         for (int i = 0; i < static_cast<int>(source_samples.size()); ++i)
         {
+            if ((i % 256) == 0 &&
+                queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return;
+            }
             const auto& source = source_samples[static_cast<std::size_t>(i)];
             const auto source_body = lower_copy(source.body_region);
             const auto source_group = mesh_first_transfer_group_for_bone(profile, source.dominant_bone);
@@ -8359,6 +8468,11 @@ namespace
         const double side_component_distance_limit = clamp_range(side_source_max_uv * 500.0, 20.0, 80.0);
         for (std::size_t sample_index = 0; sample_index < samples.size(); ++sample_index)
         {
+            if ((sample_index % 64U) == 0U &&
+                queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return;
+            }
             auto& sample = samples[sample_index];
             const bool enabled = (sample.region == MeshFirstRegion::Front && enable_front) ||
                                  (sample.region == MeshFirstRegion::Side && enable_side) ||
@@ -8367,6 +8481,7 @@ namespace
             {
                 continue;
             }
+            sample.source_direct_assignment = false;
             if (source_samples.empty())
             {
                 sample.unsafe = true;
@@ -8388,6 +8503,7 @@ namespace
                     sample.roughness = clamp01(std::max(0.35, direct_source->roughness));
                     sample.metallic = clamp01(direct_source->metallic);
                     sample.unsafe = false;
+                    sample.source_direct_assignment = true;
                     ++stats.source_direct_assignments;
                     ++stats.enabled_samples;
                     continue;
@@ -8411,7 +8527,16 @@ namespace
                     double best_uv_distance_sq = std::numeric_limits<double>::infinity();
                     const FrontSample* best = nullptr;
                     const auto* candidate_indices = sample_bin >= 0 ? &source_bins[static_cast<std::size_t>(sample_bin)] : nullptr;
-                    if (candidate_indices)
+                    const bool source_candidate_limit_exceeded =
+                        candidate_indices &&
+                        candidate_indices->size() > side_source_candidate_limit;
+                    if (source_candidate_limit_exceeded)
+                    {
+                        // Adaptive refinement must stay bounded. Reject this optional
+                        // child instead of choosing from an incomplete nearest-source scan.
+                        saw_candidate = true;
+                    }
+                    else if (candidate_indices)
                     {
                         for (const int source_index : *candidate_indices)
                         {
@@ -8462,7 +8587,11 @@ namespace
                         sample.source_distance_uv = std::numeric_limits<double>::infinity();
                         sample.source_distance_component = std::numeric_limits<double>::infinity();
                         sample.unsafe = true;
-                        if (!saw_candidate)
+                        if (source_candidate_limit_exceeded)
+                        {
+                            ++stats.unsafe_source_distance;
+                        }
+                        else if (!saw_candidate)
                         {
                             if (!sample_transfer_group.empty())
                             {
@@ -8555,6 +8684,317 @@ namespace
             const auto index = std::min(component_distances.size() - 1,
                                         static_cast<std::size_t>(std::floor(static_cast<double>(component_distances.size() - 1) * 0.95)));
             stats.source_distance_p95_component = component_distances[index];
+        }
+    }
+
+    auto mesh_first_append_adaptive_detail_samples(
+        const MeshFirstProfile* profile,
+        const std::vector<MeshFirstRuntimeTriangle>& triangles,
+        const SdkFrontCaptureResult& capture,
+        bool enable_front,
+        bool enable_side,
+        bool enable_back,
+        double side_source_max_uv,
+        double coverage_step_texels,
+        int texture_size,
+        int detail_resolution_percent,
+        std::size_t base_fine_strokes,
+        std::size_t base_total_strokes,
+        std::vector<MeshFirstPlanSample>& samples,
+        MeshFirstPlanStats& stats,
+        const std::shared_ptr<QueuedPaintJob>& queued_job) -> void
+    {
+        stats.detail_budget = static_cast<int>(
+            runtime_contract::adaptive_detail_stroke_budget(base_fine_strokes,
+                                                            base_total_strokes,
+                                                            detail_resolution_percent));
+        if (stats.detail_budget <= 0 || samples.empty() || capture.samples.empty())
+        {
+            return;
+        }
+
+        const auto region_enabled = [&](MeshFirstRegion region) {
+            return (region == MeshFirstRegion::Front && enable_front) ||
+                   (region == MeshFirstRegion::Side && enable_side) ||
+                   (region == MeshFirstRegion::Back && enable_back);
+        };
+        const std::size_t base_sample_count = samples.size();
+        std::size_t parent_count = 0;
+        for (std::size_t sample_index = 0; sample_index < base_sample_count; ++sample_index)
+        {
+            if ((sample_index % 64U) == 0U &&
+                queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return;
+            }
+            const auto& sample = samples[sample_index];
+            if (!sample.unsafe && !sample.detail_refinement && region_enabled(sample.region))
+            {
+                ++parent_count;
+            }
+        }
+        if (parent_count > runtime_contract::AdaptiveDetailGeometryCandidateLimit / 4U)
+        {
+            stats.detail_geometry_candidates = static_cast<int>(
+                runtime_contract::AdaptiveDetailGeometryCandidateLimit + 1U);
+            stats.detail_geometry_overflow = true;
+            return;
+        }
+        const std::size_t potential_geometry_candidates = parent_count * 4U;
+        stats.detail_geometry_candidates = static_cast<int>(potential_geometry_candidates);
+
+        struct DetailGeometryCandidate
+        {
+            MeshFirstPlanSample sample{};
+            std::size_t parent_sample_index{0};
+            int child_ordinal{0};
+            bool direct_capture_projection{false};
+        };
+
+        const double texture_size_double = static_cast<double>(std::max(1, texture_size));
+        const double coverage_step_uv =
+            clamp_range(coverage_step_texels, 1.0, 64.0) / texture_size_double;
+        const double child_offset_uv = coverage_step_uv * 0.25;
+        const double fine_cell_uv = coverage_step_uv * 0.5;
+        constexpr double child_offsets[4][2] = {
+            {-1.0, -1.0},
+            {1.0, 1.0},
+            {1.0, -1.0},
+            {-1.0, 1.0},
+        };
+        std::vector<DetailGeometryCandidate> geometry_candidates{};
+        geometry_candidates.reserve(potential_geometry_candidates);
+        for (std::size_t parent_index = 0; parent_index < base_sample_count; ++parent_index)
+        {
+            if ((parent_index % 64U) == 0U &&
+                queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return;
+            }
+            const auto& parent = samples[parent_index];
+            if (parent.unsafe || parent.detail_refinement || !region_enabled(parent.region) ||
+                parent.triangle_index < 0 ||
+                parent.triangle_index >= static_cast<int>(triangles.size()))
+            {
+                continue;
+            }
+            const auto& triangle = triangles[static_cast<std::size_t>(parent.triangle_index)];
+            for (int child_ordinal = 0; child_ordinal < 4; ++child_ordinal)
+            {
+                const double u = parent.u + child_offsets[child_ordinal][0] * child_offset_uv;
+                const double v = parent.v + child_offsets[child_ordinal][1] * child_offset_uv;
+                if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0)
+                {
+                    continue;
+                }
+                double a = 0.0;
+                double b = 0.0;
+                double c = 0.0;
+                if (!mesh_first_barycentric_uv(triangle.uv[0].X,
+                                               triangle.uv[0].Y,
+                                               triangle.uv[1].X,
+                                               triangle.uv[1].Y,
+                                               triangle.uv[2].X,
+                                               triangle.uv[2].Y,
+                                               u,
+                                               v,
+                                               a,
+                                               b,
+                                               c))
+                {
+                    continue;
+                }
+
+                auto child = parent;
+                child.u = clamp01(u);
+                child.v = clamp01(v);
+                child.barycentric_a = a;
+                child.barycentric_b = b;
+                child.barycentric_c = c;
+                child.local_position = sdk_vec_add(
+                    sdk_vec_add(sdk_vec_mul(triangle.local[0], a),
+                                sdk_vec_mul(triangle.local[1], b)),
+                    sdk_vec_mul(triangle.local[2], c));
+                child.world_position = sdk_vec_add(
+                    sdk_vec_add(sdk_vec_mul(triangle.world[0], a),
+                                sdk_vec_mul(triangle.world[1], b)),
+                    sdk_vec_mul(triangle.world[2], c));
+                child.reference_position = child.local_position;
+                child.reference_position_available = false;
+                if (profile)
+                {
+                    const std::size_t index_base =
+                        static_cast<std::size_t>(parent.triangle_index) * 3U;
+                    if (index_base + 2U < profile->indices.size())
+                    {
+                        sdk::FVector reference_triangle[3]{};
+                        bool reference_available = true;
+                        for (int slot = 0; slot < 3; ++slot)
+                        {
+                            const int vertex_index =
+                                profile->indices[index_base + static_cast<std::size_t>(slot)];
+                            if (vertex_index < 0 ||
+                                static_cast<std::size_t>(vertex_index) >= profile->vertices.size())
+                            {
+                                reference_available = false;
+                                break;
+                            }
+                            reference_triangle[slot] =
+                                profile->vertices[static_cast<std::size_t>(vertex_index)].position;
+                            reference_available = reference_available &&
+                                                  mesh_first_finite_vector(reference_triangle[slot]);
+                        }
+                        if (reference_available)
+                        {
+                            child.reference_position = sdk_vec_add(
+                                sdk_vec_add(sdk_vec_mul(reference_triangle[0], a),
+                                            sdk_vec_mul(reference_triangle[1], b)),
+                                sdk_vec_mul(reference_triangle[2], c));
+                            child.reference_position_available =
+                                mesh_first_finite_vector(child.reference_position);
+                        }
+                    }
+                }
+                child.source_candidate = false;
+                child.source_direct_assignment = false;
+                child.source_distance_uv = 0.0;
+                child.source_distance_component = 0.0;
+                child.unsafe = false;
+                child.detail_refinement = true;
+                geometry_candidates.push_back(
+                    {std::move(child),
+                     parent_index,
+                     child_ordinal,
+                     parent.source_direct_assignment});
+            }
+        }
+        stats.detail_geometry_candidates = static_cast<int>(geometry_candidates.size());
+        if (geometry_candidates.empty())
+        {
+            return;
+        }
+
+        std::vector<MeshFirstPlanSample> transfer_samples{};
+        std::vector<std::size_t> transfer_candidate_indices{};
+        transfer_samples.reserve(geometry_candidates.size());
+        transfer_candidate_indices.reserve(geometry_candidates.size());
+        for (std::size_t candidate_index = 0;
+             candidate_index < geometry_candidates.size();
+             ++candidate_index)
+        {
+            if ((candidate_index % 64U) == 0U &&
+                queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return;
+            }
+            auto& geometry = geometry_candidates[candidate_index];
+            if (!geometry.direct_capture_projection)
+            {
+                transfer_candidate_indices.push_back(candidate_index);
+                transfer_samples.push_back(geometry.sample);
+                continue;
+            }
+            Color projected_color{};
+            if (mesh_first_capture_project_color(capture,
+                                                 geometry.sample.world_position,
+                                                 projected_color))
+            {
+                geometry.sample.r = clamp01(projected_color.r);
+                geometry.sample.g = clamp01(projected_color.g);
+                geometry.sample.b = clamp01(projected_color.b);
+                geometry.sample.roughness = clamp01(projected_color.roughness);
+                geometry.sample.metallic = clamp01(projected_color.metallic);
+                geometry.sample.source_distance_uv = 0.0;
+                geometry.sample.source_distance_component = 0.0;
+                geometry.sample.unsafe = false;
+            }
+            else
+            {
+                geometry.sample.source_distance_uv = std::numeric_limits<double>::infinity();
+                geometry.sample.source_distance_component = std::numeric_limits<double>::infinity();
+                geometry.sample.unsafe = true;
+            }
+        }
+        MeshFirstPlanStats detail_color_stats{};
+        if (!transfer_samples.empty())
+        {
+            mesh_first_assign_colors(
+                profile,
+                transfer_samples,
+                capture,
+                enable_front,
+                enable_side,
+                enable_back,
+                side_source_max_uv,
+                detail_color_stats,
+                queued_job,
+                runtime_contract::AdaptiveDetailSideSourceCandidateLimit);
+            if (queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return;
+            }
+            for (std::size_t transfer_index = 0;
+                 transfer_index < transfer_samples.size();
+                 ++transfer_index)
+            {
+                geometry_candidates[transfer_candidate_indices[transfer_index]].sample =
+                    std::move(transfer_samples[transfer_index]);
+            }
+        }
+
+        const auto rgb8 = [](const MeshFirstPlanSample& sample) {
+            return runtime_contract::Rgb8{
+                static_cast<std::uint8_t>(std::lround(clamp01(sample.r) * 255.0)),
+                static_cast<std::uint8_t>(std::lround(clamp01(sample.g) * 255.0)),
+                static_cast<std::uint8_t>(std::lround(clamp01(sample.b) * 255.0)),
+            };
+        };
+        std::vector<runtime_contract::AdaptiveDetailCandidate> selection_candidates{};
+        selection_candidates.reserve(geometry_candidates.size());
+        for (std::size_t candidate_index = 0;
+             candidate_index < geometry_candidates.size();
+             ++candidate_index)
+        {
+            auto& geometry = geometry_candidates[candidate_index];
+            if (geometry.sample.unsafe)
+            {
+                ++stats.detail_unsafe_candidates;
+                continue;
+            }
+            ++stats.detail_safe_candidates;
+            const auto& parent = samples[geometry.parent_sample_index];
+            selection_candidates.push_back(
+                {candidate_index,
+                 geometry.parent_sample_index,
+                 mesh_first_contract_region(parent.region),
+                 parent.uv_island,
+                 static_cast<int>(std::floor(geometry.sample.u / fine_cell_uv)),
+                 static_cast<int>(std::floor(geometry.sample.v / fine_cell_uv)),
+                 geometry.parent_sample_index,
+                 geometry.child_ordinal,
+                 rgb8(parent),
+                 rgb8(geometry.sample)});
+        }
+        const auto selection = runtime_contract::select_adaptive_detail_candidates(
+            selection_candidates,
+            static_cast<std::size_t>(stats.detail_budget),
+            detail_resolution_percent);
+        stats.detail_eligible_candidates = static_cast<int>(selection.eligible_candidates);
+        stats.detail_parent_deduplicated = static_cast<int>(selection.parent_deduplicated);
+        stats.detail_cell_deduplicated = static_cast<int>(selection.cell_deduplicated);
+        stats.detail_budget_limited = selection.budget_limited;
+        for (const auto candidate_index : selection.sample_indices)
+        {
+            if (candidate_index >= geometry_candidates.size())
+            {
+                continue;
+            }
+            const auto& selected = geometry_candidates[candidate_index].sample;
+            samples.push_back(selected);
+            ++stats.detail_selected_samples;
+            ++stats.total_samples;
+            ++stats.enabled_samples;
+            ++mesh_first_sample_region_count(stats, selected.region);
         }
     }
 
@@ -8893,7 +9333,17 @@ namespace
                ",\"source_distance_max_uv\":" + std::to_string(stats.source_distance_max_uv) +
                ",\"source_distance_avg_component\":" + std::to_string(stats.source_distance_avg_component) +
                ",\"source_distance_p95_component\":" + std::to_string(stats.source_distance_p95_component) +
-               ",\"source_distance_max_component\":" + std::to_string(stats.source_distance_max_component);
+               ",\"source_distance_max_component\":" + std::to_string(stats.source_distance_max_component) +
+               ",\"detail_geometry_candidates\":" + std::to_string(stats.detail_geometry_candidates) +
+               ",\"detail_safe_candidates\":" + std::to_string(stats.detail_safe_candidates) +
+               ",\"detail_eligible_candidates\":" + std::to_string(stats.detail_eligible_candidates) +
+               ",\"detail_selected_samples\":" + std::to_string(stats.detail_selected_samples) +
+               ",\"detail_unsafe_candidates\":" + std::to_string(stats.detail_unsafe_candidates) +
+               ",\"detail_parent_deduplicated\":" + std::to_string(stats.detail_parent_deduplicated) +
+               ",\"detail_cell_deduplicated\":" + std::to_string(stats.detail_cell_deduplicated) +
+               ",\"detail_budget\":" + std::to_string(stats.detail_budget) +
+               ",\"detail_geometry_overflow\":" + std::string(json_bool(stats.detail_geometry_overflow)) +
+               ",\"detail_budget_limited\":" + std::string(json_bool(stats.detail_budget_limited));
     }
 
     struct MeshFirstRuntimePaintReplicationPressure
@@ -9357,6 +9807,13 @@ namespace
         sdk::FGuid server_packed_paint_source_id{};
         std::string server_batch_rpc{"ServerPackedPaintBatch"};
         double packed_wire_radius_scale{1.0};
+        int detail_resolution_percent{runtime_contract::DetailResolutionDefaultPercent};
+        int detail_channel_threshold{runtime_contract::AdaptiveDetailChannelThreshold};
+        int detail_maximum_strokes{
+            static_cast<int>(runtime_contract::AdaptiveDetailMaximumStrokes)};
+        int detail_budget{0};
+        int detail_selected_samples{0};
+        double detail_brush_radius_texels{0.0};
         std::vector<sdk::FPaintStroke> strokes{};
         std::string metadata{};
         MeshFirstChannelChecksum albedo_before{};
@@ -10461,6 +10918,8 @@ namespace
             }
             document += "{\"index\":" + std::to_string(index);
             document += ",\"pass\":\"" + std::string(mesh_first_replay_pass_name(entry.pass)) + "\"";
+            document += ",\"detail_refinement\":" +
+                        std::string(json_bool(entry.detail_refinement));
             document += ",\"region\":\"" + std::string(region_name(sample.region)) + "\"";
             document += ",\"body_region\":\"" + json_escape(sample.body_region) + "\"";
             document += ",\"triangle_index\":" + std::to_string(sample.triangle_index);
@@ -10773,6 +11232,20 @@ namespace
         out += ",\"terminal\":" + std::string(json_bool(terminal));
         out += ",\"result\":\"" + std::string(result && *result ? result : (terminal ? "done" : "running")) + "\"";
         out += ",\"total_strokes\":" + std::to_string(total_strokes);
+        out += ",\"detail_resolution_percent\":" +
+               std::to_string(job ? job->detail_resolution_percent
+                                  : runtime_contract::DetailResolutionDefaultPercent);
+        out += ",\"detail_channel_threshold\":" +
+               std::to_string(job ? job->detail_channel_threshold
+                                  : runtime_contract::AdaptiveDetailChannelThreshold);
+        out += ",\"detail_maximum_strokes\":" +
+               std::to_string(job ? job->detail_maximum_strokes
+                                  : static_cast<int>(runtime_contract::AdaptiveDetailMaximumStrokes));
+        out += ",\"detail_budget\":" + std::to_string(job ? job->detail_budget : 0);
+        out += ",\"detail_selected_samples\":" +
+               std::to_string(job ? job->detail_selected_samples : 0);
+        out += ",\"detail_brush_radius_texels\":" +
+               std::to_string(job ? job->detail_brush_radius_texels : 0.0);
         out += ",\"server_batch_limit\":" + std::to_string(server_batch_limit);
         out += ",\"server_batch_pacing_ms\":" + std::to_string(server_batch_delay_ms);
         out += mesh_first_replay_pass_metadata(job);
@@ -10945,6 +11418,46 @@ namespace
                                           legacy_stroke_size_texels),
                         5.0,
                         10.0);
+        const double requested_detail_resolution_percent = json_number_field(
+            request,
+            "detail_resolution_percent",
+            static_cast<double>(runtime_contract::DetailResolutionDefaultPercent));
+        const int tuning_detail_resolution_percent = json_int_field(
+            request,
+            "detail_resolution_percent",
+            runtime_contract::DetailResolutionDefaultPercent,
+            runtime_contract::DetailResolutionMinimumPercent,
+            runtime_contract::DetailResolutionMaximumPercent);
+        const bool detail_resolution_percent_clamped =
+            requested_detail_resolution_percent !=
+            static_cast<double>(tuning_detail_resolution_percent);
+        const int tuning_detail_channel_threshold =
+            runtime_contract::adaptive_detail_channel_threshold(
+                tuning_detail_resolution_percent);
+        const std::size_t tuning_detail_maximum_strokes =
+            runtime_contract::adaptive_detail_maximum_strokes(
+                tuning_detail_resolution_percent);
+        const std::string detail_resolution_metadata =
+            "\"detail_resolution_percent_requested\":" +
+            std::to_string(requested_detail_resolution_percent) +
+            ",\"detail_resolution_percent\":" +
+            std::to_string(tuning_detail_resolution_percent) +
+            ",\"detail_resolution_percent_clamped\":" +
+            std::string(json_bool(detail_resolution_percent_clamped)) +
+            ",\"detail_resolution_percent_min\":" +
+            std::to_string(runtime_contract::DetailResolutionMinimumPercent) +
+            ",\"detail_resolution_percent_max\":" +
+            std::to_string(runtime_contract::DetailResolutionMaximumPercent) +
+            ",\"detail_resolution_percent_default\":" +
+            std::to_string(runtime_contract::DetailResolutionDefaultPercent) +
+            ",\"detail_channel_threshold\":" +
+            std::to_string(tuning_detail_channel_threshold) +
+            ",\"detail_maximum_strokes\":" +
+            std::to_string(tuning_detail_maximum_strokes) +
+            ",\"detail_maximum_plan_strokes\":" +
+            std::to_string(runtime_contract::AdaptiveDetailMaximumPlanStrokes) +
+            ",\"detail_geometry_candidate_limit\":" +
+            std::to_string(runtime_contract::AdaptiveDetailGeometryCandidateLimit);
         const double tuning_side_source_max_uv = clamp_range(json_number_field(request, "side_source_max_uv", 0.08), 0.001, 0.50);
         const double tuning_front_back_source_max_uv = clamp_range(json_number_field(request, "front_back_source_max_uv", 0.45), 0.001, 2.00);
         const bool tuning_auto_material = json_bool_field(request, "auto_material", false);
@@ -11079,6 +11592,7 @@ namespace
                     std::to_string(brush_pipeline_version.supported_version);
         metadata += ",\"brush_1_size_texels\":" + std::to_string(tuning_brush_1_size_texels);
         metadata += ",\"brush_2_size_texels\":" + std::to_string(tuning_brush_2_size_texels);
+        metadata += "," + detail_resolution_metadata;
         metadata += ",\"legacy_stroke_size_texels\":" + std::to_string(legacy_stroke_size_texels);
         metadata += ",\"stroke_size_texels\":" + std::to_string(tuning_brush_2_size_texels);
         metadata += ",\"coverage_step_texels\":" + std::to_string(tuning_brush_2_size_texels);
@@ -11376,7 +11890,8 @@ namespace
                               1,
                               4,
                               0.0,
-                              "\"pipeline\":\"mesh_first_paint\"");
+                              "\"pipeline\":\"mesh_first_paint\"," +
+                                  detail_resolution_metadata);
         const auto profile_catalog = load_mesh_first_profile_catalog();
         metadata += ",\"mesh_profile_catalog_count\":" + std::to_string(profile_catalog.size());
         MeshFirstProfile profile{};
@@ -11410,7 +11925,9 @@ namespace
                               2,
                               4,
                               0.0,
-                              "\"pipeline\":\"mesh_first_paint\",\"mesh_profile_bone_count\":" + std::to_string(profile_available ? profile.bone_count : 0));
+                              "\"pipeline\":\"mesh_first_paint\",\"mesh_profile_bone_count\":" +
+                                  std::to_string(profile_available ? profile.bone_count : 0) +
+                                  "," + detail_resolution_metadata);
         SdkPoseResolveResult pose{};
         if (profile_available)
         {
@@ -11436,7 +11953,9 @@ namespace
                               3,
                               4,
                               0.0,
-                              "\"pipeline\":\"mesh_first_paint\",\"pose_transform_count\":" + std::to_string(pose.transform_count));
+                              "\"pipeline\":\"mesh_first_paint\",\"pose_transform_count\":" +
+                                  std::to_string(pose.transform_count) + "," +
+                                  detail_resolution_metadata);
         sdk::FTransform component_to_world{};
         std::string component_transform_source{};
         if (!mesh_first_resolve_component_to_world(ref, selected_mesh.mesh, ctx.body_world_position, component_to_world, component_transform_source))
@@ -11926,7 +12445,9 @@ namespace
                                   3,
                                   4,
                                   0.0,
-                                  "\"source_samples\":" + std::to_string(native_front.samples.size()));
+                                  "\"source_samples\":" +
+                                      std::to_string(native_front.samples.size()) + "," +
+                                      detail_resolution_metadata);
             const auto capture_started = std::chrono::steady_clock::now();
             capture = sdk_capture_front_colors(ref, ctx, native_front, capture_request_width, capture_request_height);
             const auto capture_elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - capture_started).count();
@@ -11957,7 +12478,8 @@ namespace
                                      enable_side,
                                      enable_back,
                                      tuning_side_source_max_uv,
-                                     plan_stats);
+                                     plan_stats,
+                                     queued_job);
             if (queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
             {
                 return queued_paint_cancel_response(queued_job, "mesh_paint_cancelled");
@@ -11973,8 +12495,6 @@ namespace
             metadata += ",\"mesh_capture_request_height\":" + std::to_string(capture_request_height);
         }
 
-        metadata += ",";
-        metadata += mesh_first_plan_stats_metadata(plan_stats);
         metadata += ",\"planner_coverage_step_texels\":" + std::to_string(tuning_brush_2_size_texels);
         metadata += ",\"source_distance_policy\":\"" +
                     std::string(research_force_paint_color
@@ -11994,6 +12514,8 @@ namespace
                     std::to_string(research_constant_paint_color_assignments);
         if (plan_stats.unsafe_enabled > 0)
         {
+            metadata += ",";
+            metadata += mesh_first_plan_stats_metadata(plan_stats);
             return response_json(false,
                                  "planner_blocked",
                                  0,
@@ -12001,6 +12523,76 @@ namespace
                                  "mesh-first planner found unsafe color-transfer candidates in enabled regions; replay was blocked instead of skipping samples",
                                  metadata + ",\"replay_blocked\":true");
         }
+
+        const bool any_fill_region = front_region_mode == MeshFirstRegionMode::Fill ||
+                                     side_region_mode == MeshFirstRegionMode::Fill ||
+                                     back_region_mode == MeshFirstRegionMode::Fill;
+        const double fill_stroke_radius_texels =
+            any_fill_region ? clamp_range(std::max(tuning_brush_1_size_texels * 4.0, 32.0),
+                                          tuning_brush_1_size_texels,
+                                          96.0)
+                            : tuning_brush_1_size_texels;
+        const bool adaptive_detail_enabled = any_paint_region && !research_force_paint_color;
+        if (adaptive_detail_enabled)
+        {
+            std::vector<runtime_contract::TwoBrushReplayCandidate> base_replay_candidates{};
+            base_replay_candidates.reserve(plan_samples.size());
+            for (std::size_t sample_index = 0; sample_index < plan_samples.size(); ++sample_index)
+            {
+                const auto& sample = plan_samples[sample_index];
+                const auto mode = mesh_first_region_mode_for_sample(sample.region,
+                                                                     front_region_mode,
+                                                                     side_region_mode,
+                                                                     back_region_mode);
+                base_replay_candidates.push_back(
+                    {sample_index,
+                     mesh_first_contract_region(sample.region),
+                     mesh_first_contract_region_mode(mode),
+                     sample.uv_island,
+                     sample.u,
+                     sample.v,
+                     sample.reference_position_available,
+                     sample.reference_position.Z,
+                     sample.local_position.Z,
+                     sample.local_position.X,
+                     sample_index,
+                     false});
+            }
+            const auto base_replay_plan = runtime_contract::build_two_brush_replay_plan(
+                base_replay_candidates,
+                active_texture_size,
+                tuning_brush_1_size_texels,
+                tuning_brush_2_size_texels,
+                fill_stroke_radius_texels,
+                tuning_detail_resolution_percent);
+            mesh_first_append_adaptive_detail_samples(
+                profile_available ? &profile : nullptr,
+                runtime_triangle_cache.triangles,
+                capture,
+                enable_front,
+                enable_side,
+                enable_back,
+                tuning_side_source_max_uv,
+                tuning_brush_2_size_texels,
+                active_texture_size,
+                tuning_detail_resolution_percent,
+                base_replay_plan.fine_paint_count,
+                base_replay_plan.entries.size(),
+                plan_samples,
+                plan_stats,
+                queued_job);
+            if (queued_paint_cancel_reason(queued_job) != PaintCancelReason::None)
+            {
+                return queued_paint_cancel_response(queued_job, "mesh_paint_cancelled");
+            }
+        }
+        metadata += ",";
+        metadata += mesh_first_plan_stats_metadata(plan_stats);
+        metadata += ",\"detail_refinement_enabled\":" +
+                    std::string(json_bool(adaptive_detail_enabled));
+        metadata += ",\"detail_refinement_policy\":\"four_half_grid_edge_probes_rgb8\"";
+        metadata += ",\"detail_side_source_candidate_limit\":" +
+                    std::to_string(runtime_contract::AdaptiveDetailSideSourceCandidateLimit);
         if (research_artifacts)
         {
             mesh_first_write_uv_debug_artifacts(plan_samples,
@@ -12113,10 +12705,18 @@ namespace
             tuning_brush_1_size_texels / texture_size_double;
         const double brush_2_radius_uv =
             tuning_brush_2_size_texels / texture_size_double;
+        const double detail_brush_radius_texels =
+            runtime_contract::adaptive_detail_radius_texels(
+                tuning_brush_2_size_texels,
+                tuning_detail_resolution_percent);
+        const double detail_brush_radius_uv =
+            detail_brush_radius_texels / texture_size_double;
         sdk::FRuntimeBrushSettings brush_1 = base_brush;
         sdk::FRuntimeBrushSettings brush_2 = base_brush;
+        sdk::FRuntimeBrushSettings detail_brush = base_brush;
         brush_1.Radius = static_cast<float>(brush_1_radius_uv);
         brush_2.Radius = static_cast<float>(brush_2_radius_uv);
+        detail_brush.Radius = static_cast<float>(detail_brush_radius_uv);
         metadata += ",\"brush_1_radius_texels\":" + std::to_string(tuning_brush_1_size_texels);
         metadata += ",\"brush_1_radius_uv\":" + std::to_string(brush_1_radius_uv);
         metadata += ",\"brush_2_radius_texels\":" + std::to_string(tuning_brush_2_size_texels);
@@ -12125,25 +12725,26 @@ namespace
                     std::to_string(brush_1_radius_uv * packed_wire_radius_scale);
         metadata += ",\"brush_2_packed_radius_uv\":" +
                     std::to_string(brush_2_radius_uv * packed_wire_radius_scale);
+        metadata += ",\"detail_brush_radius_texels\":" +
+                    std::to_string(detail_brush_radius_texels);
+        metadata += ",\"detail_brush_radius_uv\":" +
+                    std::to_string(detail_brush_radius_uv);
+        metadata += ",\"detail_brush_packed_radius_uv\":" +
+                    std::to_string(detail_brush_radius_uv * packed_wire_radius_scale);
         metadata += ",\"stroke_size_texels\":" + std::to_string(tuning_brush_2_size_texels);
         metadata += ",\"stroke_radius_texels\":" + std::to_string(tuning_brush_2_size_texels);
         metadata += ",\"stroke_radius_uv\":" + std::to_string(brush_2_radius_uv);
 
-        const bool any_fill_region = front_region_mode == MeshFirstRegionMode::Fill ||
-                                     side_region_mode == MeshFirstRegionMode::Fill ||
-                                     back_region_mode == MeshFirstRegionMode::Fill;
-        const double fill_stroke_radius_texels =
-            any_fill_region ? clamp_range(std::max(tuning_brush_1_size_texels * 4.0, 32.0),
-                                          tuning_brush_1_size_texels,
-                                          96.0)
-                            : tuning_brush_1_size_texels;
         const double fill_stroke_radius_uv =
             fill_stroke_radius_texels / texture_size_double;
         const double fill_cell_uv = std::max(fill_stroke_radius_uv * 0.75, brush_2_radius_uv);
         sdk::FRuntimeBrushSettings fill_brush = brush_1;
         fill_brush.Radius = static_cast<float>(fill_stroke_radius_uv);
         const double maximum_packed_radius_uv =
-            std::max({brush_1_radius_uv, brush_2_radius_uv, fill_stroke_radius_uv}) *
+            std::max({brush_1_radius_uv,
+                      brush_2_radius_uv,
+                      detail_brush_radius_uv,
+                      fill_stroke_radius_uv}) *
             packed_wire_radius_scale;
         if (normal_paint_requires_packed &&
             (!std::isfinite(maximum_packed_radius_uv) ||
@@ -12174,20 +12775,6 @@ namespace
             scanline_camera_right = sdk_vec_normalize(sdk_vec_cross(scanline_world_up, camera_direction));
             scanline_camera_right_available = sdk_vec_len(scanline_camera_right) > 0.000001;
         }
-        const auto contract_region = [](MeshFirstRegion region) {
-            if (region == MeshFirstRegion::Back)
-                return runtime_contract::ReplayRegion::Back;
-            if (region == MeshFirstRegion::Side)
-                return runtime_contract::ReplayRegion::Side;
-            return runtime_contract::ReplayRegion::Front;
-        };
-        const auto contract_mode = [](MeshFirstRegionMode mode) {
-            if (mode == MeshFirstRegionMode::Fill)
-                return runtime_contract::ReplayRegionMode::Fill;
-            if (mode == MeshFirstRegionMode::Skip)
-                return runtime_contract::ReplayRegionMode::Skip;
-            return runtime_contract::ReplayRegionMode::Paint;
-        };
         std::vector<runtime_contract::TwoBrushReplayCandidate> replay_candidates{};
         replay_candidates.reserve(plan_samples.size());
         double replay_reference_z_min = 0.0;
@@ -12207,8 +12794,8 @@ namespace
                                           : sample.local_position.X;
             replay_candidates.push_back(
                 {sample_index,
-                 contract_region(sample.region),
-                 contract_mode(mode),
+                 mesh_first_contract_region(sample.region),
+                 mesh_first_contract_region_mode(mode),
                  sample.uv_island,
                  sample.u,
                  sample.v,
@@ -12216,7 +12803,8 @@ namespace
                  sample.reference_position.Z,
                  sample.local_position.Z,
                  horizontal,
-                 sample_index});
+                 sample_index,
+                 sample.detail_refinement});
             if (mode != MeshFirstRegionMode::Skip)
             {
                 const double reference_z = sample.reference_position_available
@@ -12241,7 +12829,8 @@ namespace
             active_texture_size,
             tuning_brush_1_size_texels,
             tuning_brush_2_size_texels,
-            fill_stroke_radius_texels);
+            fill_stroke_radius_texels,
+            tuning_detail_resolution_percent);
         if (research_replay_stroke_index >= 0)
         {
             const auto selected = static_cast<std::size_t>(research_replay_stroke_index);
@@ -12261,6 +12850,7 @@ namespace
             replay_plan.fill_count = selected_entry.pass == runtime_contract::ReplayPass::Fill ? 1 : 0;
             replay_plan.coarse_paint_count = selected_entry.pass == runtime_contract::ReplayPass::CoarsePaint ? 1 : 0;
             replay_plan.fine_paint_count = selected_entry.pass == runtime_contract::ReplayPass::FinePaint ? 1 : 0;
+            replay_plan.detail_refinement_count = selected_entry.detail_refinement ? 1 : 0;
             metadata += ",\"research_replay_stroke_index_selected\":" + std::to_string(selected);
             metadata += ",\"research_replay_stroke_selected_pass\":\"" +
                         std::string(mesh_first_replay_pass_name(selected_entry.pass)) + "\"";
@@ -12285,6 +12875,7 @@ namespace
         int replay_fill = 0;
         int replay_coarse_paint = 0;
         int replay_fine_paint = 0;
+        int replay_detail_refinement = 0;
         int replay_front_paint = 0;
         int replay_side_paint = 0;
         int replay_back_paint = 0;
@@ -12328,6 +12919,7 @@ namespace
         double replay_triangle_world_scale_max = 0.0;
         runtime_contract::ReplayPass previous_pass = runtime_contract::ReplayPass::Fill;
         runtime_contract::ReplayRegion previous_region = runtime_contract::ReplayRegion::Front;
+        bool previous_detail_refinement = false;
         runtime_contract::SpatialScanlineKey previous_spatial_key{};
         bool have_previous_partition_entry = false;
         for (const auto& entry : replay_plan.entries)
@@ -12346,7 +12938,8 @@ namespace
                                      metadata + ",\"replay_blocked\":true");
             }
             if (!have_previous_partition_entry ||
-                entry.pass != previous_pass || entry.region != previous_region)
+                entry.pass != previous_pass || entry.region != previous_region ||
+                entry.detail_refinement != previous_detail_refinement)
             {
                 ++replay_spatial_sort_partitions;
                 have_previous_partition_entry = true;
@@ -12358,6 +12951,7 @@ namespace
             }
             previous_pass = entry.pass;
             previous_region = entry.region;
+            previous_detail_refinement = entry.detail_refinement;
             previous_spatial_key = entry.spatial_key;
 
             const auto& sample = plan_samples[entry.sample_index];
@@ -12402,7 +12996,9 @@ namespace
                                            ? fill_brush
                                            : (entry.pass == runtime_contract::ReplayPass::CoarsePaint
                                                   ? brush_1
-                                                  : brush_2);
+                                                  : (entry.detail_refinement
+                                                         ? detail_brush
+                                                         : brush_2));
             auto stroke = use_mesh_anchors
                               ? sdk_make_mesh_anchor_stroke(sample.u,
                                                             sample.v,
@@ -12470,6 +13066,8 @@ namespace
                 ++replay_coarse_paint;
             else if (entry.pass == runtime_contract::ReplayPass::FinePaint)
                 ++replay_fine_paint;
+            if (entry.detail_refinement)
+                ++replay_detail_refinement;
             if (sample.region == MeshFirstRegion::Front)
             {
                 ++replay_front;
@@ -12487,6 +13085,7 @@ namespace
             }
         }
         metadata += ",\"replay_pass_order\":\"fill,coarse_paint,fine_paint\"";
+        metadata += ",\"replay_fine_order\":\"base,detail_refinement\"";
         metadata += ",\"replay_region_order\":\"back,side,front\"";
         metadata += ",\"replay_fill_end\":" + std::to_string(replay_plan.fill_end);
         metadata += ",\"replay_coarse_end\":" + std::to_string(replay_plan.coarse_end);
@@ -12523,6 +13122,10 @@ namespace
         metadata += ",\"replay_strokes_fill\":" + std::to_string(replay_fill);
         metadata += ",\"replay_strokes_coarse_paint\":" + std::to_string(replay_coarse_paint);
         metadata += ",\"replay_strokes_fine_paint\":" + std::to_string(replay_fine_paint);
+        metadata += ",\"replay_strokes_detail_refinement\":" +
+                    std::to_string(replay_detail_refinement);
+        metadata += ",\"replay_plan_detail_refinement_count\":" +
+                    std::to_string(replay_plan.detail_refinement_count);
         metadata += ",\"replay_strokes_fill_candidates\":" + std::to_string(replay_plan.fill_candidates);
         metadata += ",\"replay_strokes_fill_coarse_skipped\":" + std::to_string(replay_plan.fill_deduplicated);
         metadata += ",\"replay_strokes_coarse_paint_candidates\":" + std::to_string(replay_plan.coarse_paint_candidates);
@@ -12535,6 +13138,12 @@ namespace
         metadata += ",\"replay_strokes_back_fill\":" + std::to_string(replay_back_fill);
         metadata += ",\"planner_strokes_paint\":" + std::to_string(replay_paint);
         metadata += ",\"planner_strokes_fill\":" + std::to_string(replay_fill);
+        const std::size_t planned_detail_count = std::min(
+            replay_plan.detail_refinement_count,
+            replay_plan.entries.size());
+        const std::size_t planned_detail_begin =
+            replay_plan.entries.size() - planned_detail_count;
+        metadata += ",\"replay_detail_begin\":" + std::to_string(planned_detail_begin);
         const auto research_strokes_before_limit = strokes.size();
         metadata += ",\"research_strokes_before_limit\":" + std::to_string(research_strokes_before_limit);
         if (research_stroke_limit > 0 && research_strokes_before_limit > static_cast<std::size_t>(research_stroke_limit))
@@ -12545,6 +13154,12 @@ namespace
         metadata += ",\"research_stroke_limit_applied\":" +
                     std::string(json_bool(research_stroke_limit > 0 &&
                                           research_strokes_before_limit > static_cast<std::size_t>(research_stroke_limit)));
+        const std::size_t effective_detail_count =
+            strokes.size() > planned_detail_begin
+                ? std::min(planned_detail_count, strokes.size() - planned_detail_begin)
+                : 0U;
+        metadata += ",\"replay_effective_detail_count\":" +
+                    std::to_string(effective_detail_count);
         const auto effective_fill_end = std::min(replay_plan.fill_end, strokes.size());
         const auto effective_coarse_end = std::min(replay_plan.coarse_end, strokes.size());
         metadata += ",\"replay_effective_fill_end\":" + std::to_string(effective_fill_end);
@@ -12703,6 +13318,9 @@ namespace
         append_pass_brush_metadata("fill", 0, effective_fill_end);
         append_pass_brush_metadata("coarse_paint", effective_fill_end, effective_coarse_end);
         append_pass_brush_metadata("fine_paint", effective_coarse_end, strokes.size());
+        append_pass_brush_metadata("detail_refinement",
+                                   planned_detail_begin,
+                                   planned_detail_begin + effective_detail_count);
         const bool packed_batch_compatible = sdk_strokes_are_packed_compatible(strokes);
         const bool packed_component_available = ctx.server_packed_paint_batch_function != 0;
         const bool packed_relay_available = ctx.server_relay_packed_stroke_batch_function != 0 && live_uobject(ctx.relay_component);
@@ -13202,7 +13820,10 @@ namespace
                                   0,
                                   static_cast<int>(strokes.size()),
                                   0.0,
-                                  "\"phase\":\"local_texture_import\",\"preview_only\":true,\"terminal\":false,\"result\":\"running\"");
+                                  "\"phase\":\"local_texture_import\",\"preview_only\":true,\"terminal\":false,\"result\":\"running\"," +
+                                      detail_resolution_metadata +
+                                      ",\"detail_brush_radius_texels\":" +
+                                      std::to_string(detail_brush_radius_texels));
             const auto* base_bytes = albedo_before_bytes.ok ? &albedo_before_bytes.bytes : nullptr;
             const auto* base_metallic_bytes = metallic_before_bytes.ok ? &metallic_before_bytes.bytes : nullptr;
             const auto* base_roughness_bytes = roughness_before_bytes.ok ? &roughness_before_bytes.bytes : nullptr;
@@ -13252,7 +13873,10 @@ namespace
                                   static_cast<int>(strokes.size()),
                                   preview_elapsed_ms,
                                   "\"phase\":\"local_texture_import\",\"preview_only\":true,\"terminal\":true,\"result\":\"" +
-                                      std::string(result.ok ? "done" : "failed") + "\"");
+                                      std::string(result.ok ? "done" : "failed") + "\"," +
+                                      detail_resolution_metadata +
+                                      ",\"detail_brush_radius_texels\":" +
+                                      std::to_string(detail_brush_radius_texels));
             return response_json(result.ok,
                                  result.ok ? "mesh_preview_done" : "mesh_preview_failed",
                                  result.ok ? static_cast<int>(strokes.size()) : result.strokes_painted,
@@ -13310,6 +13934,13 @@ namespace
             async_job->server_packed_paint_source_id = packed_source_id;
             async_job->server_batch_rpc = use_packed_server_batch ? "ServerPackedPaintBatch" : "none";
             async_job->packed_wire_radius_scale = packed_wire_radius_scale;
+            async_job->detail_resolution_percent = tuning_detail_resolution_percent;
+            async_job->detail_channel_threshold = tuning_detail_channel_threshold;
+            async_job->detail_maximum_strokes =
+                static_cast<int>(tuning_detail_maximum_strokes);
+            async_job->detail_budget = plan_stats.detail_budget;
+            async_job->detail_selected_samples = plan_stats.detail_selected_samples;
+            async_job->detail_brush_radius_texels = detail_brush_radius_texels;
             async_job->local_visual_sync_enabled = local_visual_sync_requested;
             async_job->strokes = std::move(strokes);
             async_job->initial_stroke_count = static_cast<int>(async_job->strokes.size());
@@ -16542,8 +17173,8 @@ namespace
         stroke.SkeletalTriangleBarycentric.Z = barycentric_c;
         // Do not copy the normalized UV radius into the world-radius field.
         // The game's packed compact-stroke expander treats <= 0 as the sentinel
-        // for deriving a mesh-correct world radius (supported build RVAs
-        // 0x50F65A0 -> 0x50F6110).
+        // for deriving a mesh-correct world radius (update2.8.0 RVAs
+        // 0x50F63B0 -> 0x50F5F20).
         stroke.EffectiveBrushWorldRadius = runtime_contract::PackedMeshAnchorWorldRadiusAuto;
         stroke.EffectiveSubdivisionLevel = runtime_contract::PackedMeshAnchorSubdivisionLevelAuto;
         stroke.EffectiveSubdivisionPixelSize = runtime_contract::PackedMeshAnchorSubdivisionPixelSizeAuto;
@@ -17046,33 +17677,60 @@ namespace
             return out;
         }
         const auto nt = safe_read<IMAGE_NT_HEADERS64>(module.base + static_cast<std::uintptr_t>(dos.e_lfanew));
-        const bool steam_shipping_build =
-            nt.Signature == IMAGE_NT_SIGNATURE &&
-            nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
+        if (nt.Signature != IMAGE_NT_SIGNATURE || nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        {
+            out.failure = "main_module_build_identity_mismatch";
+            return out;
+        }
+        const bool steam_20260711_shipping_build =
             nt.FileHeader.TimeDateStamp == 0xB76CD1AFu &&
             nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
             nt.OptionalHeader.CheckSum == 0x0A7394E2u;
-        if (!steam_shipping_build)
+        // Steam public build 24256862, marketed as update2.8.0, captured on
+        // 2026-07-17. Keep the previous exact contract so an older installed
+        // copy remains supported without weakening the fail-closed identity.
+        const bool steam_update_2_8_0_shipping_build =
+            nt.FileHeader.TimeDateStamp == 0x047BA867u &&
+            nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
+            nt.OptionalHeader.CheckSum == 0x0A7328BBu;
+        if (!steam_20260711_shipping_build && !steam_update_2_8_0_shipping_build)
         {
             out.failure = "main_module_build_identity_mismatch";
             return out;
         }
         static const auto text_file_identity = main_module_text_file_identity();
-        if (!text_file_identity.ok || text_file_identity.raw_size != 0x07AA2800u ||
-            text_file_identity.fnv1a64 != 0x4200B2CAF330F8C3ULL)
+        const bool text_identity_matches =
+            text_file_identity.ok && text_file_identity.raw_size == 0x07AA2800u &&
+            ((steam_20260711_shipping_build &&
+              text_file_identity.fnv1a64 == 0x4200B2CAF330F8C3ULL) ||
+             (steam_update_2_8_0_shipping_build &&
+              text_file_identity.fnv1a64 == 0x079EDD688D78E96BULL));
+        if (!text_identity_matches)
         {
             out.failure = "main_module_text_identity_mismatch";
             return out;
         }
 
-        constexpr std::uintptr_t ExpectedThunkRva = 0x50E40E0;
-        constexpr std::uintptr_t ExpectedImplementationRva = 0x50FBD80;
-        constexpr std::uintptr_t ExpectedDecoderRva = 0x5103A10;
-        constexpr std::uintptr_t ExpectedEnqueueInnerRva = 0x50F5EE0;
-        constexpr std::uintptr_t ExpectedComponentContextResolverRva = 0x3AEAF10;
-        constexpr std::uintptr_t ExpectedManagerResolverRva = 0x50E9170;
-        constexpr std::uintptr_t ExpectedManagerEnqueueRva = 0x5109030;
-        constexpr std::uintptr_t ExpectedQueueCoalescerRva = 0x5108E30;
+        const std::uintptr_t ExpectedThunkRva =
+            steam_update_2_8_0_shipping_build ? 0x50E39A0 : 0x50E40E0;
+        const std::uintptr_t ExpectedImplementationRva =
+            steam_update_2_8_0_shipping_build ? 0x50FD9F0 : 0x50FBD80;
+        const std::uintptr_t ExpectedDecoderRva =
+            steam_update_2_8_0_shipping_build ? 0x5105740 : 0x5103A10;
+        const std::uintptr_t ExpectedEnqueueInnerRva =
+            steam_update_2_8_0_shipping_build ? 0x50F5CF0 : 0x50F5EE0;
+        const std::uintptr_t ExpectedCompactStrokeExpanderRva =
+            steam_update_2_8_0_shipping_build ? 0x50F63B0 : 0x50F65A0;
+        const std::uintptr_t ExpectedSkeletalPreflightRva =
+            steam_update_2_8_0_shipping_build ? 0x50F5F20 : 0x50F6110;
+        const std::uintptr_t ExpectedComponentContextResolverRva =
+            steam_update_2_8_0_shipping_build ? 0x3AEACE0 : 0x3AEAF10;
+        const std::uintptr_t ExpectedManagerResolverRva =
+            steam_update_2_8_0_shipping_build ? 0x50E8A70 : 0x50E9170;
+        const std::uintptr_t ExpectedManagerEnqueueRva =
+            steam_update_2_8_0_shipping_build ? 0x510AD60 : 0x5109030;
+        const std::uintptr_t ExpectedQueueCoalescerRva =
+            steam_update_2_8_0_shipping_build ? 0x510AB60 : 0x5108E30;
 
         std::vector<std::uintptr_t> thunks{};
         for (std::uintptr_t slot = 0; slot <= 0x180; slot += sizeof(std::uintptr_t))
@@ -17133,6 +17791,33 @@ namespace
                                     0x57, 0x48, 0x81, 0xEC, 0x20, 0x01, 0x00, 0x00}))
         {
             out.failure = "local_packed_queue_decoder_or_inner_mismatch";
+            return out;
+        }
+        const auto compact_stroke_expander = internal_rel32_call_target(enqueue_inner + 0x8B);
+        const auto skeletal_preflight = module.base + ExpectedSkeletalPreflightRva;
+        if (!address_in_main_module_code(compact_stroke_expander) ||
+            compact_stroke_expander - module.base != ExpectedCompactStrokeExpanderRva ||
+            !internal_code_matches(compact_stroke_expander,
+                                   {0x48, 0x89, 0x5C, 0x24, 0x08,
+                                    0x48, 0x89, 0x6C, 0x24, 0x10,
+                                    0x48, 0x89, 0x74, 0x24, 0x18,
+                                    0x48, 0x89, 0x7C, 0x24, 0x20}) ||
+            internal_rel32_call_target(compact_stroke_expander + 0x21F) != skeletal_preflight ||
+            !address_in_main_module_code(skeletal_preflight) ||
+            !internal_code_matches(skeletal_preflight,
+                                   {0x48, 0x89, 0x5C, 0x24, 0x08,
+                                    0x57, 0x48, 0x83, 0xEC, 0x30,
+                                    0x80, 0x7A, 0x28, 0x00}) ||
+            !internal_code_matches(skeletal_preflight + 0x41,
+                                   {0xF2, 0x0F, 0x10, 0x80, 0x38, 0x01, 0x00, 0x00,
+                                    0xF2, 0x0F, 0x58, 0xC0}) ||
+            !internal_code_matches(skeletal_preflight + 0x57,
+                                   {0xF3, 0x0F, 0x10, 0x8B, 0xB4, 0x00, 0x00, 0x00,
+                                    0x0F, 0x57, 0xF6, 0x0F, 0x2F, 0xCE,
+                                    0x66, 0x0F, 0x5A, 0xD0, 0x77, 0x10,
+                                    0x0F, 0x28, 0xCA, 0xF3, 0x0F, 0x59, 0x4B, 0x68}))
+        {
+            out.failure = "local_packed_queue_stroke_preflight_mismatch";
             return out;
         }
         const auto component_context_resolver = internal_rel32_call_target(enqueue_inner + 0x175);
@@ -17258,11 +17943,18 @@ namespace
         // Steam Shipping build captured from the single-host investigation on
         // 2026-07-11.  The no-resend call chain is byte-identical to the legacy
         // build at the verified offsets below after a uniform -0xBC0 RVA shift.
-        const bool steam_shipping_build =
+        const bool steam_20260711_shipping_build =
             nt.FileHeader.TimeDateStamp == 0xB76CD1AFu &&
             nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
             nt.OptionalHeader.CheckSum == 0x0A7394E2u;
-        if (!legacy_shipping_build && !steam_shipping_build)
+        // Steam public build 24256862 / update2.8.0, captured 2026-07-17.
+        const bool steam_update_2_8_0_shipping_build =
+            nt.FileHeader.TimeDateStamp == 0x047BA867u &&
+            nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
+            nt.OptionalHeader.CheckSum == 0x0A7328BBu;
+        if (!legacy_shipping_build &&
+            !steam_20260711_shipping_build &&
+            !steam_update_2_8_0_shipping_build)
         {
             out.failure = "main_module_build_identity_mismatch";
             return out;
@@ -17272,19 +17964,30 @@ namespace
                                            ((legacy_shipping_build &&
                                              text_file_identity.raw_size == 0x07AA3200u &&
                                              text_file_identity.fnv1a64 == 0x085F72BE8C58A9E6ULL) ||
-                                            (steam_shipping_build &&
+                                            (steam_20260711_shipping_build &&
                                              text_file_identity.raw_size == 0x07AA2800u &&
-                                             text_file_identity.fnv1a64 == 0x4200B2CAF330F8C3ULL));
+                                             text_file_identity.fnv1a64 == 0x4200B2CAF330F8C3ULL) ||
+                                            (steam_update_2_8_0_shipping_build &&
+                                             text_file_identity.raw_size == 0x07AA2800u &&
+                                             text_file_identity.fnv1a64 == 0x079EDD688D78E96BULL));
         if (!text_identity_matches)
         {
             out.failure = "main_module_text_identity_mismatch";
             return out;
         }
 
-        const std::uintptr_t ExpectedThunkRva = steam_shipping_build ? 0x50E4E20 : 0x50E59E0;
-        const std::uintptr_t ExpectedImplRva = steam_shipping_build ? 0x50FEA90 : 0x50FF650;
-        const std::uintptr_t ExpectedConstructorRva = steam_shipping_build ? 0x50DA6A0 : 0x50DB260;
-        const std::uintptr_t ExpectedCommonRva = steam_shipping_build ? 0x50EE0C0 : 0x50EEC80;
+        const std::uintptr_t ExpectedThunkRva = steam_update_2_8_0_shipping_build
+                                                    ? 0x50E46E0
+                                                    : (steam_20260711_shipping_build ? 0x50E4E20 : 0x50E59E0);
+        const std::uintptr_t ExpectedImplRva = steam_update_2_8_0_shipping_build
+                                                   ? 0x5100700
+                                                   : (steam_20260711_shipping_build ? 0x50FEA90 : 0x50FF650);
+        const std::uintptr_t ExpectedConstructorRva = steam_update_2_8_0_shipping_build
+                                                          ? 0x50D9F60
+                                                          : (steam_20260711_shipping_build ? 0x50DA6A0 : 0x50DB260);
+        const std::uintptr_t ExpectedCommonRva = steam_update_2_8_0_shipping_build
+                                                     ? 0x50ED9C0
+                                                     : (steam_20260711_shipping_build ? 0x50EE0C0 : 0x50EEC80);
         std::vector<InternalNoResendRoute> matches{};
         for (std::uintptr_t slot = 0; slot <= 0x180; slot += sizeof(std::uintptr_t))
         {
@@ -18988,6 +19691,8 @@ namespace
         struct ProjectedFrontSample
         {
             FrontSample surface{};
+            double sample_x{0.0};
+            double sample_y{0.0};
             int x{0};
             int y{0};
             double depth{0.0};
@@ -19104,7 +19809,16 @@ namespace
             auto projected_surface = surface;
             projected_surface.screen_nx = clamp01(sx / static_cast<double>(std::max(1, out.width)));
             projected_surface.screen_ny = clamp01(sy / static_cast<double>(std::max(1, out.height)));
-            projected.push_back(ProjectedFrontSample{projected_surface, px, py, depth, has_depth, {}, false});
+            projected.push_back(ProjectedFrontSample{
+                projected_surface,
+                sx,
+                sy,
+                px,
+                py,
+                depth,
+                has_depth,
+                {},
+                false});
         }
         if (projected.empty())
         {
@@ -19300,15 +20014,19 @@ namespace
         out.samples.reserve(projected.size());
         for (const auto& projected_sample : projected)
         {
-            const int bx = best_flip_x ? (out.width - 1 - projected_sample.x) : projected_sample.x;
-            const int by = best_flip_y ? (out.height - 1 - projected_sample.y) : projected_sample.y;
-            const auto pixel_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(out.width) + static_cast<std::size_t>(bx);
-            if (pixel_index >= out.capture_pixels.size())
+            Color raw_color{};
+            if (!mesh_first_sample_capture_color(out.capture_pixels,
+                                                 out.width,
+                                                 out.height,
+                                                 projected_sample.sample_x,
+                                                 projected_sample.sample_y,
+                                                 best_flip_x,
+                                                 best_flip_y,
+                                                 raw_color))
             {
                 ++out.missing_color;
                 continue;
             }
-            const auto raw_color = out.capture_pixels[pixel_index];
             const double raw_values[]{clamp01(raw_color.r), clamp01(raw_color.g), clamp01(raw_color.b)};
             bool raw_whiteish = true;
             for (const auto value : raw_values)
@@ -19428,6 +20146,7 @@ namespace
                ",\"capture_direction_y\":" + std::to_string(capture.capture_direction.Y) +
                ",\"capture_direction_z\":" + std::to_string(capture.capture_direction.Z) +
                ",\"front_capture_projection_backend\":\"" + json_escape(capture.projection_backend) + "\"" +
+               ",\"front_capture_color_sampling\":\"bilinear_pixel_center_linear_light\"" +
                ",\"front_capture_project_attempts\":" + std::to_string(capture.project_attempts) +
                ",\"front_capture_project_success\":" + std::to_string(capture.project_success) +
                ",\"front_capture_project_failed\":" + std::to_string(capture.project_failed) +

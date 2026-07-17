@@ -7,11 +7,53 @@ public sealed record UiSnapshot(
     string Version,
     string Language,
     RuntimeSnapshot Runtime,
+    ModsSnapshot Mods,
+    PaintStudioSnapshot PaintStudio,
+    IReadOnlyList<ExternalModuleSnapshot> ExternalModules,
+    IReadOnlyList<ModuleDiagnosticSnapshot> ModuleDiagnostics,
     SettingsSnapshot Settings,
     SettingsSnapshot Defaults,
     ResetSnapshot ResetState,
     IReadOnlyList<LocaleSnapshot> Locales,
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Translations);
+
+public sealed record ModsSnapshot(
+    AutoPaintModSnapshot AutoPaint,
+    PaintStudioModSnapshot PaintStudio);
+
+public sealed record AutoPaintModSnapshot(
+    bool Available,
+    bool Running);
+
+public sealed record PaintStudioModSnapshot(bool Available);
+
+public sealed record PaintStudioSnapshot(
+    int DetailResolutionPercent,
+    IReadOnlyList<PaintPresetSnapshot> Presets,
+    bool CanUndoSettings,
+    PaintCoverageSnapshot Coverage);
+
+public sealed record PaintPresetSnapshot(string Name, string UpdatedAt);
+
+public sealed record PaintCoverageSnapshot(
+    bool Available,
+    double CoveragePercent,
+    int EnabledSamples,
+    int TotalSamples,
+    int PlannedStrokes,
+    int DetailSelected,
+    int DetailBudget,
+    string Result);
+
+public sealed record ExternalModuleSnapshot(
+    string Id,
+    string Name,
+    string Version,
+    string Description,
+    string EntryUrl,
+    IReadOnlyList<string> Permissions);
+
+public sealed record ModuleDiagnosticSnapshot(string Code, string Message, string ModuleId);
 
 public sealed record RuntimeSnapshot(
     string Process,
@@ -37,6 +79,7 @@ public sealed record SettingsSnapshot(PaintSnapshot Paint, AppSnapshot App);
 public sealed record PaintSnapshot(
     double Brush1SizeTexels,
     double Brush2SizeTexels,
+    int DetailResolutionPercent,
     int PackedBatchLimit,
     int PackedBatchPacingMs,
     bool AutoMaterial,

@@ -15,6 +15,7 @@ public sealed class HostSession
     [
         "paint.brush1SizeTexels",
         "paint.brush2SizeTexels",
+        "paint.detailResolutionPercent",
         "paint.packedBatchLimit",
         "paint.packedBatchPacingMs",
         "paint.autoMaterial",
@@ -47,9 +48,13 @@ public sealed class HostSession
     public HostSession(string version)
     {
         Paths = new AppPaths(version);
+        Paths.EnsureBaseDirectories();
         DiagnosticsState.EnsureInitialized(Paths, version);
         Store = new SettingsStore(Paths);
         Settings = Store.Load();
+        PresetStore = new PaintPresetStore(Paths.RootDirectory);
+        paintPresets = PresetStore.Load();
+        Modules = ModuleCatalog.Scan(Paths);
         Log = new RuntimeLog(Paths);
         Runtime = new RuntimeBridgeService(Paths, Log);
     }
@@ -57,6 +62,8 @@ public sealed class HostSession
     public LocalizationCatalog Localization { get; } = LocalizationCatalog.Load();
     public AppPaths Paths { get; }
     public SettingsStore Store { get; }
+    public PaintPresetStore PresetStore { get; }
+    public ModuleCatalogResult Modules { get; private set; }
     public RuntimeLog Log { get; }
     public RuntimeBridgeService Runtime { get; }
     public AppSettings Settings { get; private set; }
@@ -78,6 +85,18 @@ public sealed class HostSession
     private int paintRequestDispatchGeneration;
     private readonly object replayPassLogGate = new();
     private readonly HashSet<string> loggedReplayPasses = new(StringComparer.Ordinal);
+    private readonly object paintStudioGate = new();
+    private IReadOnlyList<PaintPreset> paintPresets;
+    private PaintSettings? paintSettingsUndo;
+    private PaintCoverageSnapshot paintCoverage = new(
+        Available: false,
+        CoveragePercent: 0.0,
+        EnabledSamples: 0,
+        TotalSamples: 0,
+        PlannedStrokes: 0,
+        DetailSelected: 0,
+        DetailBudget: 0,
+        Result: "No paint analysis yet.");
 
     public async Task<UiSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -133,6 +152,78 @@ public sealed class HostSession
         }
     }
 
+    public HostCommandResult SavePaintPreset(string name)
+    {
+        try
+        {
+            var saved = PresetStore.Save(name, Settings.Paint);
+            lock (paintStudioGate)
+                paintPresets = PresetStore.Load();
+            return new HostCommandResult(true, $"Paint Studio: saved preset '{saved.Name}'.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return new HostCommandResult(false, "Paint Studio: " + ex.Message);
+        }
+    }
+
+    public HostCommandResult ApplyPaintPreset(string name)
+    {
+        try
+        {
+            if (!PresetStore.TryGet(name, out var preset))
+                return new HostCommandResult(false, "Paint Studio: preset was not found.");
+            var previous = Clone(Settings);
+            var next = Clone(Settings);
+            next.Paint = PaintPresetStore.CloneAndClamp(preset.Paint);
+            var result = CommitSettings(next, previous);
+            if (!result.Success)
+                return result;
+            lock (paintStudioGate)
+                paintSettingsUndo = PaintPresetStore.CloneAndClamp(previous.Paint);
+            return new HostCommandResult(true, $"Paint Studio: applied preset '{preset.Name}'.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return new HostCommandResult(false, "Paint Studio: " + ex.Message);
+        }
+    }
+
+    public HostCommandResult DeletePaintPreset(string name)
+    {
+        try
+        {
+            if (!PresetStore.Delete(name))
+                return new HostCommandResult(false, "Paint Studio: preset was not found.");
+            lock (paintStudioGate)
+                paintPresets = PresetStore.Load();
+            return new HostCommandResult(true, "Paint Studio: preset deleted.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return new HostCommandResult(false, "Paint Studio: " + ex.Message);
+        }
+    }
+
+    public HostCommandResult UndoPaintSettings()
+    {
+        PaintSettings? undo;
+        lock (paintStudioGate)
+            undo = paintSettingsUndo is null ? null : PaintPresetStore.CloneAndClamp(paintSettingsUndo);
+        if (undo is null)
+            return new HostCommandResult(false, "Paint Studio: no preset change to undo.");
+
+        var previous = Clone(Settings);
+        var next = Clone(Settings);
+        next.Paint = undo;
+        var result = CommitSettings(next, previous);
+        if (!result.Success)
+            return result;
+        lock (paintStudioGate)
+            paintSettingsUndo = PaintPresetStore.CloneAndClamp(previous.Paint);
+        return new HostCommandResult(true, "Paint Studio: restored the previous paint settings.");
+    }
+
     public HostCommandResult UpdateSetting(string key, JsonElement value)
     {
         return UpdateSettings([new SettingChange(key, value)]);
@@ -184,6 +275,7 @@ public sealed class HostSession
             case "geometry":
                 next.Paint.Brush1SizeTexels = defaults.Paint.Brush1SizeTexels;
                 next.Paint.Brush2SizeTexels = defaults.Paint.Brush2SizeTexels;
+                next.Paint.DetailResolutionPercent = defaults.Paint.DetailResolutionPercent;
                 next.Paint.CoverageStepTexels = defaults.Paint.Brush2SizeTexels;
                 next.Paint.PackedBatchLimit = defaults.Paint.PackedBatchLimit;
                 next.Paint.PackedBatchPacingMs = defaults.Paint.PackedBatchPacingMs;
@@ -303,6 +395,8 @@ public sealed class HostSession
             }
             var response = await Runtime.SendPaintAsync(payload, cancellationToken);
             var message = FriendlyBridgeMessage(response.Message.Length > 0 ? response.Message : response.Stage);
+            if (!previewOnly && !unpreviewOnly)
+                CapturePaintCoverage(response);
             if (response.Success)
             {
                 message = DescribePaintCompletion(message, serverPaint: !previewOnly && !unpreviewOnly);
@@ -609,11 +703,89 @@ public sealed class HostSession
             : Log.Text.TrimEnd() + Environment.NewLine + line;
     }
 
-    public async Task ShutdownBridgeAsync()
+    public async Task ShutdownBridgeAsync(CancellationToken cancellationToken = default)
     {
-        var response = await Runtime.PingAsync();
-        if (response.Ok)
-            _ = await Runtime.ShutdownAsync();
+        if (!Runtime.HasActiveBridgeInstance)
+            return;
+        var shutdown = await Runtime.ShutdownAsync(cancellationToken);
+        if (!shutdown.Ok || !shutdown.Success)
+        {
+            var detail = string.IsNullOrWhiteSpace(shutdown.Message) ? shutdown.Stage : shutdown.Message;
+            Log.Warn("Bridge shutdown was not confirmed: " + detail);
+        }
+    }
+
+    public HostCommandResult ReloadModules()
+    {
+        Modules = ModuleCatalog.Scan(Paths);
+        foreach (var diagnostic in Modules.Diagnostics)
+            Log.Warn($"Module {diagnostic.ModuleId ?? "catalog"}: {diagnostic.Message}");
+        return new HostCommandResult(
+            true,
+            $"Modules: loaded {Modules.Modules.Count}; rejected {Modules.Diagnostics.Count}.");
+    }
+
+    public void OpenModulesDirectory()
+    {
+        Directory.CreateDirectory(Paths.ModulesDirectory);
+        Process.Start(new ProcessStartInfo(Paths.ModulesDirectory) { UseShellExecute = true });
+    }
+
+    public static PaintCoverageSnapshot? ParsePaintCoverage(BridgeReply response)
+    {
+        if (string.IsNullOrWhiteSpace(response.Raw))
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(response.Raw);
+            if (!document.RootElement.TryGetProperty("metadata", out var metadata) ||
+                metadata.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+            var totalSamples = Math.Max(0, Int(metadata, "planner_samples_total", 0));
+            var enabledSamples = Math.Clamp(
+                Int(metadata, "planner_samples_enabled", 0),
+                0,
+                Math.Max(totalSamples, 0));
+            var plannedStrokes = Math.Max(
+                0,
+                Int(metadata, "planner_strokes_total", Int(metadata, "replay_strokes_total", 0)));
+            var detailSelected = Math.Max(
+                0,
+                Int(metadata, "detail_selected_samples", Int(metadata, "replay_strokes_detail_refinement", 0)));
+            var detailBudget = Math.Max(0, Int(metadata, "detail_budget", 0));
+            if (totalSamples == 0 && plannedStrokes == 0 && detailBudget == 0)
+                return null;
+            var percent = totalSamples > 0
+                ? Math.Round(enabledSamples * 100.0 / totalSamples, 1)
+                : 0.0;
+            var result = response.Success
+                ? "Complete"
+                : (string.IsNullOrWhiteSpace(response.Message) ? "Failed" : response.Message.Trim());
+            return new PaintCoverageSnapshot(
+                Available: true,
+                CoveragePercent: percent,
+                EnabledSamples: enabledSamples,
+                TotalSamples: totalSamples,
+                PlannedStrokes: plannedStrokes,
+                DetailSelected: detailSelected,
+                DetailBudget: detailBudget,
+                Result: result);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void CapturePaintCoverage(BridgeReply response)
+    {
+        var coverage = ParsePaintCoverage(response);
+        if (coverage is null)
+            return;
+        lock (paintStudioGate)
+            paintCoverage = coverage;
     }
 
     private HostCommandResult CommitSettings(AppSettings next, AppSettings previous)
@@ -748,15 +920,58 @@ public sealed class HostSession
             queue = FormatQueue(progress);
         }
 
+        IReadOnlyList<PaintPreset> presets;
+        bool canUndoPaintSettings;
+        PaintCoverageSnapshot coverage;
+        lock (paintStudioGate)
+        {
+            presets = paintPresets.ToArray();
+            canUndoPaintSettings = paintSettingsUndo is not null;
+            coverage = paintCoverage;
+        }
+        var modsAvailable = string.Equals(service, "ready", StringComparison.Ordinal);
+        var moduleCatalog = Modules;
+        var externalModules = moduleCatalog.Modules.Select(module => new ExternalModuleSnapshot(
+            module.Id,
+            module.Name,
+            module.Version,
+            module.Description,
+            ModuleEntryUrl(module),
+            module.Permissions)).ToArray();
+        var moduleDiagnostics = moduleCatalog.Diagnostics.Select(diagnostic => new ModuleDiagnosticSnapshot(
+            diagnostic.Code,
+            diagnostic.Message,
+            diagnostic.ModuleId ?? "")).ToArray();
+
         return new UiSnapshot(
             VersionInfo.Current,
             Settings.Language,
             new RuntimeSnapshot(process, bridge, service, percent, progressSource, pass, passProgress, passEta, eta, elapsed, batch, pacing, queue, Log.Text, PaintRunning, progress is not null, DiagnosticsState.Snapshot(Paths)),
+            new ModsSnapshot(
+                new AutoPaintModSnapshot(modsAvailable, PaintRunning),
+                new PaintStudioModSnapshot(Available: true)),
+            new PaintStudioSnapshot(
+                Settings.Paint.DetailResolutionPercent,
+                presets.Select(preset => new PaintPresetSnapshot(
+                    preset.Name,
+                    preset.UpdatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture))).ToArray(),
+                canUndoPaintSettings,
+                coverage),
+            externalModules,
+            moduleDiagnostics,
             ToSnapshot(Settings),
             ToSnapshot(defaults),
             BuildResetSnapshot(Settings, defaults),
             LocalizationCatalog.SupportedLocales.Select(locale => new LocaleSnapshot(locale.Code, locale.NativeName)).ToArray(),
             Localization.All);
+    }
+
+    private static string ModuleEntryUrl(ModuleDescriptor module)
+    {
+        var encodedEntry = string.Join(
+            '/',
+            module.Entry.Split('/').Select(Uri.EscapeDataString));
+        return $"https://{ModuleSdkV1.VirtualHostName(module.Id)}/{encodedEntry}";
     }
 
     private static SettingsSnapshot ToSnapshot(AppSettings settings)
@@ -766,6 +981,7 @@ public sealed class HostSession
             new PaintSnapshot(
                 paint.Brush1SizeTexels,
                 paint.Brush2SizeTexels,
+                paint.DetailResolutionPercent,
                 paint.PackedBatchLimit,
                 paint.PackedBatchPacingMs,
                 paint.AutoMaterial,
@@ -854,7 +1070,9 @@ public sealed class HostSession
         var map = ResetKeys.ToDictionary(key => key, key => !SettingEquals(settings, defaults, key), StringComparer.OrdinalIgnoreCase);
         var sections = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
         {
-            ["paint.geometry"] = map["paint.brush1SizeTexels"] || map["paint.brush2SizeTexels"] || map["paint.packedBatchLimit"] || map["paint.packedBatchPacingMs"],
+            ["paint.geometry"] = map["paint.brush1SizeTexels"] || map["paint.brush2SizeTexels"] ||
+                                 map["paint.detailResolutionPercent"] || map["paint.packedBatchLimit"] ||
+                                 map["paint.packedBatchPacingMs"],
             ["paint.material"] = map["paint.autoMaterial"] || map["paint.metallic"] || map["paint.roughness"],
             ["regions"] = map["paint.frontRegionMode"] || map["paint.sideRegionMode"] || map["paint.backRegionMode"],
             ["fill.material"] = map["paint.fillColor"] || map["paint.fillMetallic"] || map["paint.fillRoughness"],
@@ -868,6 +1086,7 @@ public sealed class HostSession
     {
         "paint.brush1SizeTexels" => Nearly(left.Paint.Brush1SizeTexels, right.Paint.Brush1SizeTexels),
         "paint.brush2SizeTexels" => Nearly(left.Paint.Brush2SizeTexels, right.Paint.Brush2SizeTexels),
+        "paint.detailResolutionPercent" => left.Paint.DetailResolutionPercent == right.Paint.DetailResolutionPercent,
         "paint.packedBatchLimit" => left.Paint.PackedBatchLimit == right.Paint.PackedBatchLimit,
         "paint.packedBatchPacingMs" => left.Paint.PackedBatchPacingMs == right.Paint.PackedBatchPacingMs,
         "paint.autoMaterial" => left.Paint.AutoMaterial == right.Paint.AutoMaterial,
@@ -899,6 +1118,7 @@ public sealed class HostSession
                 settings.Paint.Brush2SizeTexels = defaults.Paint.Brush2SizeTexels;
                 settings.Paint.CoverageStepTexels = defaults.Paint.Brush2SizeTexels;
                 break;
+            case "paint.detailResolutionPercent": settings.Paint.DetailResolutionPercent = defaults.Paint.DetailResolutionPercent; break;
             case "paint.packedBatchLimit": settings.Paint.PackedBatchLimit = defaults.Paint.PackedBatchLimit; break;
             case "paint.packedBatchPacingMs": settings.Paint.PackedBatchPacingMs = defaults.Paint.PackedBatchPacingMs; break;
             case "paint.autoMaterial": settings.Paint.AutoMaterial = defaults.Paint.AutoMaterial; break;
@@ -931,6 +1151,7 @@ public sealed class HostSession
                 settings.Paint.Brush2SizeTexels = value.GetDouble();
                 settings.Paint.CoverageStepTexels = settings.Paint.Brush2SizeTexels;
                 break;
+            case "paint.detailResolutionPercent": settings.Paint.DetailResolutionPercent = RoundedInteger(value); break;
             case "paint.packedBatchLimit": settings.Paint.PackedBatchLimit = RoundedInteger(value); break;
             case "paint.packedBatchPacingMs": settings.Paint.PackedBatchPacingMs = RoundedInteger(value); break;
             case "paint.autoMaterial": settings.Paint.AutoMaterial = value.GetBoolean(); break;

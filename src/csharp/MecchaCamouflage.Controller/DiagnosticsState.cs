@@ -114,7 +114,7 @@ public static class DiagnosticsState
     {
         var snapshot = Snapshot(fallbackPaths);
         var builder = new StringBuilder();
-        builder.AppendLine("Meccha Camouflage diagnostics");
+        builder.AppendLine("Meccha Mod Menu diagnostics");
         builder.AppendLine($"startup_phase: {snapshot.StartupPhase}");
         builder.AppendLine($"asset_validation: {snapshot.AssetValidation}");
         builder.AppendLine($"webview2_runtime: {snapshot.WebView2Runtime}");

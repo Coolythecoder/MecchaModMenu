@@ -34,6 +34,33 @@ let editing = false;
 let activeLogFilter = "all";
 let recordingHotkey = null;
 let lastRenderedLogValue = null;
+let activeModule = "auto-paint";
+let paintCommandPending = false;
+let stopCommandPending = false;
+let paintStudioCommandPending = "";
+let moduleManagerCommandPending = false;
+let paintPresetSignature = "";
+let externalModuleInvalidCount = 0;
+let externalModuleCatalogDiagnostics = [];
+let lastExternalSnapshotSignature = "";
+const externalModules = new Map();
+const externalModuleActions = new Map();
+const externalModuleStops = new Map();
+const ExternalModuleApiVersion = 1;
+const ExternalModuleHost = "meccha-modules.localhost";
+const ExternalModuleCommands = new Map([
+  ["paint.start", "paint"],
+  ["paint.preview", "preview"],
+  ["paint.restore", "unpreview"],
+  ["paint.stop", "stop"]
+]);
+const ExternalModulePermissions = new Map([
+  ["snapshot.get", "snapshot.read"],
+  ["paint.start", "paint.start"],
+  ["paint.preview", "paint.preview"],
+  ["paint.restore", "paint.restore"],
+  ["paint.stop", "paint.stop"]
+]);
 
 window.chrome.webview.addEventListener("message", event => {
   const message = event.data;
@@ -116,6 +143,9 @@ function applyI18n() {
   for (const element of document.querySelectorAll("[data-i18n-aria-label]")) {
     element.setAttribute("aria-label", i18n(element.dataset.i18nAriaLabel));
   }
+  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
+    element.setAttribute("placeholder", i18n(element.dataset.i18nPlaceholder));
+  }
   document.title = i18n("app.title");
 }
 
@@ -132,6 +162,7 @@ function render() {
   renderSettings(currentSnapshot());
   applyI18n();
   renderEditState();
+  renderModules(liveSnapshot);
 }
 
 function renderRuntime(snapshot) {
@@ -140,6 +171,588 @@ function renderRuntime(snapshot) {
   setStatus("footer-bridge", runtime.bridge);
   text("version", snapshot.version);
   renderLogs(runtime);
+}
+
+function renderModules(snapshot) {
+  const runtime = snapshot?.runtime || {};
+  const mods = snapshot?.mods && typeof snapshot.mods === "object" ? snapshot.mods : {};
+  const autoPaint = objectValue(mods.autoPaint);
+
+  const autoAvailable = booleanField(
+    autoPaint,
+    ["available"],
+    runtime.process === "attached" || runtime.bridge === "connected"
+  );
+  const autoRunning = booleanField(
+    autoPaint,
+    ["running", "enabled"],
+    Boolean(runtime.paintRunning)
+  );
+  const autoBusy = booleanField(autoPaint, ["busy"], autoRunning) || paintCommandPending;
+  const autoState = autoRunning
+    ? "running"
+    : autoBusy
+      ? "busy"
+      : autoAvailable
+        ? "ready"
+        : "waiting";
+  setModuleState("auto-paint-state", autoState);
+  setModuleMessage("auto-paint-message", stringField(autoPaint, ["message"]));
+
+  const paintActionLocked = editing || !autoAvailable || autoRunning || autoBusy;
+  setButtonDisabled("paint-start", paintActionLocked);
+  setButtonDisabled("paint-preview", paintActionLocked);
+  setButtonDisabled("paint-unpreview", paintActionLocked);
+  setButtonDisabled(
+    "paint-stop",
+    editing || stopCommandPending || (!autoRunning && !paintCommandPending)
+  );
+
+  renderPaintStudio(snapshot, autoAvailable, autoRunning, autoBusy);
+  reconcileExternalModules(snapshot?.externalModules);
+  renderExternalModuleDiagnostics(snapshot?.moduleDiagnostics);
+  renderModuleNavigation();
+  broadcastExternalSnapshotChanged(liveSnapshot);
+}
+
+function renderPaintStudio(snapshot, autoAvailable, autoRunning, autoBusy) {
+  const studio = objectValue(snapshot?.paintStudio);
+  const studioBusy = paintStudioCommandPending.length > 0 || paintCommandPending;
+  setModuleState(
+    "paint-studio-state",
+    studioBusy ? "busy" : autoAvailable ? "ready" : "waiting"
+  );
+
+  const presets = normalizePaintPresets(studio.presets);
+  renderPaintPresetOptions(presets);
+  const selectedPreset = byId("paint-preset-select").value;
+  const presetLocked = editing || paintStudioCommandPending.length > 0;
+  byId("paint-preset-name").disabled = presetLocked;
+  byId("paint-preset-select").disabled = presetLocked || presets.length === 0;
+  setButtonDisabled("paint-preset-save", presetLocked);
+  setButtonDisabled("paint-preset-apply", presetLocked || selectedPreset.length === 0);
+  setButtonDisabled("paint-preset-delete", presetLocked || selectedPreset.length === 0);
+  setButtonDisabled(
+    "paint-settings-undo",
+    presetLocked || !booleanField(studio, ["canUndoSettings"], false)
+  );
+
+  const previewLocked = editing || !autoAvailable || autoRunning || autoBusy || studioBusy;
+  setButtonDisabled("paint-studio-preview", previewLocked);
+  setButtonDisabled("paint-studio-restore", previewLocked);
+  renderPaintCoverage(objectValue(studio.coverage));
+}
+
+function normalizePaintPresets(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  const presets = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const name = safeText(item.name, 40);
+    if (name.length === 0 || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    presets.push({ name, updatedAt: safeText(item.updatedAt, 80) });
+  }
+  return presets;
+}
+
+function renderPaintPresetOptions(presets) {
+  const signature = JSON.stringify([activeLocale(), presets]);
+  if (signature === paintPresetSignature) {
+    return;
+  }
+  paintPresetSignature = signature;
+  const select = byId("paint-preset-select");
+  const previous = select.value;
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = i18n("paint.preset.choose");
+  select.append(placeholder);
+  for (const preset of presets) {
+    const option = document.createElement("option");
+    option.value = preset.name;
+    option.textContent = preset.updatedAt.length > 0
+      ? `${preset.name} · ${formatPresetUpdatedAt(preset.updatedAt)}`
+      : preset.name;
+    option.title = preset.updatedAt;
+    select.append(option);
+  }
+  select.value = presets.some(preset => preset.name === previous) ? previous : "";
+}
+
+function formatPresetUpdatedAt(value) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString(activeLocale()) : value;
+}
+
+function renderPaintCoverage(coverage) {
+  const available = booleanField(coverage, ["available"], false);
+  if (!available) {
+    text("paint-coverage-percent", "-");
+    text("paint-coverage-samples", "-");
+    text("paint-coverage-strokes", "-");
+    text("paint-coverage-detail", "-");
+    text("paint-coverage-result", stringField(coverage, ["result"]) || i18n("state.unavailable"));
+    return;
+  }
+  const percent = clamp(finiteNumber(coverage.coveragePercent, 0), 0, 100);
+  const enabled = nonNegativeInteger(coverage.enabledSamples);
+  const total = nonNegativeInteger(coverage.totalSamples);
+  const strokes = nonNegativeInteger(coverage.plannedStrokes);
+  const detailSelected = nonNegativeInteger(coverage.detailSelected);
+  const detailBudget = nonNegativeInteger(coverage.detailBudget);
+  text("paint-coverage-percent", `${fmt(percent)}%`);
+  text("paint-coverage-samples", `${enabled} / ${total}`);
+  text("paint-coverage-strokes", String(strokes));
+  text("paint-coverage-detail", `${detailSelected} / ${detailBudget}`);
+  text("paint-coverage-result", stringField(coverage, ["result"]) || i18n("state.ready"));
+}
+
+function objectValue(value) {
+  return value && typeof value === "object" ? value : {};
+}
+
+function booleanField(source, names, fallback) {
+  for (const name of names) {
+    if (typeof source[name] === "boolean") {
+      return source[name];
+    }
+  }
+  return Boolean(fallback);
+}
+
+function stringField(source, names) {
+  for (const name of names) {
+    if (typeof source[name] === "string" && source[name].trim().length > 0) {
+      return source[name].trim();
+    }
+  }
+  return "";
+}
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function nonNegativeInteger(value) {
+  return Math.max(0, Math.round(finiteNumber(value, 0)));
+}
+
+function safeText(value, maximumLength = 200) {
+  return typeof value === "string" ? value.trim().slice(0, maximumLength) : "";
+}
+
+function setModuleState(id, state) {
+  const element = byId(id);
+  element.textContent = i18n(`state.${state}`);
+  element.className = `status-token ${statusClass(state)}`;
+}
+
+function setModuleMessage(id, value) {
+  const element = byId(id);
+  element.textContent = value;
+  element.hidden = value.length === 0;
+}
+
+function setButtonDisabled(id, disabled) {
+  byId(id).disabled = Boolean(disabled);
+}
+
+function renderModuleNavigation() {
+  for (const tab of document.querySelectorAll("[data-module-target]")) {
+    const selected = tab.dataset.moduleTarget === activeModule;
+    tab.classList.toggle("active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of document.querySelectorAll("[data-module-panel]")) {
+    const selected = panel.dataset.modulePanel === activeModule;
+    panel.classList.toggle("active", selected);
+    panel.hidden = !selected;
+  }
+  byId("settings-action-bar").hidden = activeModule.startsWith("external:");
+}
+
+function selectModule(module) {
+  const exists = [...document.querySelectorAll("[data-module-panel]")]
+    .some(panel => panel.dataset.modulePanel === module);
+  if (!exists) {
+    return;
+  }
+  activeModule = module;
+  renderModuleNavigation();
+}
+
+function reconcileExternalModules(value) {
+  const normalized = normalizeExternalModuleDescriptors(value);
+  externalModuleInvalidCount = normalized.invalidCount;
+  const desired = new Map(normalized.descriptors.map(descriptor => [descriptor.id, descriptor]));
+
+  for (const [id, current] of externalModules) {
+    const next = desired.get(id);
+    if (next && next.signature === current.descriptor.signature) {
+      continue;
+    }
+    current.tab.remove();
+    current.panel.remove();
+    externalModules.delete(id);
+    if (!next && activeModule === current.target) {
+      activeModule = "auto-paint";
+    }
+  }
+
+  for (const descriptor of normalized.descriptors) {
+    if (!externalModules.has(descriptor.id)) {
+      externalModules.set(descriptor.id, createExternalModule(descriptor));
+    }
+  }
+
+  const navigation = document.querySelector(".module-nav");
+  const moduleColumn = document.querySelector(".module-column");
+  const settingsBar = byId("settings-action-bar");
+  let nextTab = null;
+  let nextPanel = settingsBar;
+  for (const descriptor of [...normalized.descriptors].reverse()) {
+    const module = externalModules.get(descriptor.id);
+    if (module.tab.parentNode !== navigation || module.tab.nextSibling !== nextTab) {
+      navigation.insertBefore(module.tab, nextTab);
+    }
+    if (module.panel.parentNode !== moduleColumn || module.panel.nextSibling !== nextPanel) {
+      moduleColumn.insertBefore(module.panel, nextPanel);
+    }
+    nextTab = module.tab;
+    nextPanel = module.panel;
+  }
+}
+
+function normalizeExternalModuleDescriptors(value) {
+  if (value === undefined || value === null) {
+    return { descriptors: [], invalidCount: 0 };
+  }
+  if (!Array.isArray(value)) {
+    return { descriptors: [], invalidCount: 1 };
+  }
+  const descriptors = [];
+  const ids = new Set();
+  const origins = new Set();
+  let invalidCount = 0;
+  for (const item of value) {
+    const descriptor = normalizeExternalModuleDescriptor(item);
+    if (!descriptor || ids.has(descriptor.id) || origins.has(descriptor.origin)) {
+      invalidCount += 1;
+      continue;
+    }
+    ids.add(descriptor.id);
+    origins.add(descriptor.origin);
+    descriptors.push(descriptor);
+  }
+  return { descriptors, invalidCount };
+}
+
+function normalizeExternalModuleDescriptor(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const id = safeText(value.id, 64);
+  const name = safeText(value.name, 80);
+  const version = safeText(value.version, 40);
+  const description = safeText(value.description, 500);
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id) || name.length === 0 || !Array.isArray(value.permissions)) {
+    return null;
+  }
+  let url;
+  try {
+    url = new URL(value.entryUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" ||
+      !url.hostname.endsWith(`.${ExternalModuleHost}`) ||
+      url.port !== "" ||
+      url.username ||
+      url.password) {
+    return null;
+  }
+  const permissions = [...new Set(value.permissions
+    .filter(permission => typeof permission === "string")
+    .map(permission => permission.trim())
+    .filter(permission => permission.length > 0 && permission.length <= 64))].sort();
+  const signature = JSON.stringify([id, name, version, description, url.href, permissions]);
+  return {
+    id,
+    name,
+    version,
+    description,
+    entryUrl: url.href,
+    origin: url.origin,
+    permissions: new Set(permissions),
+    signature
+  };
+}
+
+function createExternalModule(descriptor) {
+  const target = `external:${descriptor.id}`;
+  const tabId = `module-tab-external-${descriptor.id}`;
+  const panelId = `module-external-${descriptor.id}`;
+  const tab = document.createElement("button");
+  tab.id = tabId;
+  tab.type = "button";
+  tab.role = "tab";
+  tab.dataset.moduleTarget = target;
+  tab.setAttribute("aria-controls", panelId);
+  tab.setAttribute("aria-selected", "false");
+  tab.textContent = descriptor.name;
+  tab.title = descriptor.description;
+
+  const panel = document.createElement("section");
+  panel.id = panelId;
+  panel.className = "panel panel-fill corner-accent module-panel external-module-panel";
+  panel.dataset.modulePanel = target;
+  panel.setAttribute("role", "tabpanel");
+  panel.setAttribute("aria-labelledby", tabId);
+  panel.hidden = true;
+
+  const title = document.createElement("div");
+  title.className = "panel-title";
+  const name = document.createElement("span");
+  name.textContent = descriptor.name;
+  const version = document.createElement("b");
+  version.className = "external-module-version";
+  version.textContent = descriptor.version;
+  title.append(name, version);
+
+  const description = document.createElement("div");
+  description.className = "external-module-description";
+  description.textContent = descriptor.description;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+  iframe.title = descriptor.name;
+  iframe.loading = "lazy";
+  iframe.referrerPolicy = "no-referrer";
+  iframe.src = descriptor.entryUrl;
+  panel.append(title, description, iframe);
+  tab.addEventListener("click", () => selectModule(target));
+  const module = { descriptor, target, tab, panel, iframe, loaded: false };
+  iframe.addEventListener("load", () => {
+    module.loaded = true;
+    broadcastExternalSnapshotChanged(liveSnapshot, module);
+  });
+  return module;
+}
+
+function renderExternalModuleDiagnostics(moduleDiagnostics) {
+  if (moduleDiagnostics !== undefined) {
+    externalModuleCatalogDiagnostics = normalizeModuleDiagnostics(moduleDiagnostics);
+  }
+  const diagnostics = byId("external-modules-diagnostics");
+  if (!diagnostics) {
+    return;
+  }
+  diagnostics.textContent = i18n(
+    "external.modules.diagnostics",
+    externalModules.size,
+    externalModuleInvalidCount + externalModuleCatalogDiagnostics.length,
+    new Set([...externalModuleActions.keys(), ...externalModuleStops.keys()]).size
+  );
+  diagnostics.title = externalModuleCatalogDiagnostics
+    .map(item => item.moduleId.length > 0
+      ? `${item.moduleId}: ${item.message}`
+      : item.message)
+    .join("\n");
+  byId("open-modules").disabled = moduleManagerCommandPending;
+  byId("reload-modules").disabled = moduleManagerCommandPending;
+}
+
+function normalizeModuleDiagnostics(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter(item => item && typeof item === "object" && !Array.isArray(item))
+    .map(item => ({
+      code: safeText(item.code, 80),
+      message: safeText(item.message, 500),
+      moduleId: safeText(item.moduleId, 64)
+    }))
+    .filter(item => item.message.length > 0);
+}
+
+async function handleExternalModuleMessage(event) {
+  const module = [...externalModules.values()].find(candidate =>
+    candidate.descriptor.origin !== "null" &&
+    event.origin === candidate.descriptor.origin &&
+    event.source === candidate.iframe.contentWindow
+  );
+  if (!module) {
+    return;
+  }
+  const request = event.data;
+  if (!request || typeof request !== "object" || Array.isArray(request) || request.source !== "meccha-module") {
+    return;
+  }
+  const requestId = typeof request.requestId === "string" ? request.requestId : "";
+  const command = typeof request.command === "string" ? request.command : "";
+  if (requestId.length === 0 || requestId.length > 128 || requestId.trim().length === 0) {
+    return;
+  }
+  if (request.apiVersion !== ExternalModuleApiVersion) {
+    postExternalModuleResponse(module, requestId, command, false, null, "unsupported_version", "Unsupported module API version.");
+    return;
+  }
+  const permission = ExternalModulePermissions.get(command);
+  if (!permission) {
+    postExternalModuleResponse(module, requestId, command, false, null, "unsupported_command", "Unsupported module command.");
+    return;
+  }
+  if (!module.descriptor.permissions.has(permission)) {
+    postExternalModuleResponse(module, requestId, command, false, null, "permission_denied", "The module does not have permission for this command.");
+    return;
+  }
+  if (command === "snapshot.get") {
+    postExternalModuleResponse(module, requestId, command, true, sanitizeSnapshotForModule(liveSnapshot));
+    return;
+  }
+  const stopping = command === "paint.stop";
+  const actionBlocked = stopping
+    ? externalModuleStops.has(module.descriptor.id)
+    : externalModuleActions.has(module.descriptor.id) || externalModuleStops.has(module.descriptor.id);
+  if (actionBlocked) {
+    postExternalModuleResponse(module, requestId, command, false, null, "action_in_flight", "This module already has an action in flight.");
+    return;
+  }
+
+  const pendingActions = stopping ? externalModuleStops : externalModuleActions;
+  const actionToken = {};
+  pendingActions.set(module.descriptor.id, actionToken);
+  renderExternalModuleDiagnostics();
+  try {
+    const result = await send(ExternalModuleCommands.get(command));
+    const message = safeText(result?.message, 500);
+    if (result?.success) {
+      postExternalModuleResponse(module, requestId, command, true, { success: true, message });
+    } else {
+      postExternalModuleResponse(module, requestId, command, false, null, "command_failed", message || "The host command failed.");
+    }
+  } catch (error) {
+    postExternalModuleResponse(module, requestId, command, false, null, "host_error", safeText(error?.message || String(error), 500));
+  } finally {
+    if (pendingActions.get(module.descriptor.id) === actionToken) {
+      pendingActions.delete(module.descriptor.id);
+    }
+    renderExternalModuleDiagnostics();
+  }
+}
+
+function postExternalModuleResponse(module, requestId, command, ok, data = null, code = "", message = "") {
+  const response = {
+    source: "meccha-host",
+    apiVersion: ExternalModuleApiVersion,
+    type: "response",
+    requestId,
+    command,
+    ok
+  };
+  if (ok) {
+    response.data = data;
+  } else {
+    response.error = { code, message };
+  }
+  module.iframe.contentWindow?.postMessage(response, module.descriptor.origin);
+}
+
+function broadcastExternalSnapshotChanged(snapshot, targetModule = null) {
+  if (!snapshot) {
+    return;
+  }
+  const data = sanitizeSnapshotForModule(snapshot);
+  if (!targetModule) {
+    const signature = JSON.stringify(data);
+    if (signature === lastExternalSnapshotSignature) {
+      return;
+    }
+    lastExternalSnapshotSignature = signature;
+  }
+  const message = {
+    source: "meccha-host",
+    apiVersion: ExternalModuleApiVersion,
+    type: "event",
+    name: "snapshotChanged",
+    data
+  };
+  const modules = targetModule ? [targetModule] : externalModules.values();
+  for (const module of modules) {
+    if (!module.loaded || !module.descriptor.permissions.has("snapshot.read")) {
+      continue;
+    }
+    module.iframe.contentWindow?.postMessage(message, module.descriptor.origin);
+  }
+}
+
+function sanitizeSnapshotForModule(snapshot) {
+  const runtime = objectValue(snapshot?.runtime);
+  const paint = objectValue(snapshot?.settings?.paint);
+  const studio = objectValue(snapshot?.paintStudio);
+  const coverage = objectValue(studio.coverage);
+  return {
+    version: safeText(snapshot?.version, 40),
+    language: safeText(snapshot?.language, 20),
+    runtime: {
+      process: safeText(runtime.process, 32),
+      bridge: safeText(runtime.bridge, 32),
+      service: safeText(runtime.service, 32),
+      paintRunning: Boolean(runtime.paintRunning),
+      progressVisible: Boolean(runtime.progressVisible),
+      progressPercent: clamp(finiteNumber(runtime.progressPercent, 0), 0, 100),
+      paintPass: safeText(runtime.paintPass, 80),
+      paintPassProgress: safeText(runtime.paintPassProgress, 80),
+      paintPassEta: safeText(runtime.paintPassEta, 80),
+      paintEta: safeText(runtime.paintEta, 80),
+      paintElapsed: safeText(runtime.paintElapsed, 80)
+    },
+    settings: {
+      paint: {
+        brush1SizeTexels: finiteNumber(paint.brush1SizeTexels, 0),
+        brush2SizeTexels: finiteNumber(paint.brush2SizeTexels, 0),
+        detailResolutionPercent: clamp(finiteNumber(paint.detailResolutionPercent, 100), 50, 500),
+        packedBatchLimit: nonNegativeInteger(paint.packedBatchLimit),
+        packedBatchPacingMs: nonNegativeInteger(paint.packedBatchPacingMs),
+        autoMaterial: Boolean(paint.autoMaterial),
+        metallic: clamp(finiteNumber(paint.metallic, 0), 0, 1),
+        roughness: clamp(finiteNumber(paint.roughness, 1), 0, 1),
+        frontRegionMode: safeText(paint.frontRegionMode, 16),
+        sideRegionMode: safeText(paint.sideRegionMode, 16),
+        backRegionMode: safeText(paint.backRegionMode, 16),
+        fillColor: safeText(paint.fillColor, 16),
+        fillMetallic: clamp(finiteNumber(paint.fillMetallic, 0), 0, 1),
+        fillRoughness: clamp(finiteNumber(paint.fillRoughness, 1), 0, 1)
+      }
+    },
+    paintStudio: {
+      detailResolutionPercent: clamp(finiteNumber(studio.detailResolutionPercent, paint.detailResolutionPercent || 100), 50, 500),
+      presets: normalizePaintPresets(studio.presets),
+      canUndoSettings: Boolean(studio.canUndoSettings),
+      coverage: {
+        available: Boolean(coverage.available),
+        coveragePercent: clamp(finiteNumber(coverage.coveragePercent, 0), 0, 100),
+        enabledSamples: nonNegativeInteger(coverage.enabledSamples),
+        totalSamples: nonNegativeInteger(coverage.totalSamples),
+        plannedStrokes: nonNegativeInteger(coverage.plannedStrokes),
+        detailSelected: nonNegativeInteger(coverage.detailSelected),
+        detailBudget: nonNegativeInteger(coverage.detailBudget),
+        result: safeText(coverage.result, 200)
+      }
+    }
+  };
 }
 
 function renderLogs(runtime) {
@@ -251,10 +864,10 @@ function localizedStatus(value) {
 
 function statusClass(value) {
   const normalized = String(value || "").toLowerCase();
-  if (["attached", "connected", "ready", "running", "complete", "ok"].includes(normalized)) {
+  if (["attached", "connected", "ready", "running", "complete", "ok", "enabled"].includes(normalized)) {
     return "ok";
   }
-  if (["waiting", "starting", "pending"].includes(normalized)) {
+  if (["waiting", "starting", "pending", "busy"].includes(normalized)) {
     return "wait";
   }
   if (["failed", "error", "cancelled"].includes(normalized)) {
@@ -267,6 +880,13 @@ function renderSettings(snapshot) {
   const paint = snapshot.settings.paint;
   setNumberPair("brush-1-size", "brush-1-size-number", paint.brush1SizeTexels);
   setNumberPair("brush-2-size", "brush-2-size-number", paint.brush2SizeTexels);
+  const detailResolution = clamp(
+    finiteNumber(paint.detailResolutionPercent, snapshot.paintStudio?.detailResolutionPercent ?? 100),
+    50,
+    500
+  );
+  setNumberPair("auto-detail-resolution", "auto-detail-resolution-number", detailResolution);
+  setNumberPair("detail-resolution", "detail-resolution-number", detailResolution);
   setNumberPair("packed-batch-limit", "packed-batch-limit-number", paint.packedBatchLimit);
   setNumberPair("packed-batch-pacing", "packed-batch-pacing-number", paint.packedBatchPacingMs);
   setChecked("auto-material", paint.autoMaterial);
@@ -538,6 +1158,7 @@ function diffSnapshots(before, after) {
     "app.language",
     "paint.brush1SizeTexels",
     "paint.brush2SizeTexels",
+    "paint.detailResolutionPercent",
     "paint.packedBatchLimit",
     "paint.packedBatchPacingMs",
     "paint.autoMaterial",
@@ -578,8 +1199,14 @@ function normalizeColor(value) {
 }
 
 function bindRangePair(sliderId, numberId, key, transform = Number) {
-  const slider = byId(sliderId);
-  const number = byId(numberId);
+  bindRangePairs([[sliderId, numberId]], key, transform);
+}
+
+function bindRangePairs(pairIds, key, transform = Number) {
+  const pairs = pairIds.map(([sliderId, numberId]) => ({
+    slider: byId(sliderId),
+    number: byId(numberId)
+  }));
   const commit = source => {
     if (!canEditControl(source)) {
       return;
@@ -596,20 +1223,24 @@ function bindRangePair(sliderId, numberId, key, transform = Number) {
       ? minimum + Math.round((clamped - minimum) / step) * step
       : clamped;
     const normalized = clamp(stepped, minimum, maximum);
-    slider.value = String(normalized);
-    number.value = fmt(normalized);
+    for (const pair of pairs) {
+      pair.slider.value = String(normalized);
+      pair.number.value = fmt(normalized);
+    }
     setDraftSetting(key, transform(normalized));
     if (key === "app.opacity") {
       send("previewWindow", { opacity: transform(normalized) }).catch(error => showError(error.message || String(error)));
     }
   };
-  slider.addEventListener("input", () => commit(slider));
-  number.addEventListener("change", () => commit(number));
-  number.addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-      number.blur();
-    }
-  });
+  for (const pair of pairs) {
+    pair.slider.addEventListener("input", () => commit(pair.slider));
+    pair.number.addEventListener("change", () => commit(pair.number));
+    pair.number.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        pair.number.blur();
+      }
+    });
+  }
 }
 
 function bindInput(id, key, transform = value => value) {
@@ -730,6 +1361,116 @@ function setHotkeyDialogMessage(message, error) {
   byId("hotkey-dialog-message").textContent = message;
 }
 
+async function runPaintAction(command) {
+  const stopping = command === "stop";
+  if ((stopping && stopCommandPending) || (!stopping && paintCommandPending)) {
+    return;
+  }
+  if (stopping) {
+    stopCommandPending = true;
+  } else {
+    paintCommandPending = true;
+  }
+  render();
+  try {
+    const result = await send(command);
+    showCommandResult(result);
+  } catch (error) {
+    showError(error?.message || String(error));
+  } finally {
+    if (stopping) {
+      stopCommandPending = false;
+    } else {
+      paintCommandPending = false;
+    }
+    render();
+    refresh().catch(error => showError(error?.message || String(error)));
+  }
+}
+
+async function runPaintStudioCommand(command, payload = {}) {
+  if (paintStudioCommandPending.length > 0) {
+    return false;
+  }
+  paintStudioCommandPending = command;
+  render();
+  let succeeded = false;
+  try {
+    const result = await send(command, payload);
+    succeeded = Boolean(result?.success);
+    showCommandResult(result);
+  } catch (error) {
+    showError(error?.message || String(error));
+  } finally {
+    paintStudioCommandPending = "";
+    render();
+    refresh().catch(error => showError(error?.message || String(error)));
+  }
+  return succeeded;
+}
+
+async function savePaintPreset() {
+  const input = byId("paint-preset-name");
+  const name = input.value.trim();
+  if (name.length === 0) {
+    showError(i18n("error.preset.name.required"));
+    return;
+  }
+  if (await runPaintStudioCommand("savePaintPreset", { name })) {
+    input.value = "";
+  }
+}
+
+function selectedPaintPreset() {
+  return byId("paint-preset-select").value;
+}
+
+function applyPaintPreset() {
+  const name = selectedPaintPreset();
+  if (name.length === 0) {
+    showError(i18n("error.preset.selection.required"));
+    return;
+  }
+  runPaintStudioCommand("applyPaintPreset", { name });
+}
+
+function deletePaintPreset() {
+  const name = selectedPaintPreset();
+  if (name.length === 0) {
+    showError(i18n("error.preset.selection.required"));
+    return;
+  }
+  runPaintStudioCommand("deletePaintPreset", { name });
+}
+
+async function runModuleManagerCommand(command) {
+  if (moduleManagerCommandPending) {
+    return;
+  }
+  moduleManagerCommandPending = true;
+  renderExternalModuleDiagnostics();
+  try {
+    const result = await send(command);
+    showCommandResult(result);
+  } catch (error) {
+    showError(error?.message || String(error));
+  } finally {
+    moduleManagerCommandPending = false;
+    renderExternalModuleDiagnostics();
+    refresh().catch(error => showError(error?.message || String(error)));
+  }
+}
+
+function showCommandResult(result) {
+  if (!result?.success) {
+    showError(result?.message || i18n("error.command.failed"));
+    return;
+  }
+  if (result.message) {
+    toast(result.message);
+  }
+}
+
 function showError(message) {
   console.error(message);
   toast(message, "error");
@@ -746,10 +1487,37 @@ function toast(message, level = "success") {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  for (const tab of document.querySelectorAll("[data-module-target]")) {
+    tab.addEventListener("click", () => selectModule(tab.dataset.moduleTarget));
+  }
+  byId("paint-start").addEventListener("click", () => runPaintAction("paint"));
+  byId("paint-preview").addEventListener("click", () => runPaintAction("preview"));
+  byId("paint-unpreview").addEventListener("click", () => runPaintAction("unpreview"));
+  byId("paint-stop").addEventListener("click", () => runPaintAction("stop"));
+  byId("paint-studio-preview").addEventListener("click", () => runPaintAction("preview"));
+  byId("paint-studio-restore").addEventListener("click", () => runPaintAction("unpreview"));
+  byId("paint-preset-save").addEventListener("click", savePaintPreset);
+  byId("paint-preset-apply").addEventListener("click", applyPaintPreset);
+  byId("paint-preset-delete").addEventListener("click", deletePaintPreset);
+  byId("paint-settings-undo").addEventListener("click", () => runPaintStudioCommand("undoPaintSettings"));
+  byId("paint-preset-select").addEventListener("change", render);
+  byId("paint-preset-name").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      savePaintPreset();
+    }
+  });
+  byId("open-modules").addEventListener("click", () => runModuleManagerCommand("openModules"));
+  byId("reload-modules").addEventListener("click", () => runModuleManagerCommand("reloadModules"));
+  window.addEventListener("message", handleExternalModuleMessage);
   bindRangePair("brush-1-size", "brush-1-size-number", "paint.brush1SizeTexels");
   bindRangePair("brush-2-size", "brush-2-size-number", "paint.brush2SizeTexels");
   bindRangePair("packed-batch-limit", "packed-batch-limit-number", "paint.packedBatchLimit");
   bindRangePair("packed-batch-pacing", "packed-batch-pacing-number", "paint.packedBatchPacingMs");
+  bindRangePairs([
+    ["auto-detail-resolution", "auto-detail-resolution-number"],
+    ["detail-resolution", "detail-resolution-number"]
+  ], "paint.detailResolutionPercent", value => Math.round(value));
   bindCheckbox("auto-material", "paint.autoMaterial");
   bindRangePair("metallic", "metallic-number", "paint.metallic");
   bindRangePair("roughness", "roughness-number", "paint.roughness");

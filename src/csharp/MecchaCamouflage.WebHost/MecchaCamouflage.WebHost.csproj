@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>meccha-camouflage</AssemblyName>
+    <AssemblyName>meccha-mod-menu</AssemblyName>
     <RootNamespace>MecchaCamouflage.WebHost</RootNamespace>
     <ApplicationIcon>..\..\..\resources\app-icons\icon.ico</ApplicationIcon>
     <MecchaAppVersion Condition="'$(MecchaAppVersion)' == ''">dev</MecchaAppVersion>

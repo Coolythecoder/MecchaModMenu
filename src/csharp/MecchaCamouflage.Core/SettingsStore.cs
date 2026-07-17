@@ -49,6 +49,10 @@ public sealed class SettingsStore
 
         var paint = settings.Paint;
         paint.Brush1SizeTexels = ReadDouble(root, "brush_1_size_texels", paint.Brush1SizeTexels);
+        paint.DetailResolutionPercent = ReadInt(
+            root,
+            "detail_resolution_percent",
+            paint.DetailResolutionPercent);
         if (root.TryGetPropertyValue("brush_2_size_texels", out var brush2Value) && brush2Value is not null)
         {
             paint.Brush2SizeTexels = brush2Value.GetValue<double>();
@@ -137,6 +141,7 @@ public sealed class SettingsStore
 
         settings.Paint.Brush1SizeTexels = Math.Clamp(settings.Paint.Brush1SizeTexels, 10.0, 30.0);
         settings.Paint.Brush2SizeTexels = Math.Clamp(settings.Paint.Brush2SizeTexels, 5.0, 10.0);
+        settings.Paint.DetailResolutionPercent = Math.Clamp(settings.Paint.DetailResolutionPercent, 50, 500);
         settings.Paint.PackedBatchLimit = Math.Clamp(settings.Paint.PackedBatchLimit, 1, 20);
         settings.Paint.PackedBatchPacingMs = Math.Clamp(settings.Paint.PackedBatchPacingMs, 50, 500);
         settings.Paint.CoverageStepTexels = settings.Paint.Brush2SizeTexels;
@@ -168,6 +173,7 @@ public sealed class SettingsStore
         stop_hotkey = settings.StopHotkey,
         brush_1_size_texels = settings.Paint.Brush1SizeTexels,
         brush_2_size_texels = settings.Paint.Brush2SizeTexels,
+        detail_resolution_percent = settings.Paint.DetailResolutionPercent,
         packed_batch_limit = settings.Paint.PackedBatchLimit,
         packed_batch_pacing_ms = settings.Paint.PackedBatchPacingMs,
         coverage_step_texels = settings.Paint.CoverageStepTexels,

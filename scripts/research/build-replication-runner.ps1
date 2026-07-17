@@ -75,7 +75,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE"
 }
 
-$RunnerPath = Join-Path $RunnerDir "meccha-camouflage.exe"
+$RunnerPath = Join-Path $RunnerDir "meccha-mod-menu.exe"
 if (-not (Test-Path $RunnerPath -PathType Leaf)) {
     throw "Research runner was not produced: $RunnerPath"
 }

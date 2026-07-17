@@ -23,6 +23,63 @@ research build script when those capabilities are required.
 - **Unverified**: plausible or observed once, but insufficient for a product or
   release claim.
 
+## update2.8.0 build contract
+
+The latest statically revalidated target is the 17 July 2026 Steam release
+`update2.8.0`, public Build ID `24256862`, depot `4704691`, manifest
+`4871951631373356969`. The release label comes from the
+[official announcement](https://steamcommunity.com/games/4704690/announcements/detail/711155348639056585);
+the Build ID mapping is also recorded by
+[SteamDB](https://steamdb.info/patchnotes/24256862/).
+
+| Executable identity | update2.8.0 value |
+| --- | ---: |
+| SHA-256 | `91B6CC5A75F22CDBE81D3FD6A37F7F894931F04A1E5BDCC652740A73558B2CDA` |
+| PE timestamp | `0x047BA867` |
+| `SizeOfImage` | `0x0AAFD000` |
+| PE checksum | `0x0A7328BB` |
+| raw `.text` size | `0x07AA2800` |
+| raw `.text` bridge FNV-1a-style 64 (basis `1469598103934665603`) | `0x079EDD688D78E96B` |
+
+The native packed receiver contract for this build is:
+
+| Target | RVA |
+| --- | ---: |
+| `MulticastPackedPaintBatch` thunk | `0x50E39A0` |
+| vtable implementation | `0x50FD9F0` |
+| packed decoder | `0x5105740` |
+| enqueue inner | `0x50F5CF0` |
+| compact-stroke expander | `0x50F63B0` |
+| skeletal preflight | `0x50F5F20` |
+| component-context resolver | `0x3AEACE0` |
+| manager resolver | `0x50E8A70` |
+| manager enqueue | `0x510AD60` |
+| queue coalescer | `0x510AB60` |
+
+The retained internal no-resend research route uses thunk `0x50E46E0`,
+implementation `0x5100700`, stroke constructor `0x50D9F60`, and common apply
+function `0x50ED9C0`.
+
+These addresses were recovered independently from instruction signatures and
+relative-call edges, then checked against every existing route byte contract.
+The packed gate now also verifies the compact-stroke expander to skeletal
+preflight edge and the preflight's mesh-bounds/world-radius behavior. The old
+Steam contracts remain available only behind their own exact PE and `.text`
+identities.
+
+The shipped `paintman` and `paintman_cube` profiles did not need regeneration.
+Their three current IoStore compression blocks all reside in Steam content
+chunk SHA-1 `f6228dcda191ae381a1d29d20586bb50136039e9`, which is reused byte-for-byte
+from the immediately preceding depot manifest `8387924540028786821` (Build ID
+`24176442`). The update changed and extended the surrounding IoStore archives,
+but not the compressed mesh data that produced either profile.
+
+This is static compatibility evidence, not a multiplayer release claim. The
+runtime still has to prove the reflected UFunction layouts, vtable slots,
+live component/manager objects, queue offsets, and runtime-triangle layout.
+Complete the host-initiated and joining-client-initiated checks in the Release
+Boundary section before describing update2.8.0 multiplayer behavior as tested.
+
 ## Production Route
 
 Normal multiplayer paint uses a paired packed route:
@@ -42,6 +99,12 @@ The planner produces `Fill -> Brush 1 -> Brush 2`; no packed batch crosses a
 pass boundary. Brush 1 ranges from 10--30 texels and defaults to 30. Brush 2
 ranges from 5--10 texels. Coverage is intentionally synchronized to Brush 2:
 setting Brush 2 to 5 also sets coverage to 5.
+
+Projected source colors are sampled from the calibrated bulk capture with
+pixel-centred, linear-light bilinear interpolation. Integer pixel reads remain
+limited to bulk orientation/color calibration. This removes nearest-pixel
+projection jitter without adding dark sRGB interpolation halos or changing UV
+sample density, stroke totals, pass boundaries, or the packed wire contract.
 
 Completion means that the initiating client's local game queue drained. It
 does **not** prove that a joining client has presented its final pixels. The UI

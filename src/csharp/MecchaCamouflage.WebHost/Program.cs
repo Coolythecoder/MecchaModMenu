@@ -43,10 +43,10 @@ internal static class Program
         {
             DiagnosticsState.RecordException("application_run_failed", exception);
             MessageBox.Show(
-                "Meccha Camouflage failed to start. Diagnostic logs were written to:" +
+                "Meccha Mod Menu failed to start. Diagnostic logs were written to:" +
                 Environment.NewLine + paths.DiagnosticsDirectory +
                 Environment.NewLine + Environment.NewLine + exception.Message,
-                "Meccha Camouflage",
+                "Meccha Mod Menu",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }

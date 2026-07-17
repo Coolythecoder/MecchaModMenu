@@ -19,7 +19,7 @@ internal static class WebViewFailureDialog
     {
         using var dialog = new Form
         {
-            Text = "Meccha Camouflage",
+            Text = "Meccha Mod Menu",
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MinimizeBox = false,

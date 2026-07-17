@@ -1,0 +1,111 @@
+using System.Security.Cryptography;
+using System.Text;
+
+namespace MecchaCamouflage.Core;
+
+/// <summary>
+/// Stable, data-only contract for third-party web modules. Loading a manifest grants
+/// no permission and does not execute its entry point.
+/// </summary>
+public static class ModuleSdkV1
+{
+    public const int SchemaVersion = 1;
+    public const int ApiVersion = 1;
+    public const int MaxModuleDirectories = 128;
+    public const int MaxManifestBytes = 64 * 1024;
+    public const long MaxEntryBytes = 4L * 1024 * 1024;
+    public const int MaxPackageDirectories = 128;
+    public const int MaxPackageFiles = 256;
+    public const long MaxAssetBytes = 8L * 1024 * 1024;
+    public const long MaxPackageBytes = 32L * 1024 * 1024;
+    public const int MaxIdLength = 64;
+    public const int MaxNameLength = 80;
+    public const int MaxVersionLength = 40;
+    public const int MaxDescriptionLength = 320;
+    public const int MaxEntryLength = 240;
+
+    public const string SnapshotReadPermission = "snapshot.read";
+    public const string PaintStartPermission = "paint.start";
+    public const string PaintPreviewPermission = "paint.preview";
+    public const string PaintRestorePermission = "paint.restore";
+    public const string PaintStopPermission = "paint.stop";
+
+    private static readonly string[] PermissionValues =
+    [
+        SnapshotReadPermission,
+        PaintStartPermission,
+        PaintPreviewPermission,
+        PaintRestorePermission,
+        PaintStopPermission
+    ];
+
+    public static StringComparer IdComparer { get; } = StringComparer.OrdinalIgnoreCase;
+    public static IReadOnlyList<string> AllowedPermissions { get; } = Array.AsReadOnly(PermissionValues);
+
+    public static bool IsAllowedPermission(string? permission) =>
+        permission is not null && PermissionValues.Contains(permission, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Returns a stable, DNS-safe origin for one accepted module. Keeping every module on a
+    /// distinct origin prevents same-origin scripts from borrowing another module's grants.
+    /// </summary>
+    public static string VirtualHostName(string id)
+    {
+        if (!IsValidId(id))
+            throw new ArgumentException("A valid module id is required.", nameof(id));
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(id));
+        return $"m-{Convert.ToHexString(digest.AsSpan(0, 16)).ToLowerInvariant()}.meccha-modules.localhost";
+    }
+
+    public static bool IsValidId(string? id)
+    {
+        if (string.IsNullOrEmpty(id) || id.Length > MaxIdLength || !IsLowerAsciiLetter(id[0]))
+            return false;
+
+        var previousWasSeparator = false;
+        foreach (var value in id)
+        {
+            if (IsLowerAsciiLetter(value) || IsAsciiDigit(value))
+            {
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if (value is not ('.' or '-' or '_') || previousWasSeparator)
+                return false;
+            previousWasSeparator = true;
+        }
+        return !previousWasSeparator;
+    }
+
+    public static bool IsValidRelativeHtmlEntry(string? entry)
+    {
+        if (string.IsNullOrEmpty(entry) || entry.Length > MaxEntryLength ||
+            entry[0] == '/' || entry.Contains('\\') || entry.Contains(':') ||
+            !entry.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        foreach (var segment in entry.Split('/'))
+        {
+            if (segment.Length == 0 || segment is "." or ".." ||
+                !IsSafeEntryCharacter(segment[0]) ||
+                segment.Any(value => !IsSafeEntryCharacter(value)))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool IsSafeEntryCharacter(char value) =>
+        IsAsciiLetter(value) || IsAsciiDigit(value) || value is '.' or '-' or '_';
+
+    private static bool IsAsciiLetter(char value) =>
+        IsLowerAsciiLetter(value) || value is >= 'A' and <= 'Z';
+
+    private static bool IsLowerAsciiLetter(char value) => value is >= 'a' and <= 'z';
+
+    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
+}

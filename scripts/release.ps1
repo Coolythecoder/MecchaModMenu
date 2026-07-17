@@ -32,8 +32,8 @@ $Version = Resolve-ProjectVersion -Requested $Version -Root $RuntimeRoot
 Write-Host "Package version: $Version"
 
 if (-not $OutDir) { $OutDir = Join-Path $RuntimeRoot ".build\package" }
-$ArtifactName = "meccha-camouflage-$Version"
-if (-not $ExePath) { $ExePath = Join-Path $RuntimeRoot ".build\bin\meccha-camouflage.exe" }
+$ArtifactName = "meccha-mod-menu-$Version"
+if (-not $ExePath) { $ExePath = Join-Path $RuntimeRoot ".build\bin\meccha-mod-menu.exe" }
 if (-not (Test-Path $ExePath -PathType Leaf)) { throw "Executable not found: $ExePath. Run scripts/build.ps1 first." }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null

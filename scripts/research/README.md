@@ -18,7 +18,7 @@ or `.eventwatch` sidecar before injection.
 An explicitly built diagnostic runner from this checkout has this entry point:
 
 ```text
-meccha-camouflage.exe --research-replication --pid <exact-pid> \
+meccha-mod-menu.exe --research-replication --pid <exact-pid> \
   --role host|joining-client --out <local-artifact-directory> [--paint] \
   [--hold-seconds N] [--pressure-sample-ms N] [--texture-snapshot] \
   [--texture-target resolved|eventwatch-multicast-packed-receiver --texture-discovery-seconds N] \
