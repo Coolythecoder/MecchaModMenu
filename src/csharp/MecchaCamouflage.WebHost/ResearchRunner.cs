@@ -117,7 +117,7 @@ internal static class ResearchRunner
         }
         WriteJson(Path.Combine(runDirectory, "run-start.json"), summary);
 
-        var session = new HostSession(VersionInfo.Current);
+        using var session = new HostSession(VersionInfo.Current);
         if (options.PackedBatchLimitOverride is int packedBatchLimitOverride)
             session.Settings.Paint.PackedBatchLimit = packedBatchLimitOverride;
         if (options.PackedBatchPacingOverrideMs is int packedBatchPacingOverrideMs)

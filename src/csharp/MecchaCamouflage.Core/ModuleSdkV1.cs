@@ -23,6 +23,11 @@ public static class ModuleSdkV1
     public const int MaxVersionLength = 40;
     public const int MaxDescriptionLength = 320;
     public const int MaxEntryLength = 240;
+    public const int MaxDataKeyLength = 128;
+    public const int MaxDataEntries = 256;
+    public const int MaxDataValueBytes = 256 * 1024;
+    public const int MaxDataModuleBytes = 4 * 1024 * 1024;
+    public const int MaxMemoryTotalBytes = 64 * 1024 * 1024;
 
     public const string SnapshotReadPermission = "snapshot.read";
     public const string PaintStartPermission = "paint.start";
@@ -32,6 +37,10 @@ public static class ModuleSdkV1
     public const string NetworkHttpPermission = "network.http";
     public const string NetworkHttpsPermission = "network.https";
     public const string NetworkWebSocketPermission = "network.websocket";
+    public const string StorageReadPermission = "storage.read";
+    public const string StorageWritePermission = "storage.write";
+    public const string MemoryReadPermission = "memory.read";
+    public const string MemoryWritePermission = "memory.write";
 
     private static readonly string[] PermissionValues =
     [
@@ -42,7 +51,11 @@ public static class ModuleSdkV1
         PaintStopPermission,
         NetworkHttpPermission,
         NetworkHttpsPermission,
-        NetworkWebSocketPermission
+        NetworkWebSocketPermission,
+        StorageReadPermission,
+        StorageWritePermission,
+        MemoryReadPermission,
+        MemoryWritePermission
     ];
 
     public static StringComparer IdComparer { get; } = StringComparer.OrdinalIgnoreCase;
@@ -50,6 +63,31 @@ public static class ModuleSdkV1
 
     public static bool IsAllowedPermission(string? permission) =>
         permission is not null && PermissionValues.Contains(permission, StringComparer.Ordinal);
+
+    public static string? RequiredPermissionForDataCommand(string? command) => command switch
+    {
+        "storage.get" or "storage.list" => StorageReadPermission,
+        "storage.set" or "storage.delete" => StorageWritePermission,
+        "memory.get" or "memory.list" => MemoryReadPermission,
+        "memory.set" or "memory.delete" => MemoryWritePermission,
+        _ => null
+    };
+
+    /// <summary>
+    /// Module data keys are logical, case-sensitive names. They are never used as
+    /// filesystem paths; the persistent store hashes them before choosing a file.
+    /// </summary>
+    public static bool IsValidDataKey(string? key)
+    {
+        if (string.IsNullOrEmpty(key) || key.Length > MaxDataKeyLength ||
+            (!IsLowerAsciiLetter(key[0]) && !IsAsciiDigit(key[0])))
+        {
+            return false;
+        }
+
+        return key.All(value =>
+            IsLowerAsciiLetter(value) || IsAsciiDigit(value) || value is '.' or '-' or '_');
+    }
 
     /// <summary>
     /// Builds the CSP connect-src value for one already-validated module. The HTTP

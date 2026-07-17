@@ -34,7 +34,8 @@ internal static class Program
             DiagnosticsState.SetStartupPhase("application_configuration");
             ApplicationConfiguration.Initialize();
             DiagnosticsState.SetStartupPhase("main_form_create");
-            using var form = new MainForm(new HostSession(VersionInfo.Current));
+            using var session = new HostSession(VersionInfo.Current);
+            using var form = new MainForm(session);
             DiagnosticsState.SetStartupPhase("application_run");
             Application.Run(form);
             DiagnosticsState.SetStartupPhase("application_exit");

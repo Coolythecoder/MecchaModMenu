@@ -10,6 +10,7 @@
     section { max-width: 34rem; padding: 1rem; border: 1px solid #3b536b; border-radius: .6rem; }
     h1 { margin-top: 0; font-size: 1.15rem; }
     code { color: #85d7ff; }
+    .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
     button { border: 1px solid #5781a8; padding: .55rem .8rem; background: #1b344b; color: inherit; cursor: pointer; }
     output { display: block; margin-top: .8rem; color: #85d7ff; }
   </style>
@@ -17,32 +18,143 @@
 <body>
   <section>
     <h1>Example Module</h1>
-    <p>This package declares API v1 and requests only <code>snapshot.read</code>.</p>
-    <button id="refresh" type="button">Read sanitized snapshot</button>
-    <output id="status">Waiting for the host.</output>
+    <p>This package reads a sanitized snapshot and uses isolated JSON storage.</p>
+    <div class="actions">
+      <button id="refresh" type="button">Read snapshot</button>
+      <button id="increment" type="button">Increment counters</button>
+      <button id="reset" type="button">Delete counters</button>
+    </div>
+    <output id="snapshot-status">Waiting for the host.</output>
+    <output id="data-status">Persistent and session counters are loading.</output>
   </section>
   <script>
-    const status = document.getElementById("status");
-    function requestSnapshot() {
-      window.parent.postMessage({
-        source: "meccha-module",
-        apiVersion: 1,
-        requestId: crypto.randomUUID(),
-        command: "snapshot.get",
-        payload: {}
-      }, "https://meccha.localhost");
+    const hostOrigin = "https://meccha.localhost";
+    const pending = new Map();
+    const snapshotStatus = document.getElementById("snapshot-status");
+    const dataStatus = document.getElementById("data-status");
+
+    function sdkRequest(command, payload = {}) {
+      return new Promise((resolve, reject) => {
+        const requestId = crypto.randomUUID();
+        const timeout = setTimeout(() => {
+          pending.delete(requestId);
+          reject(new Error(`SDK request timed out: ${command}`));
+        }, 10_000);
+        pending.set(requestId, { resolve, reject, timeout });
+        window.parent.postMessage({
+          source: "meccha-module",
+          apiVersion: 1,
+          requestId,
+          command,
+          payload
+        }, hostOrigin);
+      });
     }
+
+    const sdk = Object.freeze({
+      storage: Object.freeze({
+        get: key => sdkRequest("storage.get", { key }),
+        set: (key, value) => sdkRequest("storage.set", { key, value }),
+        delete: key => sdkRequest("storage.delete", { key }),
+        list: () => sdkRequest("storage.list")
+      }),
+      memory: Object.freeze({
+        get: key => sdkRequest("memory.get", { key }),
+        set: (key, value) => sdkRequest("memory.set", { key, value }),
+        delete: key => sdkRequest("memory.delete", { key }),
+        list: () => sdkRequest("memory.list")
+      })
+    });
+
     window.addEventListener("message", event => {
-      if (event.origin !== "https://meccha.localhost" ||
+      if (event.source !== window.parent ||
+          event.origin !== hostOrigin ||
           event.data?.source !== "meccha-host" ||
           event.data?.apiVersion !== 1) return;
-      const snapshot = event.data?.data;
-      if (snapshot?.runtime) {
-        status.textContent = `Game ${snapshot.runtime.process}; detail ${snapshot.settings?.paint?.detailResolutionPercent ?? "?"}%`;
+
+      const message = event.data;
+      if (message.type === "response") {
+        const request = pending.get(message.requestId);
+        if (!request) return;
+        clearTimeout(request.timeout);
+        pending.delete(message.requestId);
+        if (message.ok) {
+          request.resolve(message.data);
+        } else {
+          const error = new Error(message.error?.message || "SDK request failed");
+          error.code = message.error?.code || "sdk_error";
+          request.reject(error);
+        }
+        return;
+      }
+      if (message.type === "event" && message.name === "snapshotChanged") {
+        showSnapshot(message.data);
       }
     });
-    document.getElementById("refresh").addEventListener("click", requestSnapshot);
-    requestSnapshot();
+
+    function showSnapshot(snapshot) {
+      if (!snapshot?.runtime) return;
+      snapshotStatus.textContent =
+        `Game ${snapshot.runtime.process}; detail ${snapshot.settings?.paint?.detailResolutionPercent ?? "?"}%`;
+    }
+
+    async function refreshSnapshot() {
+      try {
+        showSnapshot(await sdkRequest("snapshot.get"));
+      } catch (error) {
+        snapshotStatus.textContent = error.message;
+      }
+    }
+
+    function counterValue(result) {
+      return result.found && Number.isSafeInteger(result.value) ? result.value : 0;
+    }
+
+    async function updateCounters(increment) {
+      try {
+        const [persistent, session] = await Promise.all([
+          sdk.storage.get("example.counter"),
+          sdk.memory.get("example.counter")
+        ]);
+        let persistentValue = counterValue(persistent);
+        let sessionValue = counterValue(session);
+        if (increment) {
+          persistentValue += 1;
+          sessionValue += 1;
+          await Promise.all([
+            sdk.storage.set("example.counter", persistentValue),
+            sdk.memory.set("example.counter", sessionValue)
+          ]);
+        }
+        const [storedKeys, memoryKeys] = await Promise.all([
+          sdk.storage.list(),
+          sdk.memory.list()
+        ]);
+        dataStatus.textContent =
+          `Persistent ${persistentValue} (${storedKeys.keys.length} key); ` +
+          `session ${sessionValue} (${memoryKeys.keys.length} key).`;
+      } catch (error) {
+        dataStatus.textContent = `${error.code || "sdk_error"}: ${error.message}`;
+      }
+    }
+
+    async function deleteCounters() {
+      try {
+        await Promise.all([
+          sdk.storage.delete("example.counter"),
+          sdk.memory.delete("example.counter")
+        ]);
+        await updateCounters(false);
+      } catch (error) {
+        dataStatus.textContent = `${error.code || "sdk_error"}: ${error.message}`;
+      }
+    }
+
+    document.getElementById("refresh").addEventListener("click", refreshSnapshot);
+    document.getElementById("increment").addEventListener("click", () => updateCounters(true));
+    document.getElementById("reset").addEventListener("click", deleteCounters);
+    refreshSnapshot();
+    updateCounters(false);
   </script>
 </body>
 </html>

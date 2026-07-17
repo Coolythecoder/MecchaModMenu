@@ -4,7 +4,7 @@ using MecchaCamouflage.Core;
 
 namespace MecchaCamouflage.Controller;
 
-public sealed class HostSession
+public sealed class HostSession : IDisposable
 {
     private const int DefaultPackedBatchLimit = 20;
     private const int DefaultPackedPacingMs = 50;
@@ -54,6 +54,7 @@ public sealed class HostSession
         Settings = Store.Load();
         PresetStore = new PaintPresetStore(Paths.RootDirectory);
         paintPresets = PresetStore.Load();
+        ModuleData = new ModuleDataService(Paths.ModuleDataDirectory);
         ModuleSourceCatalog = ModuleCatalog.Scan(Paths);
         Modules = ModuleSourceCatalog;
         Log = new RuntimeLog(Paths);
@@ -64,13 +65,21 @@ public sealed class HostSession
     public AppPaths Paths { get; }
     public SettingsStore Store { get; }
     public PaintPresetStore PresetStore { get; }
+    public ModuleDataService ModuleData { get; }
     public ModuleCatalogResult ModuleSourceCatalog { get; private set; }
     public ModuleCatalogResult Modules { get; private set; }
     public RuntimeLog Log { get; }
     public RuntimeBridgeService Runtime { get; }
     public AppSettings Settings { get; private set; }
     public bool PaintRunning { get; private set; }
-    public string ModuleHostGeneration => moduleCatalogGeneration;
+    public string ModuleHostGeneration
+    {
+        get
+        {
+            lock (moduleDataGate)
+                return moduleCatalogGeneration;
+        }
+    }
     private readonly SemaphoreSlim bridgeWarmupGate = new(1, 1);
     private readonly object paintStateGate = new();
     private DateTimeOffset nextBridgeWarmupAttempt;
@@ -90,6 +99,12 @@ public sealed class HostSession
     private readonly object replayPassLogGate = new();
     private readonly HashSet<string> loggedReplayPasses = new(StringComparer.Ordinal);
     private readonly object paintStudioGate = new();
+    private readonly object moduleDataGate = new();
+    private readonly SemaphoreSlim moduleDataOperationSlots = new(8, 8);
+    private readonly object moduleDataModuleSlotsGate = new();
+    private readonly Dictionary<string, SemaphoreSlim> moduleDataModuleSlots =
+        new(ModuleSdkV1.IdComparer);
+    private int disposed;
     private IReadOnlyList<PaintPreset> paintPresets;
     private PaintSettings? paintSettingsUndo;
     private PaintCoverageSnapshot paintCoverage = new(
@@ -101,6 +116,28 @@ public sealed class HostSession
         DetailSelected: 0,
         DetailBudget: 0,
         Result: "No paint analysis yet.");
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+            return;
+        lock (moduleDataGate)
+            moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+
+        // New operations fail the disposed check. Taking every permit drains
+        // workers that were already admitted before volatile memory is cleared.
+        for (var index = 0; index < 8; ++index)
+            moduleDataOperationSlots.Wait();
+        try
+        {
+            ModuleData.Dispose();
+        }
+        finally
+        {
+            moduleDataOperationSlots.Release(8);
+        }
+        GC.SuppressFinalize(this);
+    }
 
     public async Task<UiSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -721,20 +758,27 @@ public sealed class HostSession
 
     public HostCommandResult ReloadModules()
     {
-        ModuleSourceCatalog = ModuleCatalog.Scan(Paths);
-        Modules = ModuleSourceCatalog;
-        moduleCatalogGeneration = Guid.NewGuid().ToString("N");
-        foreach (var diagnostic in Modules.Diagnostics)
+        var sourceCatalog = ModuleCatalog.Scan(Paths);
+        lock (moduleDataGate)
+        {
+            ModuleSourceCatalog = sourceCatalog;
+            Modules = sourceCatalog;
+            moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+        }
+        foreach (var diagnostic in sourceCatalog.Diagnostics)
             Log.Warn($"Module {diagnostic.ModuleId ?? "catalog"}: {diagnostic.Message}");
         return new HostCommandResult(
             true,
-            $"Modules: loaded {Modules.Modules.Count}; rejected {Modules.Diagnostics.Count}.");
+            $"Modules: loaded {sourceCatalog.Modules.Count}; rejected {sourceCatalog.Diagnostics.Count}.");
     }
 
     public string BeginModuleHostGeneration()
     {
-        moduleCatalogGeneration = Guid.NewGuid().ToString("N");
-        return moduleCatalogGeneration;
+        lock (moduleDataGate)
+        {
+            moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+            return moduleCatalogGeneration;
+        }
     }
 
     public void ApplyHostedModules(
@@ -745,10 +789,252 @@ public sealed class HostSession
         ArgumentNullException.ThrowIfNull(stagingDiagnostics);
         var accepted = modules.ToArray();
         var diagnostics = ModuleSourceCatalog.Diagnostics.Concat(stagingDiagnostics).ToArray();
-        Modules = new ModuleCatalogResult(
-            Array.AsReadOnly(accepted),
-            Array.AsReadOnly(diagnostics));
+        lock (moduleDataGate)
+        {
+            Modules = new ModuleCatalogResult(
+                Array.AsReadOnly(accepted),
+                Array.AsReadOnly(diagnostics));
+        }
     }
+
+    public ModuleDataCommandResult ExecuteModuleData(
+        string moduleId,
+        string generation,
+        string operation,
+        JsonElement payload) =>
+        ExecuteModuleDataAsync(moduleId, generation, operation, payload).GetAwaiter().GetResult();
+
+    public async Task<ModuleDataCommandResult> ExecuteModuleDataAsync(
+        string moduleId,
+        string generation,
+        string operation,
+        JsonElement payload)
+    {
+        if (Volatile.Read(ref disposed) != 0)
+            return ModuleDataFailure("module_unavailable", "The module host is shutting down.");
+        if (!ModuleSdkV1.IsValidId(moduleId))
+            return ModuleDataFailure("module_unavailable", "The module is not currently hosted.");
+        var moduleSlot = ModuleDataModuleSlot(moduleId);
+        if (!await moduleSlot.WaitAsync(0).ConfigureAwait(false))
+            return ModuleDataFailure("storage_busy", "This module has too many data requests in flight; retry the request.");
+        try
+        {
+            if (!await moduleDataOperationSlots.WaitAsync(0).ConfigureAwait(false))
+                return ModuleDataFailure("storage_busy", "Too many module data requests are in flight; retry the request.");
+            try
+            {
+                return await ExecuteAdmittedModuleDataAsync(
+                    moduleId,
+                    generation,
+                    operation,
+                    payload).ConfigureAwait(false);
+            }
+            finally
+            {
+                moduleDataOperationSlots.Release();
+            }
+        }
+        finally
+        {
+            moduleSlot.Release();
+        }
+    }
+
+    private async Task<ModuleDataCommandResult> ExecuteAdmittedModuleDataAsync(
+        string moduleId,
+        string generation,
+        string operation,
+        JsonElement payload)
+    {
+        if (Volatile.Read(ref disposed) != 0)
+            return ModuleDataFailure("module_unavailable", "The module host is shutting down.");
+        var authorization = CheckModuleDataAuthorization(moduleId, generation, operation, out var module);
+        if (authorization is not null)
+            return authorization;
+        var ownedPayload = payload.Clone();
+
+        try
+        {
+            var canonicalId = module!.Id;
+            Action<Action> commit = mutation =>
+            {
+                lock (moduleDataGate)
+                {
+                    var commitAuthorization = CheckModuleDataAuthorization(
+                        canonicalId,
+                        generation,
+                        operation,
+                        out _);
+                    if (commitAuthorization is not null)
+                    {
+                        throw new ModuleDataException(
+                            commitAuthorization.Code,
+                            commitAuthorization.Message);
+                    }
+                    mutation();
+                }
+            };
+            var data = await Task.Run(() => ExecuteAuthorizedModuleData(
+                canonicalId,
+                operation,
+                ownedPayload,
+                commit)).ConfigureAwait(false);
+            var finalAuthorization = CheckModuleDataAuthorization(
+                canonicalId,
+                generation,
+                operation,
+                out var currentModule);
+            if (finalAuthorization is not null)
+                return finalAuthorization;
+            return new ModuleDataCommandResult(
+                true,
+                "",
+                "",
+                SanitizeModuleDataWriteResult(operation, data, currentModule!));
+        }
+        catch (ModuleDataException ex)
+        {
+            return ModuleDataFailure(ex.Code, ex.Message);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or JsonException or KeyNotFoundException)
+        {
+            return ModuleDataFailure("invalid_payload", "The module data payload is invalid.");
+        }
+    }
+
+    private SemaphoreSlim ModuleDataModuleSlot(string moduleId)
+    {
+        lock (moduleDataModuleSlotsGate)
+        {
+            if (!moduleDataModuleSlots.TryGetValue(moduleId, out var slot))
+            {
+                slot = new SemaphoreSlim(4, 4);
+                moduleDataModuleSlots[moduleId] = slot;
+            }
+            return slot;
+        }
+    }
+
+    private object ExecuteAuthorizedModuleData(
+        string moduleId,
+        string operation,
+        JsonElement payload,
+        Action<Action> commit)
+    {
+        if (operation is "storage.list" or "memory.list")
+            ValidateEmptyDataPayload(payload);
+        return operation switch
+        {
+            "storage.get" => ModuleData.StorageGet(moduleId, RequiredDataKey(payload, valueRequired: false)),
+            "storage.set" => ModuleData.StorageSet(
+                moduleId,
+                RequiredDataKey(payload, valueRequired: true),
+                payload.GetProperty("value"),
+                commit),
+            "storage.delete" => ModuleData.StorageDelete(
+                moduleId,
+                RequiredDataKey(payload, valueRequired: false),
+                commit),
+            "storage.list" => ModuleData.StorageList(moduleId),
+            "memory.get" => ModuleData.MemoryGet(moduleId, RequiredDataKey(payload, valueRequired: false)),
+            "memory.set" => ModuleData.MemorySet(
+                moduleId,
+                RequiredDataKey(payload, valueRequired: true),
+                payload.GetProperty("value"),
+                commit),
+            "memory.delete" => ModuleData.MemoryDelete(
+                moduleId,
+                RequiredDataKey(payload, valueRequired: false),
+                commit),
+            "memory.list" => ModuleData.MemoryList(moduleId),
+            _ => throw new ModuleDataException("unsupported_command", "Unsupported module data command.")
+        };
+    }
+
+    private ModuleDataCommandResult? CheckModuleDataAuthorization(
+        string moduleId,
+        string generation,
+        string operation,
+        out ModuleDescriptor? module)
+    {
+        lock (moduleDataGate)
+        {
+            module = null;
+            if (Volatile.Read(ref disposed) != 0)
+                return ModuleDataFailure("module_unavailable", "The module host is shutting down.");
+            if (!string.Equals(generation, moduleCatalogGeneration, StringComparison.Ordinal))
+                return ModuleDataFailure("stale_generation", "The module host generation is no longer active.");
+            module = Modules.Modules.FirstOrDefault(candidate =>
+                ModuleSdkV1.IdComparer.Equals(candidate.Id, moduleId));
+            if (module is null)
+                return ModuleDataFailure("module_unavailable", "The module is not currently hosted.");
+            var permission = ModuleSdkV1.RequiredPermissionForDataCommand(operation);
+            if (permission is null)
+                return ModuleDataFailure("unsupported_command", "Unsupported module data command.");
+            return module.Permissions.Contains(permission, StringComparer.Ordinal)
+                ? null
+                : ModuleDataFailure("permission_denied", "The module does not have permission for this command.");
+        }
+    }
+
+    private static object SanitizeModuleDataWriteResult(
+        string operation,
+        object data,
+        ModuleDescriptor module)
+    {
+        if (!operation.EndsWith(".set", StringComparison.Ordinal) &&
+            !operation.EndsWith(".delete", StringComparison.Ordinal))
+        {
+            return data;
+        }
+        var readPermission = operation.StartsWith("storage.", StringComparison.Ordinal)
+            ? ModuleSdkV1.StorageReadPermission
+            : ModuleSdkV1.MemoryReadPermission;
+        if (module.Permissions.Contains(readPermission, StringComparer.Ordinal))
+            return data;
+        return data switch
+        {
+            ModuleDataSetResult result => new
+            {
+                result.Key,
+                result.Stored,
+                result.SizeBytes,
+                result.QuotaBytes
+            },
+            ModuleDataDeleteResult result => new
+            {
+                result.Key,
+                Deleted = true,
+                result.QuotaBytes
+            },
+            _ => data
+        };
+    }
+
+    private static string RequiredDataKey(JsonElement payload, bool valueRequired)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("payload must be an object.");
+        var allowed = valueRequired
+            ? new HashSet<string>(["key", "value"], StringComparer.Ordinal)
+            : new HashSet<string>(["key"], StringComparer.Ordinal);
+        if (payload.EnumerateObject().Any(property => !allowed.Contains(property.Name)) ||
+            !payload.TryGetProperty("key", out var keyValue) || keyValue.ValueKind != JsonValueKind.String ||
+            (valueRequired && !payload.TryGetProperty("value", out _)))
+        {
+            throw new ArgumentException("payload fields are invalid.");
+        }
+        return keyValue.GetString() ?? "";
+    }
+
+    private static void ValidateEmptyDataPayload(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())
+            throw new ArgumentException("list payload must be an empty object.");
+    }
+
+    private static ModuleDataCommandResult ModuleDataFailure(string code, string message) =>
+        new(false, code, message, null);
 
     public void OpenModulesDirectory()
     {
@@ -955,13 +1241,19 @@ public sealed class HostSession
             coverage = paintCoverage;
         }
         var modsAvailable = string.Equals(service, "ready", StringComparison.Ordinal);
-        var moduleCatalog = Modules;
+        ModuleCatalogResult moduleCatalog;
+        string moduleHostGeneration;
+        lock (moduleDataGate)
+        {
+            moduleCatalog = Modules;
+            moduleHostGeneration = moduleCatalogGeneration;
+        }
         var externalModules = moduleCatalog.Modules.Select(module => new ExternalModuleSnapshot(
             module.Id,
             module.Name,
             module.Version,
             module.Description,
-            ModuleEntryUrl(module),
+            ModuleEntryUrl(module, moduleHostGeneration),
             module.Permissions)).ToArray();
         var moduleDiagnostics = moduleCatalog.Diagnostics.Select(diagnostic => new ModuleDiagnosticSnapshot(
             diagnostic.Code,
@@ -993,10 +1285,16 @@ public sealed class HostSession
 
     public string ModuleEntryUrl(ModuleDescriptor module)
     {
+        lock (moduleDataGate)
+            return ModuleEntryUrl(module, moduleCatalogGeneration);
+    }
+
+    private static string ModuleEntryUrl(ModuleDescriptor module, string generation)
+    {
         var encodedEntry = string.Join(
             '/',
             module.Entry.Split('/').Select(Uri.EscapeDataString));
-        return $"https://{ModuleSdkV1.VirtualHostName(module.Id)}/{moduleCatalogGeneration}/{encodedEntry}";
+        return $"https://{ModuleSdkV1.VirtualHostName(module.Id)}/{generation}/{encodedEntry}";
     }
 
     private static SettingsSnapshot ToSnapshot(AppSettings settings)

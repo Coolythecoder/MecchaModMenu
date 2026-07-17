@@ -48,8 +48,11 @@ let externalModuleGeneration = "";
 const externalModules = new Map();
 const externalModuleActions = new Map();
 const externalModuleStops = new Map();
+const externalModuleDataCounts = new Map();
 const ExternalModuleApiVersion = 1;
 const ExternalModuleHostPattern = /^m-[0-9a-f]{32}\.localhost$/;
+const ModuleDataKeyPattern = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const ModuleDataValueMaxBytes = 256 * 1024;
 const ExternalModuleCommands = new Map([
   ["paint.start", "paint"],
   ["paint.preview", "preview"],
@@ -61,7 +64,19 @@ const ExternalModulePermissions = new Map([
   ["paint.start", "paint.start"],
   ["paint.preview", "paint.preview"],
   ["paint.restore", "paint.restore"],
-  ["paint.stop", "paint.stop"]
+  ["paint.stop", "paint.stop"],
+  ["storage.get", "storage.read"],
+  ["storage.list", "storage.read"],
+  ["storage.set", "storage.write"],
+  ["storage.delete", "storage.write"],
+  ["memory.get", "memory.read"],
+  ["memory.list", "memory.read"],
+  ["memory.set", "memory.write"],
+  ["memory.delete", "memory.write"]
+]);
+const ModuleDataCommands = new Set([
+  "storage.get", "storage.list", "storage.set", "storage.delete",
+  "memory.get", "memory.list", "memory.set", "memory.delete"
 ]);
 
 window.chrome.webview.addEventListener("message", event => {
@@ -627,6 +642,50 @@ function normalizeModuleDiagnostics(value) {
     .filter(item => item.message.length > 0);
 }
 
+function normalizeModuleDataPayload(command, value) {
+  const payload = value === undefined ? {} : value;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, code: "invalid_payload", message: "payload must be an object." };
+  }
+  const keys = Object.keys(payload);
+  if (command.endsWith(".list")) {
+    return keys.length === 0
+      ? { ok: true, payload: {} }
+      : { ok: false, code: "invalid_payload", message: "list does not accept payload fields." };
+  }
+  const expectsValue = command.endsWith(".set");
+  const expected = expectsValue ? ["key", "value"] : ["key"];
+  if (keys.length !== expected.length || expected.some(key => !Object.hasOwn(payload, key))) {
+    return { ok: false, code: "invalid_payload", message: "The command payload fields are invalid." };
+  }
+  if (typeof payload.key !== "string" || !ModuleDataKeyPattern.test(payload.key)) {
+    return { ok: false, code: "invalid_key", message: "key must be a lowercase logical data name." };
+  }
+  if (!expectsValue) {
+    return { ok: true, payload: { key: payload.key } };
+  }
+  try {
+    const encoded = JSON.stringify(payload.value, (_, item) => {
+      if (typeof item === "number" && !Number.isFinite(item)) {
+        throw new TypeError("JSON numbers must be finite.");
+      }
+      if (["undefined", "function", "symbol", "bigint"].includes(typeof item)) {
+        throw new TypeError("value must contain JSON-compatible values only.");
+      }
+      return item;
+    });
+    if (encoded === undefined) {
+      throw new TypeError("value must be JSON-compatible.");
+    }
+    if (new TextEncoder().encode(encoded).length > ModuleDataValueMaxBytes) {
+      return { ok: false, code: "item_too_large", message: "The JSON value exceeds the per-item byte limit." };
+    }
+    return { ok: true, payload: { key: payload.key, value: JSON.parse(encoded) } };
+  } catch (error) {
+    return { ok: false, code: "invalid_value", message: safeText(error?.message || String(error), 500) };
+  }
+}
+
 async function handleExternalModuleMessage(event) {
   const module = [...externalModules.values()].find(candidate =>
     candidate.descriptor.origin !== "null" &&
@@ -660,6 +719,57 @@ async function handleExternalModuleMessage(event) {
   }
   if (command === "snapshot.get") {
     postExternalModuleResponse(module, requestId, command, true, sanitizeSnapshotForModule(liveSnapshot));
+    return;
+  }
+  if (ModuleDataCommands.has(command)) {
+    const currentDataRequests = externalModuleDataCounts.get(module.descriptor.id) || 0;
+    if (currentDataRequests >= 4) {
+      postExternalModuleResponse(module, requestId, command, false, null, "storage_busy", "This module has too many data requests in flight.");
+      return;
+    }
+    const normalized = normalizeModuleDataPayload(command, request.payload);
+    if (!normalized.ok) {
+      postExternalModuleResponse(module, requestId, command, false, null, normalized.code, normalized.message);
+      return;
+    }
+    const generation = module.descriptor.generation;
+    externalModuleDataCounts.set(module.descriptor.id, currentDataRequests + 1);
+    try {
+      const result = await send("moduleData", {
+        moduleId: module.descriptor.id,
+        generation,
+        operation: command,
+        payload: normalized.payload
+      });
+      if (externalModulesSuspended || externalModules.get(module.descriptor.id) !== module ||
+          module.descriptor.generation !== generation) {
+        return;
+      }
+      if (result?.success) {
+        postExternalModuleResponse(module, requestId, command, true, result.data);
+      } else {
+        postExternalModuleResponse(
+          module,
+          requestId,
+          command,
+          false,
+          null,
+          safeText(result?.code, 80) || "command_failed",
+          safeText(result?.message, 500) || "The module data command failed."
+        );
+      }
+    } catch (error) {
+      if (!externalModulesSuspended && externalModules.get(module.descriptor.id) === module) {
+        postExternalModuleResponse(module, requestId, command, false, null, "host_error", safeText(error?.message || String(error), 500));
+      }
+    } finally {
+      const remaining = (externalModuleDataCounts.get(module.descriptor.id) || 1) - 1;
+      if (remaining > 0) {
+        externalModuleDataCounts.set(module.descriptor.id, remaining);
+      } else {
+        externalModuleDataCounts.delete(module.descriptor.id);
+      }
+    }
     return;
   }
   const stopping = command === "paint.stop";

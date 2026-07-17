@@ -127,6 +127,7 @@ Important paths:
 %LOCALAPPDATA%\MecchaCamouflage\bridge-instances\
 %LOCALAPPDATA%\MecchaCamouflage\bridge-state\
 %LOCALAPPDATA%\MecchaCamouflage\modules\
+%LOCALAPPDATA%\MecchaCamouflage\module-data\
 ```
 
 Versioned app logs, diagnostics, and extracted package assets live under
@@ -140,6 +141,12 @@ game process, lives under `bridge-state/`.
 User-installed Paint Studio modules live under `modules/<module-id>/`. Each
 package is discovered from its `module.json` manifest and is served to a
 sandboxed WebView frame; it is not loaded as native code.
+
+Host-managed persistent SDK data lives as hashed per-key `.entry` JSON records
+inside hashed module directories under `module-data/`. Its internal names are
+not a public filesystem API. It is separate from editable module packages,
+per-run secured snapshots, and volatile `sdk.memory` data. Volatile module
+memory exists only in the running app process and is never written here.
 
 Each direct bridge injection stages a uniquely named DLL and its profiles under
 `bridge-instances/<instance-guid>/`. Older bridge instances may remain loaded

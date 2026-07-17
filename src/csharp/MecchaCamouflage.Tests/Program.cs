@@ -39,6 +39,10 @@ var tests = new List<(string Name, Action Run)>
     ("module catalog rejects unsafe manifests without blocking valid modules", ModuleCatalogRejectsUnsafeManifestsNonfatally),
     ("module catalog enforces file and link boundaries", ModuleCatalogEnforcesFileAndLinkBoundaries),
     ("module SDK example is a valid package", ModuleSdkExampleIsValid),
+    ("module data service persists storage and clears session memory", ModuleDataServicePersistsStorageAndClearsSessionMemory),
+    ("module data service enforces isolation validation and quotas", ModuleDataServiceEnforcesIsolationValidationAndQuotas),
+    ("module data persistence serializes writers and bounds lock waits", ModuleDataPersistenceSerializesWritersAndBoundsLockWaits),
+    ("module data relay rechecks generation identity and permissions", ModuleDataRelayRechecksGenerationIdentityAndPermissions),
     ("paint preset store saves applies deletes and preserves detail", PaintPresetStoreRoundTripsPaintSettings),
     ("paint studio preset apply supports undo", PaintStudioPresetApplySupportsUndo),
     ("paint coverage parser clamps native analysis metadata", PaintCoverageParserClampsNativeMetadata),
@@ -516,14 +520,20 @@ static void ModuleDirectoryIsGlobalAcrossVersions()
         "third-party modules should persist across application version directories");
     Assert(first.ModulesDirectory == Path.Combine(first.RootDirectory, "modules"),
         "modules should live directly under the persistent application root");
+    Assert(first.ModuleDataDirectory == second.ModuleDataDirectory &&
+           first.ModuleDataDirectory == Path.Combine(first.RootDirectory, "module-data"),
+        "host-managed persistent module data should be global across app versions");
     Assert(!first.ModulesDirectory.StartsWith(first.VersionRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
         "the global module catalog must not be nested under one version");
+    Assert(!first.ModuleDataDirectory.StartsWith(first.VersionRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+        "persistent module data must not be nested under one app version");
     Assert(first.ModuleHostDirectory.StartsWith(first.RuntimeDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
            first.ModuleHostDirectory != second.ModuleHostDirectory,
         "secured module host snapshots should be scoped to one application version runtime");
 
     first.EnsureBaseDirectories();
     Assert(Directory.Exists(first.ModulesDirectory), "base-directory setup should create the module directory");
+    Assert(Directory.Exists(first.ModuleDataDirectory), "base-directory setup should create the persistent module-data directory");
     Assert(Directory.Exists(first.ModuleHostDirectory), "base-directory setup should create the secured module host directory");
 }
 
@@ -542,7 +552,7 @@ static void ModuleCatalogLoadsValidV1Manifest()
           "version": "1.2.3",
           "description": "A data-only SDK test module.",
           "entry": "ui/index.html",
-          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.websocket"]
+          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.websocket", "storage.read", "storage.write", "memory.read", "memory.write"]
         }
         """,
         "ui/index.html");
@@ -563,17 +573,38 @@ static void ModuleCatalogLoadsValidV1Manifest()
     Assert(module.Permissions.SequenceEqual(new[]
         {
             "snapshot.read", "paint.preview", "paint.restore",
-            "network.http", "network.https", "network.websocket"
+            "network.http", "network.https", "network.websocket",
+            "storage.read", "storage.write", "memory.read", "memory.write"
         }),
         "descriptor should expose only declared, allowlisted permissions");
 
     var expectedPermissions = new HashSet<string>(StringComparer.Ordinal)
     {
         "snapshot.read", "paint.start", "paint.preview", "paint.restore", "paint.stop",
-        "network.http", "network.https", "network.websocket"
+        "network.http", "network.https", "network.websocket",
+        "storage.read", "storage.write", "memory.read", "memory.write"
     };
     Assert(expectedPermissions.SetEquals(ModuleSdkV1.AllowedPermissions), "API v1 permission allowlist changed unexpectedly");
     Assert(!ModuleSdkV1.IsAllowedPermission("native.command"), "arbitrary native command permission must not exist");
+    Assert(ModuleSdkV1.RequiredPermissionForDataCommand("storage.get") == "storage.read" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("storage.list") == "storage.read" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("storage.set") == "storage.write" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("storage.delete") == "storage.write" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.get") == "memory.read" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.list") == "memory.read" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.set") == "memory.write" &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.delete") == "memory.write",
+        "persistent and session data commands should require separate read and write grants");
+    Assert(ModuleSdkV1.RequiredPermissionForDataCommand("storage.clear") is null &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.clear") is null &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.readProcess") is null,
+        "API v1 should expose exactly four data operations per namespace and no process-memory command");
+    Assert(ModuleSdkV1.IsValidDataKey("example.counter") &&
+           !ModuleSdkV1.IsValidDataKey("") &&
+           !ModuleSdkV1.IsValidDataKey("../counter") &&
+           !ModuleSdkV1.IsValidDataKey("Counter") &&
+           !ModuleSdkV1.IsValidDataKey("process:0x1234"),
+        "module data keys should be bounded logical names rather than paths, pointers, or addresses");
     Assert(ModuleSdkV1.ConnectSourcePolicy([]) == "'none'",
         "modules without a network grant must keep connect-src closed");
     Assert(ModuleSdkV1.ConnectSourcePolicy([ModuleSdkV1.NetworkHttpsPermission]) == "https:",
@@ -957,10 +988,29 @@ static void ModuleSdkExampleIsValid()
     Assert(result.Diagnostics.Count == 0, "the documented SDK example should pass the production catalog validator; diagnostics=" +
         string.Join(',', result.Diagnostics.Select(diagnostic => diagnostic.Code + ":" + diagnostic.Message)));
     Assert(result.Modules.Count == 1 && result.Modules[0].Id == "example", "the SDK example should load as the example module");
+    Assert(new HashSet<string>(result.Modules[0].Permissions, StringComparer.Ordinal).SetEquals(new[]
+        {
+            "snapshot.read", "storage.read", "storage.write", "memory.read", "memory.write"
+        }),
+        "the SDK example should declare exactly the snapshot and module-data permissions it demonstrates");
 
     var exampleHtml = File.ReadAllText(Path.Combine(target, "index.html"));
     Assert(!exampleHtml.Contains("Content-Security-Policy", StringComparison.OrdinalIgnoreCase),
         "the SDK example must not ship an author policy that intersects away declared network permissions");
+    Assert(exampleHtml.Contains("event.source !== window.parent", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"storage.get\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"storage.set\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"storage.delete\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"storage.list\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"memory.get\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"memory.set\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"memory.delete\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"memory.list\"", StringComparison.Ordinal),
+        "the SDK example should validate its parent and demonstrate all persistent and session data calls");
+    Assert(!exampleHtml.Contains("process.memory", StringComparison.OrdinalIgnoreCase) &&
+           !exampleHtml.Contains("memory.readProcess", StringComparison.Ordinal) &&
+           !exampleHtml.Contains("memory.readAddress", StringComparison.Ordinal),
+        "the SDK memory example must remain volatile JSON state rather than raw process memory access");
     var manifestPath = Path.Combine(target, "module.json");
     File.WriteAllText(
         manifestPath,
@@ -981,6 +1031,295 @@ static void ModuleSdkExampleIsValid()
     var stagedHtml = File.ReadAllText(Path.Combine(stagingDirectory, "index.html"));
     Assert(stagedHtml.Contains("connect-src https:", StringComparison.Ordinal),
         "the network-enabled SDK example should receive the declared HTTPS connection policy");
+}
+
+static void ModuleDataServicePersistsStorageAndClearsSessionMemory()
+{
+    using var temp = new TempDirectory("module-data-lifetime-test");
+    var root = Path.Combine(temp.Path, "module-data");
+    var persistentValue = JsonSerializer.SerializeToElement(new { accent = "#5ac8fa", enabled = true });
+    var memoryValue = JsonSerializer.SerializeToElement(new { selected = 3 });
+
+    using (var service = new ModuleDataService(root))
+    {
+        var stored = service.StorageSet("alpha.module", "settings.main", persistentValue);
+        Assert(stored.Stored && stored.Key == "settings.main" && stored.UsedBytes == stored.SizeBytes &&
+               stored.QuotaBytes == ModuleSdkV1.MaxDataModuleBytes,
+            "persistent set should report the stored key and authoritative quota usage");
+        var remembered = service.MemorySet("alpha.module", "settings.main", memoryValue);
+        Assert(remembered.Stored && remembered.UsedBytes == remembered.SizeBytes,
+            "session set should report its independent namespace usage");
+
+        var persistent = service.StorageGet("alpha.module", "settings.main");
+        var memory = service.MemoryGet("alpha.module", "settings.main");
+        Assert(persistent.Found && persistent.Value?.GetProperty("accent").GetString() == "#5ac8fa",
+            "persistent get should return an owned JSON value");
+        Assert(memory.Found && memory.Value?.GetProperty("selected").GetInt32() == 3,
+            "session get should return its independent JSON value");
+        Assert(!service.StorageGet("beta.module", "settings.main").Found &&
+               !service.MemoryGet("beta.module", "settings.main").Found,
+            "another module id must not see either namespace");
+
+        service.StorageSet("alpha.module", "a.first", JsonSerializer.SerializeToElement(1));
+        service.MemorySet("alpha.module", "a.first", JsonSerializer.SerializeToElement(2));
+        Assert(service.StorageList("alpha.module").Keys.SequenceEqual(new[] { "a.first", "settings.main" }),
+            "persistent list should return sorted keys without exposing values");
+        Assert(service.MemoryList("alpha.module").Keys.SequenceEqual(new[] { "a.first", "settings.main" }),
+            "session list should return sorted keys without exposing values");
+
+        var replaced = service.StorageSet(
+            "alpha.module",
+            "settings.main",
+            JsonSerializer.SerializeToElement(new { accent = "#ffffff" }));
+        Assert(replaced.Stored && service.StorageGet("alpha.module", "settings.main")
+                .Value?.GetProperty("accent").GetString() == "#ffffff",
+            "persistent set should atomically replace an existing value");
+        Assert(!service.StorageDelete("alpha.module", "missing.key").Deleted &&
+               !service.MemoryDelete("alpha.module", "missing.key").Deleted,
+            "deleting a missing key should be an idempotent success result");
+        Assert(service.StorageDelete("alpha.module", "a.first").Deleted &&
+               service.MemoryDelete("alpha.module", "a.first").Deleted,
+            "delete should remove only the selected key from its namespace");
+    }
+
+    Assert(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Any(),
+        "persistent module data should be written beneath the host-owned root");
+    Assert(!Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)
+            .Any(path => path.Contains("alpha.module", StringComparison.Ordinal) ||
+                         path.Contains("settings.main", StringComparison.Ordinal)),
+        "persistent paths should hash module ids and keys instead of exposing them as paths");
+
+    using var restarted = new ModuleDataService(root);
+    Assert(restarted.StorageGet("alpha.module", "settings.main").Found,
+        "persistent storage should survive a new app-session service instance");
+    Assert(!restarted.MemoryGet("alpha.module", "settings.main").Found,
+        "session memory should clear when its service instance exits");
+}
+
+static void ModuleDataServiceEnforcesIsolationValidationAndQuotas()
+{
+    using var temp = new TempDirectory("module-data-guard-test");
+    var root = Path.Combine(temp.Path, "module-data");
+    using var service = new ModuleDataService(root);
+
+    ExpectDataError("invalid_module", () =>
+        service.MemorySet("../other", "safe.key", JsonSerializer.SerializeToElement(1)));
+    ExpectDataError("invalid_key", () =>
+        service.MemorySet("guard.module", "../escape", JsonSerializer.SerializeToElement(1)));
+    ExpectDataError("invalid_key", () =>
+        service.MemorySet("guard.module", "Uppercase", JsonSerializer.SerializeToElement(1)));
+    Assert(!Directory.Exists(root),
+        "rejected and memory-only operations must not create persistent files");
+
+    var oversizedValue = JsonSerializer.SerializeToElement(new string('x', ModuleSdkV1.MaxDataValueBytes));
+    ExpectDataError("item_too_large", () =>
+        service.MemorySet("guard.module", "large.value", oversizedValue));
+
+    using (var duplicate = JsonDocument.Parse("{\"same\":1,\"same\":2}"))
+    {
+        ExpectDataError("invalid_value", () =>
+            service.MemorySet("guard.module", "duplicate.value", duplicate.RootElement));
+    }
+    using (var boundary = JsonDocument.Parse(
+               new string('[', 32) + "0" + new string(']', 32),
+               new JsonDocumentOptions { MaxDepth = 64 }))
+    {
+        Assert(service.MemorySet("guard.module", "depth.memory", boundary.RootElement).Stored &&
+               service.StorageSet("guard.module", "depth.storage", boundary.RootElement).Stored,
+            "both namespaces should accept the documented maximum JSON nesting depth");
+    }
+    using (var deep = JsonDocument.Parse(
+               new string('[', 33) + "0" + new string(']', 33),
+               new JsonDocumentOptions { MaxDepth = 64 }))
+    {
+        ExpectDataError("invalid_value", () =>
+            service.MemorySet("guard.module", "deep.value", deep.RootElement));
+        ExpectDataError("invalid_value", () =>
+            service.StorageSet("guard.module", "deep.storage", deep.RootElement));
+    }
+
+    var maximumValue = JsonSerializer.SerializeToElement(new string('x', ModuleSdkV1.MaxDataValueBytes - 2));
+    for (var index = 0; index < ModuleSdkV1.MaxDataModuleBytes / ModuleSdkV1.MaxDataValueBytes; ++index)
+        service.MemorySet("quota.module", $"item.{index:D2}", maximumValue);
+    ExpectDataError("quota_exceeded", () =>
+        service.MemorySet("quota.module", "item.overflow", maximumValue));
+
+    for (var index = 0; index < ModuleSdkV1.MaxDataEntries; ++index)
+        service.MemorySet("keys.module", $"item.{index:D3}", JsonSerializer.SerializeToElement(null as object));
+    ExpectDataError("key_limit", () =>
+        service.MemorySet("keys.module", "item.overflow", JsonSerializer.SerializeToElement(null as object)));
+
+    var existingRecords = Directory.EnumerateFiles(root, "*.entry", SearchOption.AllDirectories)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    service.StorageSet("corrupt.module", "safe.key", JsonSerializer.SerializeToElement(true));
+    var record = Directory.EnumerateFiles(root, "*.entry", SearchOption.AllDirectories)
+        .Single(path => !existingRecords.Contains(path));
+    File.WriteAllText(record, "{}");
+    ExpectDataError("storage_corrupt", () => service.StorageList("corrupt.module"));
+
+    static void ExpectDataError(string code, Action action)
+    {
+        try
+        {
+            action();
+            throw new InvalidOperationException($"expected module data error: {code}");
+        }
+        catch (ModuleDataException ex)
+        {
+            Assert(ex.Code == code, $"expected module data error {code}, received {ex.Code}");
+        }
+    }
+}
+
+static void ModuleDataPersistenceSerializesWritersAndBoundsLockWaits()
+{
+    using var temp = new TempDirectory("module-data-concurrency-test");
+    var root = Path.Combine(temp.Path, "module-data");
+    using var first = new ModuleDataService(root);
+    using var second = new ModuleDataService(root);
+
+    try
+    {
+        Parallel.Invoke(
+            () => first.StorageSet("shared.module", "writer.first", JsonSerializer.SerializeToElement(new { value = 1 })),
+            () => second.StorageSet("shared.module", "writer.second", JsonSerializer.SerializeToElement(new { value = 2 })));
+    }
+    catch (Exception ex)
+    {
+        throw new InvalidOperationException("concurrent persistent writes failed: " + ex, ex);
+    }
+    Assert(first.StorageList("shared.module").Keys.SequenceEqual(new[] { "writer.first", "writer.second" }),
+        "separate service instances should serialize same-module writes through the persistent lock file");
+
+    var moduleDirectory = Directory.EnumerateDirectories(root).Single();
+    var staleTemporary = Path.Combine(moduleDirectory, $".tmp-{Guid.NewGuid():N}.tmp");
+    File.WriteAllText(staleTemporary, "stale");
+    _ = first.StorageList("shared.module");
+    Assert(!File.Exists(staleTemporary), "a bounded scan should clean a recognized stale temporary file");
+
+    var lockPath = Path.Combine(moduleDirectory, "storage-v1.lock");
+    using (var heldLock = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+    {
+        var wait = Stopwatch.StartNew();
+        try
+        {
+            second.StorageGet("shared.module", "writer.first");
+            throw new InvalidOperationException("expected storage_busy while the persistent lock is held");
+        }
+        catch (ModuleDataException ex)
+        {
+            Assert(ex.Code == "storage_busy", "lock contention should return the stable storage_busy error");
+        }
+        Assert(wait.Elapsed < TimeSpan.FromSeconds(2), "lock contention must have a bounded wait");
+    }
+
+    using var quotaTemp = new TempDirectory("module-data-persistent-quota-test");
+    using var quota = new ModuleDataService(Path.Combine(quotaTemp.Path, "module-data"));
+    var maximumValue = JsonSerializer.SerializeToElement(new string('x', ModuleSdkV1.MaxDataValueBytes - 2));
+    var fullEntryCount = ModuleSdkV1.MaxDataModuleBytes / ModuleSdkV1.MaxDataValueBytes;
+    for (var index = 0; index < fullEntryCount; ++index)
+        quota.StorageSet("quota.module", $"item.{index:D2}", maximumValue);
+    try
+    {
+        quota.StorageSet("quota.module", "item.overflow", maximumValue);
+        throw new InvalidOperationException("expected persistent quota enforcement");
+    }
+    catch (ModuleDataException ex)
+    {
+        Assert(ex.Code == "quota_exceeded", "persistent storage should enforce the per-module byte quota");
+    }
+    quota.StorageSet("quota.module", "item.00", JsonSerializer.SerializeToElement(null as object));
+    var replacementValue = JsonSerializer.SerializeToElement(new string('x', ModuleSdkV1.MaxDataValueBytes - 6));
+    Assert(quota.StorageSet("quota.module", "item.overflow", replacementValue).Stored,
+        "shrinking an overwrite should free persistent quota for a new key");
+}
+
+static void ModuleDataRelayRechecksGenerationIdentityAndPermissions()
+{
+    using var home = new TempHome();
+    var paths = new AppPaths("module-data-relay-test");
+    Directory.CreateDirectory(paths.ModulesDirectory);
+    CreateModulePackage(paths.ModulesDirectory, "full.module", """
+    {"schema_version":1,"api_version":1,"id":"full.module","name":"Full","version":"1","entry":"index.html","permissions":["storage.read","storage.write","memory.read","memory.write"]}
+    """);
+    CreateModulePackage(paths.ModulesDirectory, "reader.module", """
+    {"schema_version":1,"api_version":1,"id":"reader.module","name":"Reader","version":"1","entry":"index.html","permissions":["storage.read","memory.read"]}
+    """);
+    CreateModulePackage(paths.ModulesDirectory, "writer.module", """
+    {"schema_version":1,"api_version":1,"id":"writer.module","name":"Writer","version":"1","entry":"index.html","permissions":["storage.write","memory.write"]}
+    """);
+
+    var session = new HostSession("module-data-relay-test");
+    var generation = session.ModuleHostGeneration;
+    var setPayload = JsonSerializer.SerializeToElement(new { key = "shared.value", value = new { count = 1 } });
+    var getPayload = JsonSerializer.SerializeToElement(new { key = "shared.value" });
+    var emptyPayload = JsonSerializer.SerializeToElement(new { });
+
+    var stored = session.ExecuteModuleData("full.module", generation, "storage.set", setPayload);
+    var remembered = session.ExecuteModuleData("full.module", generation, "memory.set", setPayload);
+    Assert(stored.Success && stored.Data is ModuleDataSetResult &&
+           remembered.Success && remembered.Data is ModuleDataSetResult,
+        "a current module with write grants should reach its persistent and session stores");
+    var readStorage = session.ExecuteModuleData("full.module", generation, "storage.get", getPayload);
+    var readMemory = session.ExecuteModuleData("full.module", generation, "memory.get", getPayload);
+    Assert(readStorage.Success && readStorage.Data is ModuleDataGetResult { Found: true } &&
+           readMemory.Success && readMemory.Data is ModuleDataGetResult { Found: true },
+        "a current module with read grants should receive its own stored JSON");
+    Assert(session.ExecuteModuleData("reader.module", generation, "storage.set", setPayload).Code == "permission_denied" &&
+           session.ExecuteModuleData("reader.module", generation, "memory.set", setPayload).Code == "permission_denied" &&
+           session.ExecuteModuleData("writer.module", generation, "storage.get", getPayload).Code == "permission_denied" &&
+           session.ExecuteModuleData("writer.module", generation, "memory.list", emptyPayload).Code == "permission_denied",
+        "the relay should enforce read and write permissions independently in both namespaces");
+    var writeOnlyStorage = session.ExecuteModuleData("writer.module", generation, "storage.set", setPayload);
+    var writeOnlyMemory = session.ExecuteModuleData("writer.module", generation, "memory.set", setPayload);
+    var writeOnlyDelete = session.ExecuteModuleData(
+        "writer.module",
+        generation,
+        "storage.delete",
+        JsonSerializer.SerializeToElement(new { key = "missing.value" }));
+    var writeOnlyJson = JsonSerializer.Serialize(new[]
+    {
+        writeOnlyStorage.Data,
+        writeOnlyMemory.Data,
+        writeOnlyDelete.Data
+    });
+    Assert(writeOnlyStorage.Success && writeOnlyMemory.Success && writeOnlyDelete.Success &&
+           !writeOnlyJson.Contains("UsedBytes", StringComparison.OrdinalIgnoreCase) &&
+           writeOnlyJson.Contains("\"Deleted\":true", StringComparison.OrdinalIgnoreCase),
+        "write-only responses should not reveal prior key existence or namespace usage");
+    Assert(session.ExecuteModuleData("reader.module", generation, "storage.get", getPayload).Data is
+               ModuleDataGetResult { Found: false } &&
+           session.ExecuteModuleData("reader.module", generation, "memory.get", getPayload).Data is
+               ModuleDataGetResult { Found: false },
+        "a different authorized module must still receive only its own namespaces");
+    Assert(session.ExecuteModuleData("missing.module", generation, "storage.get", getPayload).Code == "module_unavailable",
+        "payload identity must resolve to a currently hosted canonical module");
+    Assert(session.ExecuteModuleData("full.module", generation, "memory.address", getPayload).Code == "unsupported_command",
+        "the relay must not expose a raw process-memory operation");
+    Assert(session.ExecuteModuleData(
+               "full.module",
+               generation,
+               "storage.list",
+               JsonSerializer.SerializeToElement(new { moduleId = "reader.module" })).Code == "invalid_payload",
+        "module list payloads must not be able to supply an alternate identity");
+
+    var nextGeneration = session.BeginModuleHostGeneration();
+    Assert(nextGeneration != generation &&
+           session.ExecuteModuleData("full.module", generation, "storage.get", getPayload).Code == "stale_generation",
+        "a request from an unloaded frame generation must fail before reaching module data");
+
+    var revoked = session.Modules.Modules.Select(module =>
+        ModuleSdkV1.IdComparer.Equals(module.Id, "full.module")
+            ? module with { Permissions = Array.Empty<string>() }
+            : module).ToArray();
+    session.ApplyHostedModules(revoked, []);
+    Assert(session.ExecuteModuleData("full.module", nextGeneration, "storage.get", getPayload).Code == "permission_denied" &&
+           session.ExecuteModuleData("full.module", nextGeneration, "memory.set", setPayload).Code == "permission_denied",
+        "the server-side relay must recheck current grants after a generation transition");
+
+    session.Dispose();
+    Assert(session.ExecuteModuleData("full.module", nextGeneration, "storage.get", getPayload).Code == "module_unavailable",
+        "disposing the host session should invalidate and drain module-data access");
 }
 
 static void PaintPresetStoreRoundTripsPaintSettings()
@@ -1517,6 +1856,9 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
     var moduleSdk = File.ReadAllText(Path.Combine(
         repository,
         "src", "csharp", "MecchaCamouflage.Core", "ModuleSdkV1.cs"));
+    var moduleData = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.Controller", "ModuleDataService.cs"));
 
     Assert(mainForm.Contains("ModuleSdkV1.VirtualHostName(module.Id)", StringComparison.Ordinal) &&
            mainForm.Contains("ModuleCatalog.TryStagePackage", StringComparison.Ordinal) &&
@@ -1561,6 +1903,29 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
            app.Contains("event.origin === candidate.descriptor.origin", StringComparison.Ordinal) &&
            app.Contains("[\"snapshot.get\", \"snapshot.read\"]", StringComparison.Ordinal),
         "the JavaScript relay should bind source, exact origin, and command-specific permission");
+    Assert(app.Contains("[\"storage.get\", \"storage.read\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"storage.list\", \"storage.read\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"storage.set\", \"storage.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"storage.delete\", \"storage.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"memory.get\", \"memory.read\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"memory.list\", \"memory.read\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"memory.set\", \"memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"memory.delete\", \"memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("send(\"moduleData\"", StringComparison.Ordinal) &&
+           app.Contains("moduleId: module.descriptor.id", StringComparison.Ordinal) &&
+           app.Contains("const generation = module.descriptor.generation", StringComparison.Ordinal) &&
+           app.Contains("module.descriptor.generation !== generation", StringComparison.Ordinal),
+        "the iframe relay should derive data identity and generation from the matched module and split read/write grants");
+    Assert(mainForm.Contains("case \"moduleData\"", StringComparison.Ordinal) &&
+           mainForm.Contains("session.ExecuteModuleDataAsync(moduleId, generation, operation, payload)", StringComparison.Ordinal) &&
+           hostSession.Contains("RequiredPermissionForDataCommand(operation)", StringComparison.Ordinal) &&
+           hostSession.Contains("moduleDataGate", StringComparison.Ordinal),
+        "the trusted host should independently recheck module data generation, identity, and permission");
+    Assert(!moduleData.Contains("RuntimeBridgeService", StringComparison.Ordinal) &&
+           !moduleData.Contains("BridgeClient", StringComparison.Ordinal) &&
+           !moduleData.Contains("ReadProcessMemory", StringComparison.Ordinal) &&
+           !moduleData.Contains("WriteProcessMemory", StringComparison.Ordinal),
+        "volatile SDK memory must remain host JSON state with no path to raw game-process memory");
 }
 
 static void WebUiKeepsThemeColorOnReadonlyControls()
@@ -3267,7 +3632,7 @@ static void Assert(bool condition, string message)
 
 sealed class TempHome : IDisposable
 {
-    private readonly string oldLocalAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    private readonly string? oldLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
     private readonly string temp = Path.Combine(Path.GetTempPath(), "meccha-tests-" + Guid.NewGuid().ToString("N"));
 
     public TempHome()

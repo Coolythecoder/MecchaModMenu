@@ -7,7 +7,12 @@ public sealed class AppPaths
     public AppPaths(string version)
     {
         Version = SanitizeVersion(version);
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        // Prefer the process environment so isolated test and portable launch
+        // contexts can redirect app data without touching the signed-in user's
+        // real profile. Normal Windows launches resolve this to the same folder.
+        var local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(local))
+            local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(local))
             local = Path.GetTempPath();
         RootDirectory = Path.Combine(local, "MecchaCamouflage");
@@ -19,6 +24,7 @@ public sealed class AppPaths
         RuntimeDirectory = Path.Combine(VersionRoot, "runtime");
         ModuleHostDirectory = Path.Combine(RuntimeDirectory, "module-hosts");
         ModulesDirectory = Path.Combine(RootDirectory, "modules");
+        ModuleDataDirectory = Path.Combine(RootDirectory, "module-data");
         BridgeInstancesDirectory = Path.Combine(RootDirectory, "bridge-instances");
         BridgeStateDirectory = Path.Combine(RootDirectory, "bridge-state");
         BridgeProgressDirectory = Path.Combine(BridgeStateDirectory, "progress");
@@ -36,6 +42,7 @@ public sealed class AppPaths
     public string RuntimeDirectory { get; }
     public string ModuleHostDirectory { get; }
     public string ModulesDirectory { get; }
+    public string ModuleDataDirectory { get; }
     public string BridgeInstancesDirectory { get; }
     public string BridgeStateDirectory { get; }
     public string BridgeProgressDirectory { get; }
@@ -48,6 +55,7 @@ public sealed class AppPaths
         Directory.CreateDirectory(LogDirectory);
         Directory.CreateDirectory(ModuleHostDirectory);
         Directory.CreateDirectory(ModulesDirectory);
+        Directory.CreateDirectory(ModuleDataDirectory);
         Directory.CreateDirectory(BridgeInstancesDirectory);
         Directory.CreateDirectory(BridgeProgressDirectory);
         Directory.CreateDirectory(DiagnosticsDirectory);

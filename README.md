@@ -22,7 +22,8 @@
 - **Paint Studio** — saves presets, previews and restores paint, undoes the last
   settings change, and shows planned coverage.
 - **Module SDK v1** — loads trusted local Web modules through validated
-  manifests, isolated origins, and explicit paint and network permissions.
+  manifests, isolated origins, and explicit paint, network, persistent-storage,
+  and session-memory permissions.
 - **MECCHA CHAMELEON update2.8.0 support** — the current native runtime target.
 
 ## Build and run
@@ -161,8 +162,8 @@ are optional; all other properties shown above are required.
 
 The host responds only to the registered module frame. Always validate
 `event.origin`, `source`, and `apiVersion` before using a message.
-API v1 ignores request payload values; paint commands use the settings currently
-configured in Meccha Mod Menu.
+Payload shapes are command-specific. Paint commands ignore their payload and use
+the settings currently configured in Meccha Mod Menu.
 
 ### 4. Choose permissions
 
@@ -178,6 +179,10 @@ Only declare permissions your module uses:
 | `network.https` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTPS only |
 | `network.http` | `fetch`, `XMLHttpRequest`, and `EventSource` over HTTP or HTTPS |
 | `network.websocket` | `WebSocket` connections over `ws:` or `wss:` |
+| `storage.read` | `sdk.storage.get` and `sdk.storage.list` for persistent module data |
+| `storage.write` | `sdk.storage.set` and `sdk.storage.delete` for persistent module data |
+| `memory.read` | `sdk.memory.get` and `sdk.memory.list` for this app session |
+| `memory.write` | `sdk.memory.set` and `sdk.memory.delete` for this app session |
 
 There is no generic native-command, filesystem, or process permission. Paint
 actions use the current settings configured in Meccha Mod Menu. Network access
@@ -213,6 +218,22 @@ another module. CORS controls whether JavaScript may read a cross-origin
 response; it is not a guarantee that the request was never sent. Remote servers
 must enforce authorization and CSRF protections independently.
 
+For module-owned JSON data, copy the Promise-based `sdk` wrapper from the full
+guide. `sdk.storage` persists across reloads and app versions; `sdk.memory`
+survives module reloads only within the current app process:
+
+```js
+await sdk.storage.set("preferences", { accent: "#5ac8fa" });
+const preferences = await sdk.storage.get("preferences");
+
+await sdk.memory.set("preview", { selected: 3 });
+const sessionKeys = await sdk.memory.list();
+```
+
+Both namespaces are per-module, quota-limited key/value stores. “Memory” means
+volatile SDK data only—it never exposes game memory, process addresses, pointers,
+or the native bridge.
+
 ### 5. Load and test it
 
 1. Open Meccha Mod Menu and go to **App → External modules**.
@@ -240,6 +261,8 @@ snapshot shape, validation rules, and trust model.
   those resources inside the validated module package.
 - Package asset references must be relative rather than root-relative so they
   stay under the current reload generation's cache-busting path.
+- Persistent storage is plain local JSON namespaced by module ID, not a secret vault.
+  Replacing a package with another package using the same ID retains that data.
 - Install only modules you trust. Permission checks and browser isolation reduce
   accidental access but do not make untrusted local code safe.
 

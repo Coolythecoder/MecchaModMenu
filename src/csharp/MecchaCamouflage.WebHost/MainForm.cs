@@ -85,7 +85,10 @@ public sealed class MainForm : Form
             }
         };
         FormClosing += HandleFormClosingAsync;
-        FormClosed += (_, _) => TryDeleteModuleHostStagingDirectory(moduleHostStagingDirectory);
+        FormClosed += (_, _) =>
+        {
+            TryDeleteModuleHostStagingDirectory(moduleHostStagingDirectory);
+        };
         ResizeEnd += (_, _) => PersistWindowSnapshot();
         Move += (_, _) => PersistWindowSnapshot();
         statusTimer.Tick += async (_, _) =>
@@ -1074,6 +1077,8 @@ public sealed class MainForm : Form
             case "openModules":
                 session.OpenModulesDirectory();
                 return new { success = true };
+            case "moduleData":
+                return await HandleModuleDataAsync(command.Payload);
             case "reloadModules":
             {
                 HostCommandResult reloadResult;
@@ -1184,6 +1189,37 @@ public sealed class MainForm : Form
             throw new ArgumentException($"{name} must be a string.");
         }
         return value.GetString() ?? "";
+    }
+
+    private async Task<ModuleDataCommandResult> HandleModuleDataAsync(JsonElement request)
+    {
+        if (moduleNetworkTransition)
+            return new ModuleDataCommandResult(false, "stale_generation", "Module reload is in progress.", null);
+        if (request.ValueKind != JsonValueKind.Object ||
+            !request.TryGetProperty("moduleId", out var moduleIdValue) || moduleIdValue.ValueKind != JsonValueKind.String ||
+            !request.TryGetProperty("generation", out var generationValue) || generationValue.ValueKind != JsonValueKind.String ||
+            !request.TryGetProperty("operation", out var operationValue) || operationValue.ValueKind != JsonValueKind.String ||
+            !request.TryGetProperty("payload", out var payload))
+        {
+            return new ModuleDataCommandResult(false, "invalid_payload", "The module data request is invalid.", null);
+        }
+        var allowedFields = new HashSet<string>(["moduleId", "generation", "operation", "payload"], StringComparer.Ordinal);
+        if (request.EnumerateObject().Any(property => !allowedFields.Contains(property.Name)))
+            return new ModuleDataCommandResult(false, "invalid_payload", "The module data request is invalid.", null);
+
+        var moduleId = moduleIdValue.GetString() ?? "";
+        var generation = generationValue.GetString() ?? "";
+        var operation = operationValue.GetString() ?? "";
+        var requiredPermission = ModuleSdkV1.RequiredPermissionForDataCommand(operation);
+        var hostedModule = moduleVirtualHostModules.Values.FirstOrDefault(module =>
+            ModuleSdkV1.IdComparer.Equals(module.Id, moduleId));
+        if (hostedModule is null)
+            return new ModuleDataCommandResult(false, "module_unavailable", "The module is not currently hosted.", null);
+        if (requiredPermission is null)
+            return new ModuleDataCommandResult(false, "unsupported_command", "Unsupported module data command.", null);
+        if (!hostedModule.Permissions.Contains(requiredPermission, StringComparer.Ordinal))
+            return new ModuleDataCommandResult(false, "permission_denied", "The module does not have permission for this command.", null);
+        return await session.ExecuteModuleDataAsync(moduleId, generation, operation, payload);
     }
 
     private async Task RefreshSnapshotsUntilCancelledAsync(CancellationToken cancellationToken)

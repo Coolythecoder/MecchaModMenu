@@ -7,6 +7,10 @@
   "description": "A minimal third-party module package for the Meccha Mod Menu SDK.",
   "entry": "index.html",
   "permissions": [
-    "snapshot.read"
+    "snapshot.read",
+    "storage.read",
+    "storage.write",
+    "memory.read",
+    "memory.write"
   ]
 }
