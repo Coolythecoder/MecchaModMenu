@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Meccha Mod Menu icon</title>
+  <desc id="desc">A silver mechanical M on a dark octagonal control plate with a green status light.</desc>
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#252b2f"/>
+      <stop offset="0.48" stop-color="#111517"/>
+      <stop offset="1" stop-color="#080a0b"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.5" stop-color="#d9dee1"/>
+      <stop offset="1" stop-color="#8d969b"/>
+    </linearGradient>
+    <linearGradient id="status" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dff98"/>
+      <stop offset="1" stop-color="#28a947"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M166 54h692l112 112v692L858 970H166L54 858V166Z"
+        fill="#070909" stroke="#070909" stroke-width="28" stroke-linejoin="round"/>
+  <path d="M174 78h676l96 96v676l-96 96H174l-96-96V174Z"
+        fill="url(#plate)" stroke="#d9dee1" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M194 112h636l82 82v636l-82 82H194l-82-82V194Z"
+        fill="none" stroke="#424a4f" stroke-width="12" stroke-linejoin="round"/>
+
+  <path d="M210 766V280h158l144 218 144-218h158v486H662V526L512 750 362 526v240Z"
+        fill="#050707" opacity="0.72" transform="translate(0 18)"/>
+  <path d="M210 748V262h158l144 218 144-218h158v486H662V508L512 732 362 508v240Z"
+        fill="url(#metal)"/>
+
+  <path d="M512 414 574 508 512 602 450 508Z"
+        fill="#111517"/>
+  <path d="M512 440 557 508 512 576 467 508Z"
+        fill="url(#status)"/>
+
+  <circle cx="512" cy="174" r="34" fill="#070909" stroke="#657076" stroke-width="10"/>
+  <circle cx="512" cy="174" r="20" fill="url(#status)"/>
+</svg>
