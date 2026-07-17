@@ -3369,6 +3369,11 @@ namespace
         return value ? "true" : "false";
     }
 
+    auto json_finite_number(double value) -> std::string
+    {
+        return std::isfinite(value) ? std::to_string(value) : "null";
+    }
+
     struct SdkResolutionException : std::runtime_error
     {
         std::string stage;
@@ -7154,7 +7159,9 @@ namespace
         double uv_area_sum{0.0};
         double weighted_world_units_per_uv{0.0};
         double raw_world_scale{0.0};
+        double measured_scale{0.0};
         double scale{0.0};
+        bool used_expected_fallback{false};
         int valid_triangles{0};
         int invalid_triangles{0};
         std::string failure{"not_run"};
@@ -7210,14 +7217,18 @@ namespace
         }
         out.weighted_world_units_per_uv = weighted_sum / out.uv_area_sum;
         out.raw_world_scale = out.weighted_world_units_per_uv / out.mesh_bounds_diameter;
-        out.scale = out.raw_world_scale * runtime_contract::PackedMeshAnchorCoverageSafetyFactor;
-        if (!std::isfinite(out.scale) || out.scale < 0.5 || out.scale > 6.0)
+        out.measured_scale =
+            out.raw_world_scale * runtime_contract::PackedMeshAnchorCoverageSafetyFactor;
+        if (!runtime_contract::resolve_packed_mesh_radius_calibration(
+                out.measured_scale,
+                out.scale,
+                out.used_expected_fallback))
         {
-            out.failure = "packed_radius_calibration_out_of_range";
+            out.failure = "packed_radius_calibration_invalid";
             return out;
         }
         out.ok = true;
-        out.failure = "ok";
+        out.failure = out.used_expected_fallback ? "ok_expected_fallback" : "ok";
         return out;
     }
 
@@ -12635,6 +12646,32 @@ namespace
                 ? mesh_first_resolve_packed_radius_calibration(selected_mesh.mesh,
                                                                runtime_triangle_cache.triangles)
                 : MeshFirstPackedRadiusCalibration{};
+        metadata += ",\"packed_mesh_radius_calibration_required\":" +
+                    std::string(json_bool(uniform_packed_radius_calibration_required));
+        metadata += ",\"packed_mesh_radius_calibration_ok\":" +
+                    std::string(json_bool(packed_radius_calibration.ok));
+        metadata += ",\"packed_mesh_radius_calibration_failure\":\"" +
+                    json_escape(packed_radius_calibration.failure) + "\"";
+        metadata += ",\"packed_mesh_bounds_sphere_radius\":" +
+                    json_finite_number(packed_radius_calibration.mesh_sphere_radius);
+        metadata += ",\"packed_mesh_bounds_diameter\":" +
+                    json_finite_number(packed_radius_calibration.mesh_bounds_diameter);
+        metadata += ",\"packed_mesh_radius_calibration_triangles\":" +
+                    std::to_string(packed_radius_calibration.valid_triangles);
+        metadata += ",\"packed_mesh_radius_calibration_invalid_triangles\":" +
+                    std::to_string(packed_radius_calibration.invalid_triangles);
+        metadata += ",\"packed_mesh_radius_calibration_uv_area\":" +
+                    json_finite_number(packed_radius_calibration.uv_area_sum);
+        metadata += ",\"packed_mesh_world_units_per_uv_weighted\":" +
+                    json_finite_number(packed_radius_calibration.weighted_world_units_per_uv);
+        metadata += ",\"packed_mesh_radius_scale_raw_world\":" +
+                    json_finite_number(packed_radius_calibration.raw_world_scale);
+        metadata += ",\"packed_mesh_radius_scale_measured\":" +
+                    json_finite_number(packed_radius_calibration.measured_scale);
+        metadata += ",\"packed_mesh_radius_expected_fallback_used\":" +
+                    std::string(json_bool(packed_radius_calibration.used_expected_fallback));
+        metadata += ",\"packed_mesh_radius_coverage_safety_factor\":" +
+                    std::to_string(runtime_contract::PackedMeshAnchorCoverageSafetyFactor);
         if (uniform_packed_radius_calibration_required && !packed_radius_calibration.ok)
         {
             return response_json(false,
@@ -12666,28 +12703,6 @@ namespace
                        : packed_radius_calibration.scale)
                 : 1.0;
         const double packed_wire_radius_scale = packed_mesh_radius_scale;
-        metadata += ",\"packed_mesh_radius_calibration_required\":" +
-                    std::string(json_bool(uniform_packed_radius_calibration_required));
-        metadata += ",\"packed_mesh_radius_calibration_ok\":" +
-                    std::string(json_bool(packed_radius_calibration.ok));
-        metadata += ",\"packed_mesh_radius_calibration_failure\":\"" +
-                    json_escape(packed_radius_calibration.failure) + "\"";
-        metadata += ",\"packed_mesh_bounds_sphere_radius\":" +
-                    std::to_string(packed_radius_calibration.mesh_sphere_radius);
-        metadata += ",\"packed_mesh_bounds_diameter\":" +
-                    std::to_string(packed_radius_calibration.mesh_bounds_diameter);
-        metadata += ",\"packed_mesh_radius_calibration_triangles\":" +
-                    std::to_string(packed_radius_calibration.valid_triangles);
-        metadata += ",\"packed_mesh_radius_calibration_invalid_triangles\":" +
-                    std::to_string(packed_radius_calibration.invalid_triangles);
-        metadata += ",\"packed_mesh_radius_calibration_uv_area\":" +
-                    std::to_string(packed_radius_calibration.uv_area_sum);
-        metadata += ",\"packed_mesh_world_units_per_uv_weighted\":" +
-                    std::to_string(packed_radius_calibration.weighted_world_units_per_uv);
-        metadata += ",\"packed_mesh_radius_scale_raw_world\":" +
-                    std::to_string(packed_radius_calibration.raw_world_scale);
-        metadata += ",\"packed_mesh_radius_coverage_safety_factor\":" +
-                    std::to_string(runtime_contract::PackedMeshAnchorCoverageSafetyFactor);
         metadata += ",\"packed_mesh_radius_scale_effective\":" +
                     std::to_string(packed_wire_radius_scale);
         metadata += ",\"packed_mesh_radius_scale_source\":\"" +
@@ -12697,7 +12712,9 @@ namespace
                                            ? "research_triangle_world_radius_uv_unscaled"
                                            : (research_radius_override_requested
                                                   ? "research_override"
-                                                  : "runtime_uv_area_weighted_mesh_calibration"))) +
+                                                  : (packed_radius_calibration.used_expected_fallback
+                                                         ? "expected_calibration_fallback"
+                                                         : "runtime_uv_area_weighted_mesh_calibration")))) +
                     "\"";
         metadata += ",\"packed_mesh_radius_scale_application\":\"packed_wire_encoder_only\"";
         const double texture_size_double = static_cast<double>(std::max(1, active_texture_size));

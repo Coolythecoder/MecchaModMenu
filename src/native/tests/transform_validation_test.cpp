@@ -284,9 +284,40 @@ int main()
         return 18;
     }
 
+    double resolved_calibration = -1.0;
+    bool used_expected_calibration = true;
     if (runtime_contract::PackedMeshAnchorWorldRadiusAuto != 0.0f ||
         runtime_contract::PackedMeshAnchorCoverageSafetyFactor != 0.91 ||
         runtime_contract::PackedMeshAnchorExpectedRadiusCalibration != 3.5 ||
+        !runtime_contract::resolve_packed_mesh_radius_calibration(
+            3.75, resolved_calibration, used_expected_calibration) ||
+        resolved_calibration != 3.75 || used_expected_calibration ||
+        !runtime_contract::resolve_packed_mesh_radius_calibration(
+            0.5, resolved_calibration, used_expected_calibration) ||
+        resolved_calibration != 0.5 || used_expected_calibration ||
+        !runtime_contract::resolve_packed_mesh_radius_calibration(
+            6.0, resolved_calibration, used_expected_calibration) ||
+        resolved_calibration != 6.0 || used_expected_calibration ||
+        !runtime_contract::resolve_packed_mesh_radius_calibration(
+            6.01, resolved_calibration, used_expected_calibration) ||
+        resolved_calibration != runtime_contract::PackedMeshAnchorExpectedRadiusCalibration ||
+        !used_expected_calibration ||
+        !runtime_contract::resolve_packed_mesh_radius_calibration(
+            0.49, resolved_calibration, used_expected_calibration) ||
+        resolved_calibration != runtime_contract::PackedMeshAnchorExpectedRadiusCalibration ||
+        !used_expected_calibration ||
+        runtime_contract::resolve_packed_mesh_radius_calibration(
+            0.0, resolved_calibration, used_expected_calibration) ||
+        runtime_contract::resolve_packed_mesh_radius_calibration(
+            -1.0, resolved_calibration, used_expected_calibration) ||
+        runtime_contract::resolve_packed_mesh_radius_calibration(
+            std::numeric_limits<double>::quiet_NaN(),
+            resolved_calibration,
+            used_expected_calibration) ||
+        runtime_contract::resolve_packed_mesh_radius_calibration(
+            std::numeric_limits<double>::infinity(),
+            resolved_calibration,
+            used_expected_calibration) ||
         !runtime_contract::packed_mesh_anchor_requests_world_radius_conversion(
             runtime_contract::PackedMeshAnchorWorldRadiusAuto) ||
         runtime_contract::packed_mesh_anchor_requests_world_radius_conversion(20.0f / 1024.0f) ||
@@ -302,8 +333,15 @@ int main()
     }
 
     const float source_wire_test_radius = 10.0f / 1024.0f;
+    const float fill_wire_test_radius = 96.0f / 1024.0f;
+    const float detail_500_wire_test_radius = static_cast<float>(
+        runtime_contract::adaptive_detail_radius_texels(10.0, 500) / 1024.0);
     float resolved_wire_radius = -1.0f;
-    if (!runtime_contract::resolve_packed_wire_brush_radius(source_wire_test_radius,
+    if (!runtime_contract::resolve_packed_mesh_radius_calibration(
+            6.01, resolved_calibration, used_expected_calibration) ||
+        resolved_calibration != runtime_contract::PackedMeshAnchorExpectedRadiusCalibration ||
+        !used_expected_calibration ||
+        !runtime_contract::resolve_packed_wire_brush_radius(source_wire_test_radius,
                                                             1.0,
                                                             resolved_wire_radius) ||
         resolved_wire_radius != source_wire_test_radius ||
@@ -312,6 +350,15 @@ int main()
                                                             resolved_wire_radius) ||
         resolved_wire_radius != static_cast<float>(
                                     static_cast<double>(source_wire_test_radius) * 3.5) ||
+        !runtime_contract::resolve_packed_wire_brush_radius(
+            fill_wire_test_radius,
+            resolved_calibration,
+            resolved_wire_radius) ||
+        !runtime_contract::resolve_packed_wire_brush_radius(
+            detail_500_wire_test_radius,
+            resolved_calibration,
+            resolved_wire_radius) ||
+        detail_500_wire_test_radius != 1.0f / 1024.0f ||
         source_wire_test_radius != 10.0f / 1024.0f ||
         runtime_contract::resolve_packed_wire_brush_radius(0.0f, 1.0, resolved_wire_radius) ||
         runtime_contract::resolve_packed_wire_brush_radius(-0.1f, 1.0, resolved_wire_radius) ||

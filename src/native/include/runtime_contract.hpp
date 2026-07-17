@@ -47,6 +47,8 @@ namespace runtime_contract
     // conservative factor (3.4/4.0 outperformed both 4.0 and per-anchor max).
     constexpr double PackedMeshAnchorCoverageSafetyFactor = 0.91;
     constexpr double PackedMeshAnchorExpectedRadiusCalibration = 3.5;
+    constexpr double PackedMeshAnchorMinimumMeasuredRadiusCalibration = 0.5;
+    constexpr double PackedMeshAnchorMaximumMeasuredRadiusCalibration = 6.0;
     constexpr int PackedMeshAnchorSubdivisionLevelAuto = 0;
     constexpr float PackedMeshAnchorSubdivisionPixelSizeAuto = 0.0f;
     constexpr int PackedMeshAnchorTemplateResolutionAuto = 0;
@@ -54,6 +56,32 @@ namespace runtime_contract
     constexpr bool packed_mesh_anchor_requests_world_radius_conversion(float effective_world_radius)
     {
         return effective_world_radius <= 0.0f;
+    }
+
+    // Live pose geometry and component bounds are sampled independently.  During
+    // pose transitions they can briefly disagree even though both inputs are
+    // individually valid.  Preserve trustworthy measurements and fall back to
+    // the host-validated packed calibration instead of aborting an otherwise
+    // valid paint when that transient ratio is implausible.
+    inline bool resolve_packed_mesh_radius_calibration(double measured_scale,
+                                                       double& effective_scale,
+                                                       bool& used_expected_fallback)
+    {
+        effective_scale = 0.0;
+        used_expected_fallback = false;
+        if (!std::isfinite(measured_scale) || measured_scale <= 0.0)
+        {
+            return false;
+        }
+        if (measured_scale < PackedMeshAnchorMinimumMeasuredRadiusCalibration ||
+            measured_scale > PackedMeshAnchorMaximumMeasuredRadiusCalibration)
+        {
+            effective_scale = PackedMeshAnchorExpectedRadiusCalibration;
+            used_expected_fallback = true;
+            return true;
+        }
+        effective_scale = measured_scale;
+        return true;
     }
 
     inline bool packed_mesh_anchor_world_radius_contract_valid(float effective_world_radius,
