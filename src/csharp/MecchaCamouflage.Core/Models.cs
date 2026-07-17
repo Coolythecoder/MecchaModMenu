@@ -39,7 +39,7 @@ public sealed class PaintSettings
 {
     public double Brush1SizeTexels { get; set; } = 30.0;
     public double Brush2SizeTexels { get; set; } = 10.0;
-    public int DetailResolutionPercent { get; set; } = 100;
+    public int DetailResolutionPercent { get; set; } = 500;
     public double CoverageStepTexels { get; set; } = 10.0;
     public int PackedBatchLimit { get; set; } = 20;
     public int PackedBatchPacingMs { get; set; } = 50;

@@ -129,9 +129,11 @@ the existing command line on that same connection. `ping`, paint, preview,
 cancel, and shutdown payloads are unchanged after HELLO.
 
 Auto Paint and Paint Studio send `detail_resolution_percent` as bounded paint
-tuning. Native code validates it at 50–500 with a default of 100. The
-correction-stroke budget scales linearly from 512 at 100% to 2,560 at 500%,
-while the 100,000-stroke total-plan safety cap remains fixed. Third-party Web
+tuning. Native code validates it at 50–500 with a default of 500. The 100%
+scaling baseline remains a channel threshold of 16, a half-brush radius, and a
+512-stroke correction budget; the 500% default uses threshold 4, one-fifth of
+that baseline radius, and up to 2,560 correction strokes. The 100,000-stroke
+total-plan safety cap remains fixed. Third-party Web
 modules never connect to this TCP bridge directly; their SDK permissions are
 relayed through the controller's existing allowlisted paint commands.
 

@@ -473,7 +473,8 @@ namespace runtime_contract
     // The resolution percentage scales refinement density inside hard limits so
     // runtime and replicated-plan growth stay predictable.
     constexpr int DetailResolutionMinimumPercent = 50;
-    constexpr int DetailResolutionDefaultPercent = 100;
+    constexpr int DetailResolutionBaselinePercent = 100;
+    constexpr int DetailResolutionDefaultPercent = 500;
     constexpr int DetailResolutionMaximumPercent = 500;
     constexpr int AdaptiveDetailChannelThreshold = 16;
     // Baseline at 100%; the selected resolution scales this linearly.
@@ -495,7 +496,7 @@ namespace runtime_contract
         int detail_resolution_percent = DetailResolutionDefaultPercent)
     {
         const int safe_percent = clamp_detail_resolution_percent(detail_resolution_percent);
-        return (AdaptiveDetailChannelThreshold * DetailResolutionDefaultPercent +
+        return (AdaptiveDetailChannelThreshold * DetailResolutionBaselinePercent +
                 safe_percent - 1) /
                safe_percent;
     }
@@ -507,8 +508,8 @@ namespace runtime_contract
             clamp_detail_resolution_percent(detail_resolution_percent));
         const std::size_t scaled =
             (AdaptiveDetailMaximumStrokes * safe_percent +
-             static_cast<std::size_t>(DetailResolutionDefaultPercent - 1)) /
-            static_cast<std::size_t>(DetailResolutionDefaultPercent);
+             static_cast<std::size_t>(DetailResolutionBaselinePercent - 1)) /
+            static_cast<std::size_t>(DetailResolutionBaselinePercent);
         return scaled;
     }
 
@@ -564,7 +565,7 @@ namespace runtime_contract
     {
         const double baseline =
             brush_2_size_texels * 0.5 < 2.5 ? 2.5 : brush_2_size_texels * 0.5;
-        return baseline * static_cast<double>(DetailResolutionDefaultPercent) /
+        return baseline * static_cast<double>(DetailResolutionBaselinePercent) /
                static_cast<double>(clamp_detail_resolution_percent(detail_resolution_percent));
     }
 

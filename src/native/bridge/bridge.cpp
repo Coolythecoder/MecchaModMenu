@@ -9808,9 +9808,9 @@ namespace
         std::string server_batch_rpc{"ServerPackedPaintBatch"};
         double packed_wire_radius_scale{1.0};
         int detail_resolution_percent{runtime_contract::DetailResolutionDefaultPercent};
-        int detail_channel_threshold{runtime_contract::AdaptiveDetailChannelThreshold};
+        int detail_channel_threshold{runtime_contract::adaptive_detail_channel_threshold()};
         int detail_maximum_strokes{
-            static_cast<int>(runtime_contract::AdaptiveDetailMaximumStrokes)};
+            static_cast<int>(runtime_contract::adaptive_detail_maximum_strokes())};
         int detail_budget{0};
         int detail_selected_samples{0};
         double detail_brush_radius_texels{0.0};
@@ -11237,10 +11237,10 @@ namespace
                                   : runtime_contract::DetailResolutionDefaultPercent);
         out += ",\"detail_channel_threshold\":" +
                std::to_string(job ? job->detail_channel_threshold
-                                  : runtime_contract::AdaptiveDetailChannelThreshold);
+                                  : runtime_contract::adaptive_detail_channel_threshold());
         out += ",\"detail_maximum_strokes\":" +
                std::to_string(job ? job->detail_maximum_strokes
-                                  : static_cast<int>(runtime_contract::AdaptiveDetailMaximumStrokes));
+                                  : static_cast<int>(runtime_contract::adaptive_detail_maximum_strokes()));
         out += ",\"detail_budget\":" + std::to_string(job ? job->detail_budget : 0);
         out += ",\"detail_selected_samples\":" +
                std::to_string(job ? job->detail_selected_samples : 0);

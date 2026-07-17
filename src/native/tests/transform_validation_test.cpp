@@ -483,32 +483,31 @@ int main()
     }
 
     const runtime_contract::Rgb8 detail_black{0, 0, 0};
-    const runtime_contract::Rgb8 detail_red_below_threshold{15, 0, 0};
-    const runtime_contract::Rgb8 detail_red_at_threshold{16, 0, 0};
+    const runtime_contract::Rgb8 detail_red_below_threshold{3, 0, 0};
+    const runtime_contract::Rgb8 detail_red_at_threshold{4, 0, 0};
     if (runtime_contract::adaptive_detail_color_eligible(
             detail_black, detail_red_below_threshold) ||
         !runtime_contract::adaptive_detail_color_eligible(
             detail_black, detail_red_at_threshold) ||
         runtime_contract::adaptive_detail_color_score(
-            detail_black, detail_red_at_threshold) != 54U * 16U * 16U ||
+            detail_black, detail_red_at_threshold) != 54U * 4U * 4U ||
         runtime_contract::adaptive_detail_color_score(
-            detail_red_at_threshold, detail_black) != 54U * 16U * 16U)
+            detail_red_at_threshold, detail_black) != 54U * 4U * 4U)
     {
         return 31;
     }
 
     if (runtime_contract::adaptive_detail_stroke_budget(0, 0) != 0 ||
         runtime_contract::adaptive_detail_stroke_budget(1, 0) != 1 ||
-        runtime_contract::adaptive_detail_stroke_budget(5, 0) != 1 ||
-        runtime_contract::adaptive_detail_stroke_budget(6, 0) != 2 ||
-        runtime_contract::adaptive_detail_stroke_budget(2560, 0) != 512 ||
-        runtime_contract::adaptive_detail_stroke_budget(100000, 0) !=
-            runtime_contract::AdaptiveDetailMaximumStrokes ||
+        runtime_contract::adaptive_detail_stroke_budget(5, 0) != 5 ||
+        runtime_contract::adaptive_detail_stroke_budget(6, 0) != 6 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 0) != 2560 ||
+        runtime_contract::adaptive_detail_stroke_budget(100000, 0) != 2560 ||
         runtime_contract::adaptive_detail_stroke_budget(10, 99999) != 1 ||
         runtime_contract::adaptive_detail_stroke_budget(10, 100000) != 0 ||
         runtime_contract::adaptive_detail_stroke_budget(10, 100001) != 0 ||
-        runtime_contract::adaptive_detail_radius_texels(5.0) != 2.5 ||
-        runtime_contract::adaptive_detail_radius_texels(10.0) != 5.0)
+        runtime_contract::adaptive_detail_radius_texels(5.0) != 0.5 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0) != 1.0)
     {
         return 32;
     }
@@ -667,8 +666,9 @@ int main()
         runtime_contract::adaptive_detail_channel_threshold(100) != 16 ||
         runtime_contract::adaptive_detail_channel_threshold(200) != 8 ||
         runtime_contract::adaptive_detail_channel_threshold(500) != 4 ||
-        runtime_contract::adaptive_detail_channel_threshold() !=
-            runtime_contract::AdaptiveDetailChannelThreshold)
+        runtime_contract::DetailResolutionBaselinePercent != 100 ||
+        runtime_contract::DetailResolutionDefaultPercent != 500 ||
+        runtime_contract::adaptive_detail_channel_threshold() != 4)
     {
         return 39;
     }
@@ -688,7 +688,7 @@ int main()
         runtime_contract::adaptive_detail_color_eligible(
             detail_black, detail_red_at_threshold) !=
             runtime_contract::adaptive_detail_color_eligible(
-                detail_black, detail_red_at_threshold, 100))
+                detail_black, detail_red_at_threshold, 500))
     {
         return 40;
     }
@@ -709,7 +709,7 @@ int main()
         runtime_contract::adaptive_detail_stroke_budget(2560, 100000, 200) != 0 ||
         runtime_contract::adaptive_detail_stroke_budget(2560, 100001, 200) != 0 ||
         runtime_contract::adaptive_detail_stroke_budget(10, 0) !=
-            runtime_contract::adaptive_detail_stroke_budget(10, 0, 100) ||
+            runtime_contract::adaptive_detail_stroke_budget(10, 0, 500) ||
         runtime_contract::adaptive_detail_radius_texels(5.0, 50) != 5.0 ||
         runtime_contract::adaptive_detail_radius_texels(5.0, 100) != 2.5 ||
         runtime_contract::adaptive_detail_radius_texels(5.0, 200) != 1.25 ||
@@ -719,7 +719,7 @@ int main()
         runtime_contract::adaptive_detail_radius_texels(10.0, 200) != 2.5 ||
         runtime_contract::adaptive_detail_radius_texels(10.0, 500) != 1.0 ||
         runtime_contract::adaptive_detail_radius_texels(10.0) !=
-            runtime_contract::adaptive_detail_radius_texels(10.0, 100))
+            runtime_contract::adaptive_detail_radius_texels(10.0, 500))
     {
         return 41;
     }
@@ -761,7 +761,7 @@ int main()
         resolution_selection_500.eligible_candidates != 4 ||
         runtime_contract::select_adaptive_detail_candidates(
             resolution_detail_candidates, 10).sample_indices !=
-            resolution_selection_100.sample_indices)
+            resolution_selection_500.sample_indices)
     {
         return 42;
     }

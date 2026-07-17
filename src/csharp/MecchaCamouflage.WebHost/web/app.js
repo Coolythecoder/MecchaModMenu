@@ -723,7 +723,7 @@ function sanitizeSnapshotForModule(snapshot) {
       paint: {
         brush1SizeTexels: finiteNumber(paint.brush1SizeTexels, 0),
         brush2SizeTexels: finiteNumber(paint.brush2SizeTexels, 0),
-        detailResolutionPercent: clamp(finiteNumber(paint.detailResolutionPercent, 100), 50, 500),
+        detailResolutionPercent: clamp(finiteNumber(paint.detailResolutionPercent, 500), 50, 500),
         packedBatchLimit: nonNegativeInteger(paint.packedBatchLimit),
         packedBatchPacingMs: nonNegativeInteger(paint.packedBatchPacingMs),
         autoMaterial: Boolean(paint.autoMaterial),
@@ -738,7 +738,7 @@ function sanitizeSnapshotForModule(snapshot) {
       }
     },
     paintStudio: {
-      detailResolutionPercent: clamp(finiteNumber(studio.detailResolutionPercent, paint.detailResolutionPercent || 100), 50, 500),
+      detailResolutionPercent: clamp(finiteNumber(studio.detailResolutionPercent, paint.detailResolutionPercent || 500), 50, 500),
       presets: normalizePaintPresets(studio.presets),
       canUndoSettings: Boolean(studio.canUndoSettings),
       coverage: {
@@ -881,7 +881,7 @@ function renderSettings(snapshot) {
   setNumberPair("brush-1-size", "brush-1-size-number", paint.brush1SizeTexels);
   setNumberPair("brush-2-size", "brush-2-size-number", paint.brush2SizeTexels);
   const detailResolution = clamp(
-    finiteNumber(paint.detailResolutionPercent, snapshot.paintStudio?.detailResolutionPercent ?? 100),
+    finiteNumber(paint.detailResolutionPercent, snapshot.paintStudio?.detailResolutionPercent ?? 500),
     50,
     500
   );

@@ -10,6 +10,7 @@ using MecchaCamouflage.Core;
 var tests = new List<(string Name, Action Run)>
 {
     ("paint defaults expose coarse and detail brushes", PaintDefaultsExposeCoarseAndDetailBrushes),
+    ("paint defaults use maximum detail resolution", PaintDefaultsUseMaximumDetailResolution),
     ("legacy default brush migrates to two-pass defaults", LegacyDefaultBrushMigratesToTwoPassDefaults),
     ("legacy brush migration handles missing layout version", LegacyBrushMigrationHandlesMissingLayoutVersion),
     ("legacy explicit brush migrates to detail brush", LegacyExplicitBrushMigratesToDetailBrush),
@@ -131,6 +132,26 @@ static void PaintDefaultsExposeCoarseAndDetailBrushes()
     Assert(Math.Abs(paint.Brush1SizeTexels - 30.0) < 0.000001, "brush 1 should default to the largest coarse size");
     Assert(Math.Abs(paint.Brush2SizeTexels - 10.0) < 0.000001, "brush 2 should default to the largest detail size");
     Assert(Math.Abs(paint.CoverageStepTexels - paint.Brush2SizeTexels) < 0.000001, "coverage compatibility should follow brush 2");
+}
+
+static void PaintDefaultsUseMaximumDetailResolution()
+{
+    using var temp = new TempHome();
+    var defaults = new AppSettings();
+    var paths = new AppPaths("detail-resolution-default-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    File.WriteAllText(paths.ConfigPath, """
+    {
+      "layout_version": 38
+    }
+    """);
+
+    var loaded = new SettingsStore(paths).Load();
+
+    Assert(defaults.Paint.DetailResolutionPercent == 500,
+        "new paint settings should default to the maximum detail resolution");
+    Assert(loaded.Paint.DetailResolutionPercent == 500,
+        "a config without detail resolution should inherit the 500 percent default");
 }
 
 static void LegacyDefaultBrushMigratesToTwoPassDefaults()
@@ -1160,6 +1181,10 @@ static void WebUiExposesModMenuModules()
         "Auto Paint should expose the full 50-500 percent detail resolution range");
     Assert(app.Contains("paint.detailResolutionPercent", StringComparison.Ordinal),
         "Auto Paint and Paint Studio should bind the detail resolution setting");
+    Assert(app.Contains("finiteNumber(paint.detailResolutionPercent, 500)", StringComparison.Ordinal) &&
+           app.Contains("paint.detailResolutionPercent || 500", StringComparison.Ordinal) &&
+           app.Contains("snapshot.paintStudio?.detailResolutionPercent ?? 500", StringComparison.Ordinal),
+        "the web UI should fall back to the 500 percent detail resolution default");
     Assert(app.Contains("savePaintPreset", StringComparison.Ordinal) &&
            app.Contains("applyPaintPreset", StringComparison.Ordinal) &&
            app.Contains("deletePaintPreset", StringComparison.Ordinal) &&
