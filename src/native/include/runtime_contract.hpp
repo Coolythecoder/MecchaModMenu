@@ -28,7 +28,9 @@ namespace runtime_contract
 
     // Packed skeletal strokes carry both a UV-space brush radius and an optional
     // world-space radius.  In the supported Shipping build, compact-stroke
-    // expansion at RVA 0x50F65A0 calls the skeletal preflight at RVA 0x50F6110.
+    // expansion calls the skeletal preflight (update2.8.0 RVAs
+    // 0x50F63B0 -> 0x50F5F20; prior supported Steam build
+    // 0x50F65A0 -> 0x50F6110).
     // A non-positive world radius is the sentinel that asks that preflight to
     // derive the world radius from the mesh bounds and UV radius.  Supplying the
     // normalized UV radius here is not equivalent: it suppresses that conversion
@@ -203,6 +205,102 @@ namespace runtime_contract
     constexpr int ceil_div(int numerator, int denominator)
     {
         return denominator > 0 ? (numerator + denominator - 1) / denominator : numerator;
+    }
+
+    struct BilinearAxisSample
+    {
+        int lower{0};
+        int upper{0};
+        double fraction{0.0};
+    };
+
+    struct BilinearPixelSample
+    {
+        BilinearAxisSample x{};
+        BilinearAxisSample y{};
+    };
+
+    // Projection produces coordinates in pixel-edge space: 0 is the left/top
+    // texture edge and width/height is the opposite edge.  Resolve those
+    // coordinates against pixel centres before interpolating so subpixel paint
+    // samples do not jump whenever std::round crosses an integer boundary.
+    inline bool resolve_bilinear_pixel_sample(double x,
+                                              double y,
+                                              int width,
+                                              int height,
+                                              bool flip_x,
+                                              bool flip_y,
+                                              BilinearPixelSample& sample)
+    {
+        sample = {};
+        if (width <= 0 || height <= 0 ||
+            !std::isfinite(x) || !std::isfinite(y) ||
+            x < 0.0 || y < 0.0 ||
+            x >= static_cast<double>(width) ||
+            y >= static_cast<double>(height))
+        {
+            return false;
+        }
+
+        const auto resolve_axis = [](double coordinate,
+                                     int extent,
+                                     bool flipped) -> BilinearAxisSample {
+            const double oriented = flipped
+                                        ? static_cast<double>(extent) - coordinate
+                                        : coordinate;
+            const double centred = std::clamp(oriented - 0.5,
+                                              0.0,
+                                              static_cast<double>(extent - 1));
+            const int lower = static_cast<int>(std::floor(centred));
+            const int upper = std::min(extent - 1, lower + 1);
+            return {lower, upper, centred - static_cast<double>(lower)};
+        };
+
+        sample.x = resolve_axis(x, width, flip_x);
+        sample.y = resolve_axis(y, height, flip_y);
+        return true;
+    }
+
+    inline double bilinear_pixel_value(double top_left,
+                                       double top_right,
+                                       double bottom_left,
+                                       double bottom_right,
+                                       const BilinearPixelSample& sample)
+    {
+        const double top = top_left + (top_right - top_left) * sample.x.fraction;
+        const double bottom = bottom_left + (bottom_right - bottom_left) * sample.x.fraction;
+        return top + (bottom - top) * sample.y.fraction;
+    }
+
+    inline double srgb_to_linear_unit(double value)
+    {
+        const double srgb = std::max(0.0, std::min(1.0, value));
+        return srgb <= 0.04045
+                   ? srgb / 12.92
+                   : std::pow((srgb + 0.055) / 1.055, 2.4);
+    }
+
+    inline double linear_to_srgb_unit(double value)
+    {
+        const double linear = std::max(0.0, std::min(1.0, value));
+        return linear <= 0.0031308
+                   ? linear * 12.92
+                   : 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+    }
+
+    inline double bilinear_srgb_pixel_value(double top_left,
+                                            double top_right,
+                                            double bottom_left,
+                                            double bottom_right,
+                                            const BilinearPixelSample& sample)
+    {
+        const double linear = bilinear_pixel_value(
+            srgb_to_linear_unit(top_left),
+            srgb_to_linear_unit(top_right),
+            srgb_to_linear_unit(bottom_left),
+            srgb_to_linear_unit(bottom_right),
+            sample);
+        return linear_to_srgb_unit(linear);
     }
 
     constexpr PacingDecision resolve_pacing(int requested_batch_limit,

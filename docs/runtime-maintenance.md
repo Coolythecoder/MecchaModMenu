@@ -127,6 +127,8 @@ component-to-manager resolver, enqueue/coalescer chain, manager queue offsets,
 and runtime-triangle `TArray` offset/stride. Then repeat both multiplayer
 directions with event-watch, pressure/queue samples, and painter/receiver
 texture checksums. A mismatch must remain fail-closed before the first RPC.
+Build-specific evidence and the remaining live-validation boundary belong in
+[`runtime-paint-replication-validation.md`](runtime-paint-replication-validation.md).
 
 ## Bridge File Structure
 

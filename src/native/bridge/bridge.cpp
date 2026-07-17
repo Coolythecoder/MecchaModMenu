@@ -825,6 +825,9 @@ namespace
                         {
                             break;
                         }
+                        // Preserve the bridge's historical basis exactly. It is
+                        // intentionally not the standard 64-bit FNV offset basis,
+                        // and every recorded build identity uses this variant.
                         std::uint64_t hash = 1469598103934665603ULL;
                         for (std::uint64_t offset = 0; offset < length; ++offset)
                         {
@@ -7142,9 +7145,10 @@ namespace
         const std::vector<MeshFirstRuntimeTriangle>& triangles) -> MeshFirstPackedRadiusCalibration
     {
         MeshFirstPackedRadiusCalibration out{};
-        // Exact Shipping build: USkeletalMeshComponent inherited
-        // FBoxSphereBounds3d::SphereRadius is a double at +0x138.  Native
-        // preflight RVA 0x50F6110 reads and doubles this same field.
+        // Supported Shipping builds: USkeletalMeshComponent inherited
+        // FBoxSphereBounds3d::SphereRadius is a double at +0x138.  The native
+        // preflight reads and doubles this same field (update2.8.0 RVA
+        // 0x50F5F20; prior supported Steam build RVA 0x50F6110).
         constexpr std::uintptr_t MeshBoundsSphereRadiusOffset = 0x138;
         if (!live_uobject(mesh) ||
             !safe_copy(&out.mesh_sphere_radius,
@@ -8215,9 +8219,80 @@ namespace
         return true;
     }
 
+    auto mesh_first_sample_capture_color(const std::vector<Color>& pixels,
+                                         int width,
+                                         int height,
+                                         double x,
+                                         double y,
+                                         bool flip_x,
+                                         bool flip_y,
+                                         Color& color) -> bool
+    {
+        const auto expected_pixels = static_cast<std::size_t>(std::max(0, width)) *
+                                     static_cast<std::size_t>(std::max(0, height));
+        runtime_contract::BilinearPixelSample sample{};
+        if (pixels.size() < expected_pixels ||
+            !runtime_contract::resolve_bilinear_pixel_sample(
+                x,
+                y,
+                width,
+                height,
+                flip_x,
+                flip_y,
+                sample))
+        {
+            return false;
+        }
+
+        const auto& top_left = pixels[static_cast<std::size_t>(sample.y.lower) *
+                                          static_cast<std::size_t>(width) +
+                                      static_cast<std::size_t>(sample.x.lower)];
+        const auto& top_right = pixels[static_cast<std::size_t>(sample.y.lower) *
+                                           static_cast<std::size_t>(width) +
+                                       static_cast<std::size_t>(sample.x.upper)];
+        const auto& bottom_left = pixels[static_cast<std::size_t>(sample.y.upper) *
+                                             static_cast<std::size_t>(width) +
+                                         static_cast<std::size_t>(sample.x.lower)];
+        const auto& bottom_right = pixels[static_cast<std::size_t>(sample.y.upper) *
+                                              static_cast<std::size_t>(width) +
+                                          static_cast<std::size_t>(sample.x.upper)];
+        const auto interpolate = [&](double top_left_value,
+                                     double top_right_value,
+                                     double bottom_left_value,
+                                     double bottom_right_value) {
+            return runtime_contract::bilinear_pixel_value(top_left_value,
+                                                          top_right_value,
+                                                          bottom_left_value,
+                                                          bottom_right_value,
+                                                          sample);
+        };
+        const auto interpolate_srgb = [&](double top_left_value,
+                                          double top_right_value,
+                                          double bottom_left_value,
+                                          double bottom_right_value) {
+            return runtime_contract::bilinear_srgb_pixel_value(top_left_value,
+                                                               top_right_value,
+                                                               bottom_left_value,
+                                                               bottom_right_value,
+                                                               sample);
+        };
+        color.r = clamp01(interpolate_srgb(top_left.r, top_right.r, bottom_left.r, bottom_right.r));
+        color.g = clamp01(interpolate_srgb(top_left.g, top_right.g, bottom_left.g, bottom_right.g));
+        color.b = clamp01(interpolate_srgb(top_left.b, top_right.b, bottom_left.b, bottom_right.b));
+        color.roughness = clamp01(interpolate(top_left.roughness,
+                                              top_right.roughness,
+                                              bottom_left.roughness,
+                                              bottom_right.roughness));
+        color.metallic = clamp01(interpolate(top_left.metallic,
+                                             top_right.metallic,
+                                             bottom_left.metallic,
+                                             bottom_right.metallic));
+        return true;
+    }
+
     auto mesh_first_capture_project_color(const SdkFrontCaptureResult& capture,
-                                          const sdk::FVector& world_position,
-                                          Color& color) -> bool
+                                           const sdk::FVector& world_position,
+                                           Color& color) -> bool
     {
         const auto expected_pixels = static_cast<std::size_t>(std::max(0, capture.width)) *
                                      static_cast<std::size_t>(std::max(0, capture.height));
@@ -8279,21 +8354,17 @@ namespace
             return false;
         }
 
-        const int px = std::max(0, std::min(capture.width - 1, static_cast<int>(std::round(sx))));
-        const int py = std::max(0, std::min(capture.height - 1, static_cast<int>(std::round(sy))));
-        const int bx = capture.capture_flip_x ? (capture.width - 1 - px) : px;
-        const int by = capture.capture_flip_y ? (capture.height - 1 - py) : py;
-        const auto pixel_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(capture.width) +
-                                 static_cast<std::size_t>(bx);
-        if (pixel_index >= capture.capture_pixels.size())
+        if (!mesh_first_sample_capture_color(capture.capture_pixels,
+                                             capture.width,
+                                             capture.height,
+                                             sx,
+                                             sy,
+                                             capture.capture_flip_x,
+                                             capture.capture_flip_y,
+                                             color))
         {
             return false;
         }
-
-        color = capture.capture_pixels[pixel_index];
-        color.r = clamp01(color.r);
-        color.g = clamp01(color.g);
-        color.b = clamp01(color.b);
         color.roughness = 0.65;
         color.metallic = 0.0;
         return true;
@@ -16542,8 +16613,8 @@ namespace
         stroke.SkeletalTriangleBarycentric.Z = barycentric_c;
         // Do not copy the normalized UV radius into the world-radius field.
         // The game's packed compact-stroke expander treats <= 0 as the sentinel
-        // for deriving a mesh-correct world radius (supported build RVAs
-        // 0x50F65A0 -> 0x50F6110).
+        // for deriving a mesh-correct world radius (update2.8.0 RVAs
+        // 0x50F63B0 -> 0x50F5F20).
         stroke.EffectiveBrushWorldRadius = runtime_contract::PackedMeshAnchorWorldRadiusAuto;
         stroke.EffectiveSubdivisionLevel = runtime_contract::PackedMeshAnchorSubdivisionLevelAuto;
         stroke.EffectiveSubdivisionPixelSize = runtime_contract::PackedMeshAnchorSubdivisionPixelSizeAuto;
@@ -17046,33 +17117,60 @@ namespace
             return out;
         }
         const auto nt = safe_read<IMAGE_NT_HEADERS64>(module.base + static_cast<std::uintptr_t>(dos.e_lfanew));
-        const bool steam_shipping_build =
-            nt.Signature == IMAGE_NT_SIGNATURE &&
-            nt.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
+        if (nt.Signature != IMAGE_NT_SIGNATURE || nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        {
+            out.failure = "main_module_build_identity_mismatch";
+            return out;
+        }
+        const bool steam_20260711_shipping_build =
             nt.FileHeader.TimeDateStamp == 0xB76CD1AFu &&
             nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
             nt.OptionalHeader.CheckSum == 0x0A7394E2u;
-        if (!steam_shipping_build)
+        // Steam public build 24256862, marketed as update2.8.0, captured on
+        // 2026-07-17. Keep the previous exact contract so an older installed
+        // copy remains supported without weakening the fail-closed identity.
+        const bool steam_update_2_8_0_shipping_build =
+            nt.FileHeader.TimeDateStamp == 0x047BA867u &&
+            nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
+            nt.OptionalHeader.CheckSum == 0x0A7328BBu;
+        if (!steam_20260711_shipping_build && !steam_update_2_8_0_shipping_build)
         {
             out.failure = "main_module_build_identity_mismatch";
             return out;
         }
         static const auto text_file_identity = main_module_text_file_identity();
-        if (!text_file_identity.ok || text_file_identity.raw_size != 0x07AA2800u ||
-            text_file_identity.fnv1a64 != 0x4200B2CAF330F8C3ULL)
+        const bool text_identity_matches =
+            text_file_identity.ok && text_file_identity.raw_size == 0x07AA2800u &&
+            ((steam_20260711_shipping_build &&
+              text_file_identity.fnv1a64 == 0x4200B2CAF330F8C3ULL) ||
+             (steam_update_2_8_0_shipping_build &&
+              text_file_identity.fnv1a64 == 0x079EDD688D78E96BULL));
+        if (!text_identity_matches)
         {
             out.failure = "main_module_text_identity_mismatch";
             return out;
         }
 
-        constexpr std::uintptr_t ExpectedThunkRva = 0x50E40E0;
-        constexpr std::uintptr_t ExpectedImplementationRva = 0x50FBD80;
-        constexpr std::uintptr_t ExpectedDecoderRva = 0x5103A10;
-        constexpr std::uintptr_t ExpectedEnqueueInnerRva = 0x50F5EE0;
-        constexpr std::uintptr_t ExpectedComponentContextResolverRva = 0x3AEAF10;
-        constexpr std::uintptr_t ExpectedManagerResolverRva = 0x50E9170;
-        constexpr std::uintptr_t ExpectedManagerEnqueueRva = 0x5109030;
-        constexpr std::uintptr_t ExpectedQueueCoalescerRva = 0x5108E30;
+        const std::uintptr_t ExpectedThunkRva =
+            steam_update_2_8_0_shipping_build ? 0x50E39A0 : 0x50E40E0;
+        const std::uintptr_t ExpectedImplementationRva =
+            steam_update_2_8_0_shipping_build ? 0x50FD9F0 : 0x50FBD80;
+        const std::uintptr_t ExpectedDecoderRva =
+            steam_update_2_8_0_shipping_build ? 0x5105740 : 0x5103A10;
+        const std::uintptr_t ExpectedEnqueueInnerRva =
+            steam_update_2_8_0_shipping_build ? 0x50F5CF0 : 0x50F5EE0;
+        const std::uintptr_t ExpectedCompactStrokeExpanderRva =
+            steam_update_2_8_0_shipping_build ? 0x50F63B0 : 0x50F65A0;
+        const std::uintptr_t ExpectedSkeletalPreflightRva =
+            steam_update_2_8_0_shipping_build ? 0x50F5F20 : 0x50F6110;
+        const std::uintptr_t ExpectedComponentContextResolverRva =
+            steam_update_2_8_0_shipping_build ? 0x3AEACE0 : 0x3AEAF10;
+        const std::uintptr_t ExpectedManagerResolverRva =
+            steam_update_2_8_0_shipping_build ? 0x50E8A70 : 0x50E9170;
+        const std::uintptr_t ExpectedManagerEnqueueRva =
+            steam_update_2_8_0_shipping_build ? 0x510AD60 : 0x5109030;
+        const std::uintptr_t ExpectedQueueCoalescerRva =
+            steam_update_2_8_0_shipping_build ? 0x510AB60 : 0x5108E30;
 
         std::vector<std::uintptr_t> thunks{};
         for (std::uintptr_t slot = 0; slot <= 0x180; slot += sizeof(std::uintptr_t))
@@ -17133,6 +17231,33 @@ namespace
                                     0x57, 0x48, 0x81, 0xEC, 0x20, 0x01, 0x00, 0x00}))
         {
             out.failure = "local_packed_queue_decoder_or_inner_mismatch";
+            return out;
+        }
+        const auto compact_stroke_expander = internal_rel32_call_target(enqueue_inner + 0x8B);
+        const auto skeletal_preflight = module.base + ExpectedSkeletalPreflightRva;
+        if (!address_in_main_module_code(compact_stroke_expander) ||
+            compact_stroke_expander - module.base != ExpectedCompactStrokeExpanderRva ||
+            !internal_code_matches(compact_stroke_expander,
+                                   {0x48, 0x89, 0x5C, 0x24, 0x08,
+                                    0x48, 0x89, 0x6C, 0x24, 0x10,
+                                    0x48, 0x89, 0x74, 0x24, 0x18,
+                                    0x48, 0x89, 0x7C, 0x24, 0x20}) ||
+            internal_rel32_call_target(compact_stroke_expander + 0x21F) != skeletal_preflight ||
+            !address_in_main_module_code(skeletal_preflight) ||
+            !internal_code_matches(skeletal_preflight,
+                                   {0x48, 0x89, 0x5C, 0x24, 0x08,
+                                    0x57, 0x48, 0x83, 0xEC, 0x30,
+                                    0x80, 0x7A, 0x28, 0x00}) ||
+            !internal_code_matches(skeletal_preflight + 0x41,
+                                   {0xF2, 0x0F, 0x10, 0x80, 0x38, 0x01, 0x00, 0x00,
+                                    0xF2, 0x0F, 0x58, 0xC0}) ||
+            !internal_code_matches(skeletal_preflight + 0x57,
+                                   {0xF3, 0x0F, 0x10, 0x8B, 0xB4, 0x00, 0x00, 0x00,
+                                    0x0F, 0x57, 0xF6, 0x0F, 0x2F, 0xCE,
+                                    0x66, 0x0F, 0x5A, 0xD0, 0x77, 0x10,
+                                    0x0F, 0x28, 0xCA, 0xF3, 0x0F, 0x59, 0x4B, 0x68}))
+        {
+            out.failure = "local_packed_queue_stroke_preflight_mismatch";
             return out;
         }
         const auto component_context_resolver = internal_rel32_call_target(enqueue_inner + 0x175);
@@ -17258,11 +17383,18 @@ namespace
         // Steam Shipping build captured from the single-host investigation on
         // 2026-07-11.  The no-resend call chain is byte-identical to the legacy
         // build at the verified offsets below after a uniform -0xBC0 RVA shift.
-        const bool steam_shipping_build =
+        const bool steam_20260711_shipping_build =
             nt.FileHeader.TimeDateStamp == 0xB76CD1AFu &&
             nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
             nt.OptionalHeader.CheckSum == 0x0A7394E2u;
-        if (!legacy_shipping_build && !steam_shipping_build)
+        // Steam public build 24256862 / update2.8.0, captured 2026-07-17.
+        const bool steam_update_2_8_0_shipping_build =
+            nt.FileHeader.TimeDateStamp == 0x047BA867u &&
+            nt.OptionalHeader.SizeOfImage == 0x0AAFD000u &&
+            nt.OptionalHeader.CheckSum == 0x0A7328BBu;
+        if (!legacy_shipping_build &&
+            !steam_20260711_shipping_build &&
+            !steam_update_2_8_0_shipping_build)
         {
             out.failure = "main_module_build_identity_mismatch";
             return out;
@@ -17272,19 +17404,30 @@ namespace
                                            ((legacy_shipping_build &&
                                              text_file_identity.raw_size == 0x07AA3200u &&
                                              text_file_identity.fnv1a64 == 0x085F72BE8C58A9E6ULL) ||
-                                            (steam_shipping_build &&
+                                            (steam_20260711_shipping_build &&
                                              text_file_identity.raw_size == 0x07AA2800u &&
-                                             text_file_identity.fnv1a64 == 0x4200B2CAF330F8C3ULL));
+                                             text_file_identity.fnv1a64 == 0x4200B2CAF330F8C3ULL) ||
+                                            (steam_update_2_8_0_shipping_build &&
+                                             text_file_identity.raw_size == 0x07AA2800u &&
+                                             text_file_identity.fnv1a64 == 0x079EDD688D78E96BULL));
         if (!text_identity_matches)
         {
             out.failure = "main_module_text_identity_mismatch";
             return out;
         }
 
-        const std::uintptr_t ExpectedThunkRva = steam_shipping_build ? 0x50E4E20 : 0x50E59E0;
-        const std::uintptr_t ExpectedImplRva = steam_shipping_build ? 0x50FEA90 : 0x50FF650;
-        const std::uintptr_t ExpectedConstructorRva = steam_shipping_build ? 0x50DA6A0 : 0x50DB260;
-        const std::uintptr_t ExpectedCommonRva = steam_shipping_build ? 0x50EE0C0 : 0x50EEC80;
+        const std::uintptr_t ExpectedThunkRva = steam_update_2_8_0_shipping_build
+                                                    ? 0x50E46E0
+                                                    : (steam_20260711_shipping_build ? 0x50E4E20 : 0x50E59E0);
+        const std::uintptr_t ExpectedImplRva = steam_update_2_8_0_shipping_build
+                                                   ? 0x5100700
+                                                   : (steam_20260711_shipping_build ? 0x50FEA90 : 0x50FF650);
+        const std::uintptr_t ExpectedConstructorRva = steam_update_2_8_0_shipping_build
+                                                          ? 0x50D9F60
+                                                          : (steam_20260711_shipping_build ? 0x50DA6A0 : 0x50DB260);
+        const std::uintptr_t ExpectedCommonRva = steam_update_2_8_0_shipping_build
+                                                     ? 0x50ED9C0
+                                                     : (steam_20260711_shipping_build ? 0x50EE0C0 : 0x50EEC80);
         std::vector<InternalNoResendRoute> matches{};
         for (std::uintptr_t slot = 0; slot <= 0x180; slot += sizeof(std::uintptr_t))
         {
@@ -18988,6 +19131,8 @@ namespace
         struct ProjectedFrontSample
         {
             FrontSample surface{};
+            double sample_x{0.0};
+            double sample_y{0.0};
             int x{0};
             int y{0};
             double depth{0.0};
@@ -19104,7 +19249,16 @@ namespace
             auto projected_surface = surface;
             projected_surface.screen_nx = clamp01(sx / static_cast<double>(std::max(1, out.width)));
             projected_surface.screen_ny = clamp01(sy / static_cast<double>(std::max(1, out.height)));
-            projected.push_back(ProjectedFrontSample{projected_surface, px, py, depth, has_depth, {}, false});
+            projected.push_back(ProjectedFrontSample{
+                projected_surface,
+                sx,
+                sy,
+                px,
+                py,
+                depth,
+                has_depth,
+                {},
+                false});
         }
         if (projected.empty())
         {
@@ -19300,15 +19454,19 @@ namespace
         out.samples.reserve(projected.size());
         for (const auto& projected_sample : projected)
         {
-            const int bx = best_flip_x ? (out.width - 1 - projected_sample.x) : projected_sample.x;
-            const int by = best_flip_y ? (out.height - 1 - projected_sample.y) : projected_sample.y;
-            const auto pixel_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(out.width) + static_cast<std::size_t>(bx);
-            if (pixel_index >= out.capture_pixels.size())
+            Color raw_color{};
+            if (!mesh_first_sample_capture_color(out.capture_pixels,
+                                                 out.width,
+                                                 out.height,
+                                                 projected_sample.sample_x,
+                                                 projected_sample.sample_y,
+                                                 best_flip_x,
+                                                 best_flip_y,
+                                                 raw_color))
             {
                 ++out.missing_color;
                 continue;
             }
-            const auto raw_color = out.capture_pixels[pixel_index];
             const double raw_values[]{clamp01(raw_color.r), clamp01(raw_color.g), clamp01(raw_color.b)};
             bool raw_whiteish = true;
             for (const auto value : raw_values)
@@ -19428,6 +19586,7 @@ namespace
                ",\"capture_direction_y\":" + std::to_string(capture.capture_direction.Y) +
                ",\"capture_direction_z\":" + std::to_string(capture.capture_direction.Z) +
                ",\"front_capture_projection_backend\":\"" + json_escape(capture.projection_backend) + "\"" +
+               ",\"front_capture_color_sampling\":\"bilinear_pixel_center_linear_light\"" +
                ",\"front_capture_project_attempts\":" + std::to_string(capture.project_attempts) +
                ",\"front_capture_project_success\":" + std::to_string(capture.project_success) +
                ",\"front_capture_project_failed\":" + std::to_string(capture.project_failed) +

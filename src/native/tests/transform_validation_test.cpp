@@ -404,5 +404,82 @@ int main()
     {
         return 24;
     }
+
+    runtime_contract::BilinearPixelSample bilinear{};
+    if (!runtime_contract::resolve_bilinear_pixel_sample(1.0, 1.0, 2, 2, false, false, bilinear) ||
+        bilinear.x.lower != 0 || bilinear.x.upper != 1 || bilinear.x.fraction != 0.5 ||
+        bilinear.y.lower != 0 || bilinear.y.upper != 1 || bilinear.y.fraction != 0.5 ||
+        std::abs(runtime_contract::bilinear_pixel_value(0.0, 10.0, 20.0, 30.0, bilinear) - 15.0) > 0.000001)
+    {
+        return 25;
+    }
+    if (!runtime_contract::resolve_bilinear_pixel_sample(0.5, 0.5, 2, 2, false, false, bilinear) ||
+        runtime_contract::bilinear_pixel_value(0.0, 10.0, 20.0, 30.0, bilinear) != 0.0)
+    {
+        return 26;
+    }
+    const std::vector<double> asymmetric_pixels{0.0, 10.0, 20.0,
+                                                100.0, 110.0, 120.0};
+    const auto sample_fixture = [&](const std::vector<double>& pixels,
+                                    int width,
+                                    int height,
+                                    double x,
+                                    double y,
+                                    bool flip_x,
+                                    bool flip_y,
+                                    double& value) {
+        runtime_contract::BilinearPixelSample fixture_sample{};
+        if (pixels.size() != static_cast<std::size_t>(width * height) ||
+            !runtime_contract::resolve_bilinear_pixel_sample(
+                x, y, width, height, flip_x, flip_y, fixture_sample))
+        {
+            return false;
+        }
+        const auto pixel = [&](int px, int py) {
+            return pixels[static_cast<std::size_t>(py * width + px)];
+        };
+        value = runtime_contract::bilinear_pixel_value(
+            pixel(fixture_sample.x.lower, fixture_sample.y.lower),
+            pixel(fixture_sample.x.upper, fixture_sample.y.lower),
+            pixel(fixture_sample.x.lower, fixture_sample.y.upper),
+            pixel(fixture_sample.x.upper, fixture_sample.y.upper),
+            fixture_sample);
+        return true;
+    };
+    double fixture_value = 0.0;
+    if (!sample_fixture(asymmetric_pixels, 3, 2, 1.25, 0.75, false, false, fixture_value) ||
+        std::abs(fixture_value - 32.5) > 0.000001 ||
+        !sample_fixture(asymmetric_pixels, 3, 2, 1.25, 0.75, true, false, fixture_value) ||
+        std::abs(fixture_value - 37.5) > 0.000001 ||
+        !sample_fixture(asymmetric_pixels, 3, 2, 1.25, 0.75, false, true, fixture_value) ||
+        std::abs(fixture_value - 82.5) > 0.000001 ||
+        !sample_fixture(asymmetric_pixels, 3, 2, 1.25, 0.75, true, true, fixture_value) ||
+        std::abs(fixture_value - 87.5) > 0.000001)
+    {
+        return 27;
+    }
+    if (!sample_fixture(asymmetric_pixels, 3, 2, 2.999, 1.999, false, false, fixture_value) ||
+        fixture_value != 120.0 ||
+        !sample_fixture(std::vector<double>{42.0}, 1, 1, 0.75, 0.25, true, true, fixture_value) ||
+        fixture_value != 42.0)
+    {
+        return 28;
+    }
+    if (runtime_contract::resolve_bilinear_pixel_sample(-0.001, 0.5, 2, 2, false, false, bilinear) ||
+        runtime_contract::resolve_bilinear_pixel_sample(2.0, 0.5, 2, 2, false, false, bilinear) ||
+        runtime_contract::resolve_bilinear_pixel_sample(
+            std::numeric_limits<double>::quiet_NaN(), 0.5, 2, 2, false, false, bilinear) ||
+        runtime_contract::resolve_bilinear_pixel_sample(0.5, 0.5, 0, 2, false, false, bilinear))
+    {
+        return 29;
+    }
+    if (!runtime_contract::resolve_bilinear_pixel_sample(1.0, 0.5, 2, 1, false, false, bilinear) ||
+        std::abs(runtime_contract::srgb_to_linear_unit(
+                     runtime_contract::bilinear_srgb_pixel_value(
+                         0.0, 1.0, 0.0, 1.0, bilinear)) -
+                 0.5) > 0.000001)
+    {
+        return 30;
+    }
     return 0;
 }
