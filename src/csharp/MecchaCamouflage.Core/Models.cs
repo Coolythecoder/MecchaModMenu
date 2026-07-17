@@ -48,7 +48,7 @@ public sealed class PaintSettings
     public RegionMode FrontRegionMode { get; set; } = RegionMode.Fill;
     public RegionMode SideRegionMode { get; set; } = RegionMode.Paint;
     public RegionMode BackRegionMode { get; set; } = RegionMode.Paint;
-    public bool AutoMaterial { get; set; } = false;
+    public bool AutoMaterial { get; set; } = true;
     public double Metallic { get; set; } = 0.0;
     public double Roughness { get; set; } = 1.0;
     public RgbColor FillColor { get; set; } = RgbColor.White;
@@ -63,7 +63,7 @@ public sealed class PaintSettings
 
 public sealed class AppSettings
 {
-    public const int CurrentLayoutVersion = 39;
+    public const int CurrentLayoutVersion = 40;
     public int LayoutVersion { get; set; } = CurrentLayoutVersion;
     public double PanelX { get; set; } = -1.0;
     public double PanelY { get; set; } = -1.0;

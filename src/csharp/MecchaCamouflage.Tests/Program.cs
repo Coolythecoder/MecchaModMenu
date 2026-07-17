@@ -13,7 +13,10 @@ var tests = new List<(string Name, Action Run)>
     ("paint defaults use maximum detail resolution", PaintDefaultsUseMaximumDetailResolution),
     ("legacy detail resolution migrates to maximum", LegacyDetailResolutionMigratesToMaximum),
     ("current detail resolution preserves chosen value", CurrentDetailResolutionPreservesChosenValue),
+    ("legacy auto material migrates on", LegacyAutoMaterialMigratesOn),
+    ("current auto material preserves chosen value", CurrentAutoMaterialPreservesChosenValue),
     ("legacy default brush migrates to two-pass defaults", LegacyDefaultBrushMigratesToTwoPassDefaults),
+    ("legacy nine texel brush default migrates", LegacyNineTexelBrushDefaultMigrates),
     ("legacy brush migration handles missing layout version", LegacyBrushMigrationHandlesMissingLayoutVersion),
     ("legacy explicit brush migrates to detail brush", LegacyExplicitBrushMigratesToDetailBrush),
     ("existing explicit Brush 1 value is preserved", ExistingExplicitBrush1ValueIsPreserved),
@@ -31,6 +34,10 @@ var tests = new List<(string Name, Action Run)>
     ("legacy compatibility pacing migrates to sliders", LegacyCompatibilityPacingMigratesToSliders),
     ("settings clamp batch sliders", SettingsClampBatchSliders),
     ("module directory is global across app versions", ModuleDirectoryIsGlobalAcrossVersions),
+    ("settings migrate across app versions", SettingsMigrateAcrossAppVersions),
+    ("partial legacy settings migrate from original location", PartialLegacySettingsMigrateFromOriginalLocation),
+    ("future settings layouts are not rewritten", FutureSettingsLayoutsAreNotRewritten),
+    ("corrupt stable settings are not overwritten", CorruptStableSettingsAreNotOverwritten),
     ("module catalog loads a valid API v1 manifest", ModuleCatalogLoadsValidV1Manifest),
     ("module document policy is injected before authored content", ModuleDocumentPolicyIsInjectedFirst),
     ("module runtime staging isolates and secures packages", ModuleRuntimeStagingIsolatesAndSecuresPackages),
@@ -65,7 +72,8 @@ var tests = new List<(string Name, Action Run)>
     ("diagnostic summary includes file not found details", DiagnosticSummaryIncludesFileNotFoundDetails),
     ("diagnostics log write is best effort when file is locked", DiagnosticsLogWriteIsBestEffortWhenFileLocked),
     ("runtime log write is best effort when file is locked", RuntimeLogWriteIsBestEffortWhenFileLocked),
-    ("auto material defaults off", AutoMaterialDefaultsOff),
+    ("auto material defaults on", AutoMaterialDefaultsOn),
+    ("auto material defaults stay aligned across runtimes", AutoMaterialDefaultsStayAlignedAcrossRuntimes),
     ("front region defaults to fill", FrontRegionDefaultsToFill),
     ("bridge messages are user friendly", BridgeMessagesAreUserFriendly),
     ("settings detect supported system language", SettingsDetectSupportedSystemLanguage),
@@ -113,6 +121,7 @@ var tests = new List<(string Name, Action Run)>
     ("stale bridge request preserves replacement connection state", StaleBridgeRequestPreservesReplacementConnectionState),
     ("runtime exposes exact PID bridge startup", RuntimeExposesExactPidBridgeStartup),
     ("web startup lifecycle stabilizes after navigation and ui ready", WebStartupLifecycleStabilizesAfterNavigationAndUiReady),
+    ("web host enforces one settings writer", WebHostEnforcesOneSettingsWriter),
     ("direct bridge names avoid historical loader pattern", DirectBridgeNamesAvoidHistoricalLoaderPattern),
     ("release packaging contains only direct bridge components", ReleasePackagingContainsOnlyDirectBridge),
     ("release build excludes research runner and devtools", ReleaseBuildExcludesResearchRunnerAndDevTools)
@@ -210,6 +219,62 @@ static void CurrentDetailResolutionPreservesChosenValue()
         "a current-layout config should preserve the user's chosen detail resolution");
 }
 
+static void LegacyAutoMaterialMigratesOn()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("auto-material-layout-migration-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    File.WriteAllText(paths.ConfigPath, """
+    {
+      "layout_version": 39,
+      "auto_material": false,
+      "brush_1_size_texels": 20.0,
+      "opacity": 1.0
+    }
+    """);
+
+    var store = new SettingsStore(paths);
+    var loaded = store.Load();
+
+    Assert(loaded.Paint.AutoMaterial,
+        "a version 39 config should migrate Auto Detect Material to the enabled default");
+    Assert(Math.Abs(loaded.Paint.Brush1SizeTexels - 30.0) < 0.000001 &&
+           Math.Abs(loaded.Opacity - 0.99) < 0.000001,
+        "defaults changed before layout 40 should migrate even when older layouts persisted their prior values");
+    Assert(loaded.LayoutVersion == AppSettings.CurrentLayoutVersion,
+        "the auto material migration should advance the layout version");
+
+    loaded.Paint.AutoMaterial = false;
+    store.Save(loaded);
+    var reloaded = store.Load();
+
+    Assert(!reloaded.Paint.AutoMaterial,
+        "a post-migration Auto Detect Material choice should survive save and reload");
+}
+
+static void CurrentAutoMaterialPreservesChosenValue()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("auto-material-current-layout-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    File.WriteAllText(paths.ConfigPath, $$"""
+    {
+      "layout_version": {{AppSettings.CurrentLayoutVersion}},
+      "auto_material": false,
+      "brush_1_size_texels": 20.0,
+      "opacity": 1.0
+    }
+    """);
+
+    var loaded = new SettingsStore(paths).Load();
+
+    Assert(!loaded.Paint.AutoMaterial,
+        "a current-layout config should preserve the user's Auto Detect Material choice");
+    Assert(Math.Abs(loaded.Paint.Brush1SizeTexels - 20.0) < 0.000001 &&
+           Math.Abs(loaded.Opacity - 1.0) < 0.000001,
+        "current-layout choices that equal historical defaults should not be migrated again");
+}
+
 static void LegacyDefaultBrushMigratesToTwoPassDefaults()
 {
     using var temp = new TempHome();
@@ -233,6 +298,24 @@ static void LegacyDefaultBrushMigratesToTwoPassDefaults()
     Assert(Math.Abs(saved.RootElement.GetProperty("brush_1_size_texels").GetDouble() - 30.0) < 0.000001, "brush 1 should persist with its new default");
     Assert(Math.Abs(saved.RootElement.GetProperty("brush_2_size_texels").GetDouble() - 10.0) < 0.000001, "brush 2 should persist with its new key");
     Assert(!saved.RootElement.TryGetProperty("stroke_size_texels", out _), "the legacy brush key should not be persisted");
+}
+
+static void LegacyNineTexelBrushDefaultMigrates()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("legacy-nine-texel-brush-migration-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    File.WriteAllText(paths.ConfigPath, """
+    {
+      "layout_version": 33,
+      "stroke_size_texels": 9.0
+    }
+    """);
+
+    var settings = new SettingsStore(paths).Load();
+
+    Assert(Math.Abs(settings.Paint.Brush2SizeTexels - 10.0) < 0.000001,
+        "the historical nine-texel default should migrate to the current detail brush default");
 }
 
 static void LegacyBrushMigrationHandlesMissingLayoutVersion()
@@ -278,14 +361,14 @@ static void ExistingExplicitBrush1ValueIsPreserved()
     File.WriteAllText(paths.ConfigPath, """
     {
       "layout_version": 37,
-      "brush_1_size_texels": 20.0,
+      "brush_1_size_texels": 17.5,
       "brush_2_size_texels": 7.5
     }
     """);
 
     var settings = new SettingsStore(paths).Load();
 
-    Assert(Math.Abs(settings.Paint.Brush1SizeTexels - 20.0) < 0.000001,
+    Assert(Math.Abs(settings.Paint.Brush1SizeTexels - 17.5) < 0.000001,
         "an explicit legacy Brush 1 selection must not be silently changed to the new default");
     Assert(Math.Abs(settings.Paint.Brush2SizeTexels - 7.5) < 0.000001,
         "preserving Brush 1 must not disturb Brush 2");
@@ -380,6 +463,7 @@ static void PayloadIncludesPackedRouteAndFillMaterial()
     Assert(tuning.GetProperty("back_region_mode").GetString() == "paint", "back mode missing");
     Assert(tuning.GetProperty("server_batch_limit").GetInt32() == 13, "server batch limit should be sent");
     Assert(tuning.GetProperty("server_batch_pacing_ms").GetInt32() == 88, "server batch pacing should be sent");
+    Assert(tuning.GetProperty("auto_material").GetBoolean(), "the game payload should enable auto material by default");
     Assert(tuning.GetProperty("fill_color").GetString() == "#F11111", "fill color missing");
     Assert(Math.Abs(tuning.GetProperty("fill_color_r").GetDouble() - (241.0 / 255.0)) < 0.00001, "fill red not normalized");
     Assert(!tuning.TryGetProperty("enable_front_paint", out _), "legacy front bool must not be sent");
@@ -513,9 +597,17 @@ static void DetailResolutionClampsAndReachesPayload()
 
 static void ModuleDirectoryIsGlobalAcrossVersions()
 {
+    using var temp = new TempHome();
     var first = new AppPaths("module-path-v1");
     var second = new AppPaths("module-path-v2");
 
+    Assert(first.ConfigPath == second.ConfigPath &&
+           first.ConfigPath == Path.Combine(first.RootDirectory, "config", "config.json"),
+        "user settings should have one stable path shared by every app version");
+    Assert(first.VersionConfigPath != second.VersionConfigPath,
+        "legacy version config paths should remain distinct for one-time import");
+    Assert(first.LegacyVersionConfigPath != second.LegacyVersionConfigPath,
+        "the original per-version config paths should remain distinct for one-time import");
     Assert(first.ModulesDirectory == second.ModulesDirectory,
         "third-party modules should persist across application version directories");
     Assert(first.ModulesDirectory == Path.Combine(first.RootDirectory, "modules"),
@@ -535,6 +627,163 @@ static void ModuleDirectoryIsGlobalAcrossVersions()
     Assert(Directory.Exists(first.ModulesDirectory), "base-directory setup should create the module directory");
     Assert(Directory.Exists(first.ModuleDataDirectory), "base-directory setup should create the persistent module-data directory");
     Assert(Directory.Exists(first.ModuleHostDirectory), "base-directory setup should create the secured module host directory");
+}
+
+static void SettingsMigrateAcrossAppVersions()
+{
+    using var temp = new TempHome();
+    var older = new AppPaths("v0.8.0");
+    var newestValid = new AppPaths("v0.9.0");
+    var corruptNewest = new AppPaths("v0.9.1-broken");
+    var current = new AppPaths("v1.0.1");
+
+    WriteVersionConfig(older, """
+    {
+      "layout_version": 37,
+      "game_process_name": "OlderGame.exe",
+      "start_hotkey": "F7",
+      "opacity": 1.0,
+      "brush_1_size_texels": 20.0,
+      "detail_resolution_percent": 100,
+      "auto_material": false
+    }
+    """, DateTime.UtcNow.AddMinutes(-3));
+    WriteVersionConfig(newestValid, """
+    {
+      "layout_version": 37,
+      "game_process_name": "NewestGame.exe",
+      "start_hotkey": "F8",
+      "opacity": 1.0,
+      "brush_1_size_texels": 20.0,
+      "detail_resolution_percent": 100,
+      "auto_material": false
+    }
+    """, DateTime.UtcNow.AddMinutes(-2));
+    WriteVersionConfig(corruptNewest, "{not-json", DateTime.UtcNow.AddMinutes(-1));
+    Directory.CreateDirectory(newestValid.LogDirectory);
+    Directory.CreateDirectory(newestValid.RuntimeDirectory);
+    File.WriteAllText(Path.Combine(newestValid.LogDirectory, "legacy.log"), "do not copy");
+    File.WriteAllText(Path.Combine(newestValid.RuntimeDirectory, "legacy.bin"), "do not copy");
+
+    var store = new SettingsStore(current);
+    var migrated = store.Load();
+
+    Assert(migrated.GameProcessName == "NewestGame.exe" && migrated.StartHotkey == "F8",
+        "the newest valid legacy config should supply unchanged user choices");
+    Assert(Math.Abs(migrated.Paint.Brush1SizeTexels - 30.0) < 0.000001 &&
+           Math.Abs(migrated.Opacity - 0.99) < 0.000001 &&
+           migrated.Paint.DetailResolutionPercent == 500 &&
+           migrated.Paint.AutoMaterial,
+        "every changed default should migrate to its current value");
+    Assert(File.Exists(current.ConfigPath), "the normalized config should persist at the stable path");
+    using (var saved = JsonDocument.Parse(File.ReadAllText(current.ConfigPath)))
+    {
+        Assert(saved.RootElement.GetProperty("layout_version").GetInt32() == AppSettings.CurrentLayoutVersion,
+            "the persisted imported config should advance to the current layout");
+        Assert(saved.RootElement.GetProperty("auto_material").GetBoolean(),
+            "the persisted imported config should contain the enabled Auto Detect Material default");
+    }
+    Assert(!File.Exists(Path.Combine(current.LogDirectory, "legacy.log")) &&
+           !File.Exists(Path.Combine(current.RuntimeDirectory, "legacy.bin")),
+        "cross-version settings migration must not copy logs or runtime assets");
+
+    migrated.Paint.AutoMaterial = false;
+    migrated.Paint.Brush1SizeTexels = 17.0;
+    store.Save(migrated);
+    var laterVersion = new AppPaths("v2.0.0");
+    WriteVersionConfig(laterVersion, """
+    {
+      "layout_version": 39,
+      "game_process_name": "ShouldNotReplaceStable.exe",
+      "auto_material": true
+    }
+    """, DateTime.UtcNow);
+
+    var reloaded = new SettingsStore(laterVersion).Load();
+
+    Assert(!reloaded.Paint.AutoMaterial && Math.Abs(reloaded.Paint.Brush1SizeTexels - 17.0) < 0.000001,
+        "post-migration user choices should persist across later app versions");
+    Assert(reloaded.GameProcessName == "NewestGame.exe",
+        "an existing stable config must remain authoritative over later legacy files");
+
+    static void WriteVersionConfig(AppPaths paths, string json, DateTime lastWriteUtc)
+    {
+        Directory.CreateDirectory(paths.VersionConfigDirectory);
+        File.WriteAllText(paths.VersionConfigPath, json);
+        File.SetLastWriteTimeUtc(paths.VersionConfigPath, lastWriteUtc);
+    }
+}
+
+static void PartialLegacySettingsMigrateFromOriginalLocation()
+{
+    using var temp = new TempHome();
+    var legacy = new AppPaths("v0.1.0");
+    var current = new AppPaths("v1.0.1");
+    Directory.CreateDirectory(legacy.VersionRoot);
+    File.WriteAllText(legacy.LegacyVersionConfigPath, """
+    {
+      "opacity": 0.6,
+      "paint_hotkey": "F9",
+      "enable_side_paint": false,
+      "metallic": 0.4,
+      "auto_material_properties": false
+    }
+    """);
+
+    var migrated = new SettingsStore(current).Load();
+
+    Assert(Math.Abs(migrated.Opacity - 0.6) < 0.000001 && migrated.StartHotkey == "F9",
+        "a no-layout partial config should retain recognized app and legacy hotkey values");
+    Assert(migrated.Paint.SideRegionMode == RegionMode.Fill &&
+           Math.Abs(migrated.Paint.Metallic - 0.4) < 0.000001,
+        "legacy region aliases and canonical material values should migrate from the original config location");
+    Assert(migrated.Paint.AutoMaterial,
+        "the current Auto Detect Material default should replace the legacy disabled default");
+    Assert(File.Exists(current.ConfigPath),
+        "the imported original-location config should be normalized to the stable path");
+}
+
+static void FutureSettingsLayoutsAreNotRewritten()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("future-layout-reader-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    var futureJson = """
+    {
+      "layout_version": 999,
+      "game_process_name": "FutureGame.exe",
+      "auto_material": false,
+      "future_setting": "keep-me"
+    }
+    """;
+    File.WriteAllText(paths.ConfigPath, futureJson);
+
+    var store = new SettingsStore(paths);
+    var loaded = store.Load();
+
+    Assert(loaded.GameProcessName == "FutureGame.exe" && !loaded.Paint.AutoMaterial,
+        "an older app should read the known values from a future settings layout");
+    loaded.Paint.AutoMaterial = true;
+    store.Save(loaded);
+    Assert(File.ReadAllText(paths.ConfigPath) == futureJson,
+        "an older app must not rewrite a future settings layout or drop unknown fields during later saves");
+}
+
+static void CorruptStableSettingsAreNotOverwritten()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("corrupt-stable-settings-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    const string corruptJson = "{not-json";
+    File.WriteAllText(paths.ConfigPath, corruptJson);
+    var store = new SettingsStore(paths);
+
+    var recoveredInMemory = store.Load();
+    recoveredInMemory.Paint.AutoMaterial = false;
+    store.Save(recoveredInMemory);
+
+    Assert(File.ReadAllText(paths.ConfigPath) == corruptJson,
+        "automatic window or settings saves must not destroy an unreadable stable config");
 }
 
 static void ModuleCatalogLoadsValidV1Manifest()
@@ -1646,9 +1895,24 @@ static string StartupLogPath(string summary)
     return line["startup_log: ".Length..].Trim();
 }
 
-static void AutoMaterialDefaultsOff()
+static void AutoMaterialDefaultsOn()
 {
-    Assert(!new AppSettings().Paint.AutoMaterial, "auto material should default off");
+    Assert(new AppSettings().Paint.AutoMaterial, "auto material should default on");
+}
+
+static void AutoMaterialDefaultsStayAlignedAcrossRuntimes()
+{
+    var root = FindRepositoryRoot();
+    var native = File.ReadAllText(Path.Combine(root, "src", "native", "bridge", "bridge.cpp"));
+    var web = File.ReadAllText(Path.Combine(root, "src", "csharp", "MecchaCamouflage.WebHost", "web", "app.js"));
+    var markup = File.ReadAllText(Path.Combine(root, "src", "csharp", "MecchaCamouflage.WebHost", "web", "index.html"));
+
+    Assert(native.Contains("json_bool_field(request, \"auto_material\", true)", StringComparison.Ordinal),
+        "native paint requests should default auto material on when the field is omitted");
+    Assert(web.Contains("autoMaterial: paint.autoMaterial !== false", StringComparison.Ordinal),
+        "module snapshots should default a missing auto material value on while preserving explicit false");
+    Assert(markup.Contains("id=\"auto-material\" class=\"setting-control\" disabled type=\"checkbox\" checked", StringComparison.Ordinal),
+        "the initial Auto Detect Material checkbox should render checked");
 }
 
 static void FrontRegionDefaultsToFill()
@@ -3504,6 +3768,17 @@ static void WebStartupLifecycleStabilizesAfterNavigationAndUiReady()
     Assert(!lifecycle.MarkUiReady(first), "stale WebView generations must be ignored");
     Assert(!lifecycle.MarkUiReady(second), "uiReady alone must not stabilize the window");
     Assert(lifecycle.MarkNavigationSucceeded(second, 202), "navigation after uiReady must request one stabilization");
+}
+
+static void WebHostEnforcesOneSettingsWriter()
+{
+    var root = FindRepositoryRoot();
+    var program = File.ReadAllText(Path.Combine(root, "src", "csharp", "MecchaCamouflage.WebHost", "Program.cs"));
+
+    Assert(program.Contains("Local\\MecchaModMenu.Application", StringComparison.Ordinal) &&
+           program.Contains("out var isFirstInstance", StringComparison.Ordinal) &&
+           program.Contains("applicationMutex.ReleaseMutex()", StringComparison.Ordinal),
+        "the normal app must allow only one process to own and save the stable settings file");
 }
 
 static void DirectBridgeNamesAvoidHistoricalLoaderPattern()

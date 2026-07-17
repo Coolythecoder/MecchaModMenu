@@ -4,6 +4,8 @@ namespace MecchaCamouflage.WebHost;
 
 internal static class Program
 {
+    private const string ApplicationMutexName = @"Local\MecchaModMenu.Application";
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -16,6 +18,20 @@ internal static class Program
             return;
         }
 #endif
+        using var applicationMutex = new Mutex(
+            initiallyOwned: true,
+            ApplicationMutexName,
+            out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            MessageBox.Show(
+                "Meccha Mod Menu is already running.",
+                "Meccha Mod Menu",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, args) => DiagnosticsState.RecordException("winforms_thread_exception", args.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
@@ -50,6 +66,10 @@ internal static class Program
                 "Meccha Mod Menu",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+        finally
+        {
+            applicationMutex.ReleaseMutex();
         }
     }
 }

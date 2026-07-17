@@ -5,7 +5,10 @@ namespace MecchaCamouflage.Core;
 
 public sealed class SettingsStore
 {
+    private const int LegacyNineTexelBrushDefaultMaxLayoutVersion = 33;
     private const int DetailResolution500DefaultLayoutVersion = 39;
+    private const int UpdatedDefaultsMigrationLayoutVersion = 40;
+    private const int AutoMaterialOnDefaultLayoutVersion = 40;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -14,6 +17,7 @@ public sealed class SettingsStore
     };
 
     private readonly AppPaths paths;
+    private bool writesBlocked;
 
     public SettingsStore(AppPaths paths)
     {
@@ -22,17 +26,76 @@ public sealed class SettingsStore
 
     public AppSettings Load()
     {
-        if (!File.Exists(paths.ConfigPath))
-            return Clamp(new AppSettings());
+        if (TryLoad(paths.ConfigPath, requireRecognizedSetting: false, out var current, out var sourceLayoutVersion))
+        {
+            if (sourceLayoutVersion > AppSettings.CurrentLayoutVersion)
+                writesBlocked = true;
+            if (sourceLayoutVersion < AppSettings.CurrentLayoutVersion)
+                Save(current);
+            return current;
+        }
 
-        var text = File.ReadAllText(paths.ConfigPath);
-        var root = JsonNode.Parse(text)?.AsObject();
-        if (root is null)
+        // A stable config is authoritative even if it is temporarily unreadable.
+        // Never replace it with an arbitrary older version behind the user's back.
+        if (File.Exists(paths.ConfigPath))
+        {
+            writesBlocked = true;
             return Clamp(new AppSettings());
+        }
 
+        foreach (var candidate in PreviousVersionConfigPaths())
+        {
+            if (!TryLoad(candidate, requireRecognizedSetting: true, out var imported, out var importedLayoutVersion))
+                continue;
+            if (importedLayoutVersion > AppSettings.CurrentLayoutVersion)
+            {
+                writesBlocked = true;
+                return imported;
+            }
+            Save(imported);
+            return imported;
+        }
+
+        var defaults = Clamp(new AppSettings());
+        Save(defaults);
+        return defaults;
+    }
+
+    private bool TryLoad(
+        string path,
+        bool requireRecognizedSetting,
+        out AppSettings settings,
+        out int sourceLayoutVersion)
+    {
+        settings = new AppSettings();
+        sourceLayoutVersion = AppSettings.CurrentLayoutVersion;
+        if (!File.Exists(path))
+            return false;
+
+        try
+        {
+            var text = File.ReadAllText(path);
+            var root = JsonNode.Parse(text)?.AsObject();
+            if (root is null || (requireRecognizedSetting && !ContainsRecognizedSetting(root)))
+                return false;
+            settings = Parse(root, out sourceLayoutVersion);
+            return true;
+        }
+        catch (Exception error) when (
+            error is IOException or UnauthorizedAccessException or JsonException or
+            InvalidOperationException or FormatException or OverflowException)
+        {
+            return false;
+        }
+    }
+
+    private static AppSettings Parse(JsonObject root, out int sourceLayoutVersion)
+    {
         var settings = new AppSettings();
         // A persisted config without a layout version predates versioned migration.
-        settings.LayoutVersion = ReadInt(root, "layout_version", 0);
+        sourceLayoutVersion = ReadInt(root, "layout_version", 0);
+        settings.LayoutVersion = sourceLayoutVersion;
+
         settings.PanelX = ReadDouble(root, "panel_x", settings.PanelX);
         settings.PanelY = ReadDouble(root, "panel_y", settings.PanelY);
         settings.PanelWidth = ReadDouble(root, "panel_width", settings.PanelWidth);
@@ -43,7 +106,10 @@ public sealed class SettingsStore
         settings.Opacity = ReadDouble(root, "opacity", settings.Opacity);
         if (RgbColor.TryParse(ReadString(root, "theme_color", settings.ThemeColor.ToHex()), out var theme))
             settings.ThemeColor = theme;
-        settings.StartHotkey = ReadString(root, "start_hotkey", settings.StartHotkey);
+        settings.StartHotkey = ReadString(
+            root,
+            "start_hotkey",
+            ReadString(root, "paint_hotkey", settings.StartHotkey));
         settings.StopHotkey = ReadString(root, "stop_hotkey", settings.StopHotkey);
         settings.PreviewHotkey = ReadString(root, "preview_hotkey", settings.PreviewHotkey);
         settings.UnPreviewHotkey = ReadString(root, "unpreview_hotkey", settings.UnPreviewHotkey);
@@ -51,9 +117,7 @@ public sealed class SettingsStore
 
         var paint = settings.Paint;
         paint.Brush1SizeTexels = ReadDouble(root, "brush_1_size_texels", paint.Brush1SizeTexels);
-        paint.DetailResolutionPercent = settings.LayoutVersion < DetailResolution500DefaultLayoutVersion
-            ? 500
-            : ReadInt(root, "detail_resolution_percent", paint.DetailResolutionPercent);
+        paint.DetailResolutionPercent = ReadInt(root, "detail_resolution_percent", paint.DetailResolutionPercent);
         if (root.TryGetPropertyValue("brush_2_size_texels", out var brush2Value) && brush2Value is not null)
         {
             paint.Brush2SizeTexels = brush2Value.GetValue<double>();
@@ -78,7 +142,7 @@ public sealed class SettingsStore
         paint.PackedBatchLimit = ReadInt(
             root,
             "packed_batch_limit",
-            legacyPacingMode == "compatibility" ? 6 : 20);
+            legacyPacingMode == "compatibility" ? 6 : paint.PackedBatchLimit);
         paint.PackedBatchPacingMs = ReadInt(
             root,
             "packed_batch_pacing_ms",
@@ -87,15 +151,18 @@ public sealed class SettingsStore
                 "manual_slower" => legacyBatchDelayMs,
                 "compatibility" => 75,
                 _ when !hasLegacyPacingMode && hasLegacyBatchDelay => legacyBatchDelayMs,
-                _ => 50
+                _ => paint.PackedBatchPacingMs
             });
         paint.CoverageStepTexels = paint.Brush2SizeTexels;
         paint.SideSourceMaxUv = ReadDouble(root, "side_source_max_uv", paint.SideSourceMaxUv);
         paint.FrontBackSourceMaxUv = ReadDouble(root, "front_back_source_max_uv", paint.FrontBackSourceMaxUv);
-        paint.FrontRegionMode = ReadRegionMode(root, "front_region_mode", paint.FrontRegionMode);
-        paint.SideRegionMode = ReadRegionMode(root, "side_region_mode", paint.SideRegionMode);
-        paint.BackRegionMode = ReadRegionMode(root, "back_region_mode", paint.BackRegionMode);
-        paint.AutoMaterial = ReadBool(root, "auto_material", paint.AutoMaterial);
+        paint.FrontRegionMode = ReadRegionMode(root, "front_region_mode", "enable_front_paint", paint.FrontRegionMode);
+        paint.SideRegionMode = ReadRegionMode(root, "side_region_mode", "enable_side_paint", paint.SideRegionMode);
+        paint.BackRegionMode = ReadRegionMode(root, "back_region_mode", "enable_back_paint", paint.BackRegionMode);
+        paint.AutoMaterial = ReadBool(
+            root,
+            "auto_material",
+            ReadBool(root, "auto_material_properties", paint.AutoMaterial));
         paint.Metallic = ReadDouble(root, "metallic", paint.Metallic);
         paint.Roughness = ReadDouble(root, "roughness", paint.Roughness);
         if (RgbColor.TryParse(ReadString(root, "fill_color", paint.FillColor.ToHex()), out var fill))
@@ -103,23 +170,89 @@ public sealed class SettingsStore
         paint.FillMetallic = ReadDouble(root, "fill_metallic", paint.FillMetallic);
         paint.FillRoughness = ReadDouble(root, "fill_roughness", paint.FillRoughness);
 
+        ApplyUpdatedDefaults(settings);
         return Clamp(settings);
     }
 
+    private IReadOnlyList<string> PreviousVersionConfigPaths()
+    {
+        var candidates = new List<(string Path, DateTime LastWriteUtc, bool CurrentVersion)>();
+        if (!Directory.Exists(paths.VersionsDirectory))
+            return [];
+
+        try
+        {
+            foreach (var versionDirectory in Directory.EnumerateDirectories(paths.VersionsDirectory))
+            {
+                var isCurrentVersion = string.Equals(
+                    Path.GetFullPath(versionDirectory),
+                    Path.GetFullPath(paths.VersionRoot),
+                    StringComparison.OrdinalIgnoreCase);
+
+                foreach (var candidate in new[]
+                {
+                    Path.Combine(versionDirectory, "config", "config.json"),
+                    Path.Combine(versionDirectory, "config.json")
+                })
+                {
+                    if (!File.Exists(candidate))
+                        continue;
+                    candidates.Add((candidate, File.GetLastWriteTimeUtc(candidate), isCurrentVersion));
+                }
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Retain any valid candidates enumerated before an inaccessible entry.
+        }
+
+        return candidates
+            .OrderByDescending(candidate => candidate.CurrentVersion)
+            .ThenByDescending(candidate => candidate.LastWriteUtc)
+            .ThenBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(candidate => candidate.Path)
+            .ToArray();
+    }
+
+    private static bool ContainsRecognizedSetting(JsonObject root) => root.Any(property => property.Key is
+        "layout_version" or
+        "panel_x" or "panel_y" or "panel_width" or "panel_height" or
+        "language" or "log_retention_days" or "game_process_name" or
+        "always_on_top" or "opacity" or "theme_color" or
+        "start_hotkey" or "paint_hotkey" or "preview_hotkey" or "unpreview_hotkey" or "stop_hotkey" or
+        "brush_1_size_texels" or "brush_2_size_texels" or "stroke_size_texels" or
+        "detail_resolution_percent" or "coverage_step_texels" or
+        "pacing_mode" or "packed_batch_delay_ms" or "packed_batch_limit" or "packed_batch_pacing_ms" or
+        "side_source_max_uv" or "front_back_source_max_uv" or
+        "front_region_mode" or "side_region_mode" or "back_region_mode" or
+        "enable_front_paint" or "enable_side_paint" or "enable_back_paint" or
+        "auto_material" or "auto_material_properties" or
+        "metallic" or "roughness" or "fill_color" or "fill_metallic" or "fill_roughness");
+
     public void Save(AppSettings settings)
     {
+        if (writesBlocked)
+            return;
+
         paths.EnsureBaseDirectories();
         var clamped = Clamp(settings);
         var json = JsonSerializer.Serialize(ToConfigDto(clamped), Options);
-        var tmp = paths.ConfigPath + ".tmp";
-        File.WriteAllText(tmp, json + Environment.NewLine);
-        if (File.Exists(paths.ConfigPath))
-            File.Delete(paths.ConfigPath);
-        File.Move(tmp, paths.ConfigPath);
+        var tmp = paths.ConfigPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, json + Environment.NewLine);
+            File.Move(tmp, paths.ConfigPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tmp))
+                File.Delete(tmp);
+        }
     }
 
     public static AppSettings Clamp(AppSettings settings)
     {
+        var defaults = new AppSettings();
         settings.LayoutVersion = AppSettings.CurrentLayoutVersion;
         settings.PanelWidth = Math.Clamp(settings.PanelWidth, 960.0, 3200.0);
         settings.PanelHeight = Math.Clamp(settings.PanelHeight, 640.0, 2200.0);
@@ -130,15 +263,15 @@ public sealed class SettingsStore
             settings.Language = "en";
         settings.LogRetentionDays = Math.Clamp(settings.LogRetentionDays, 1, 90);
         if (string.IsNullOrWhiteSpace(settings.GameProcessName))
-            settings.GameProcessName = "PenguinHotel-Win64-Shipping.exe";
+            settings.GameProcessName = defaults.GameProcessName;
         if (string.IsNullOrWhiteSpace(settings.StartHotkey))
-            settings.StartHotkey = "F1";
+            settings.StartHotkey = defaults.StartHotkey;
         if (string.IsNullOrWhiteSpace(settings.PreviewHotkey))
-            settings.PreviewHotkey = "F2";
+            settings.PreviewHotkey = defaults.PreviewHotkey;
         if (string.IsNullOrWhiteSpace(settings.UnPreviewHotkey))
-            settings.UnPreviewHotkey = "F3";
+            settings.UnPreviewHotkey = defaults.UnPreviewHotkey;
         if (string.IsNullOrWhiteSpace(settings.StopHotkey))
-            settings.StopHotkey = "F4";
+            settings.StopHotkey = defaults.StopHotkey;
 
         settings.Paint.Brush1SizeTexels = Math.Clamp(settings.Paint.Brush1SizeTexels, 10.0, 30.0);
         settings.Paint.Brush2SizeTexels = Math.Clamp(settings.Paint.Brush2SizeTexels, 5.0, 10.0);
@@ -153,6 +286,30 @@ public sealed class SettingsStore
         settings.Paint.FillMetallic = Math.Clamp(settings.Paint.FillMetallic, 0.0, 1.0);
         settings.Paint.FillRoughness = Math.Clamp(settings.Paint.FillRoughness, 0.0, 1.0);
         return settings;
+    }
+
+    private static void ApplyUpdatedDefaults(AppSettings settings)
+    {
+        var defaults = new AppSettings();
+
+        // Every changed default receives a layout migration here. Once the
+        // layout is current, subsequent user choices are loaded unchanged.
+        if (settings.LayoutVersion <= LegacyNineTexelBrushDefaultMaxLayoutVersion &&
+            Math.Abs(settings.Paint.Brush2SizeTexels - 9.0) < 0.000001)
+        {
+            settings.Paint.Brush2SizeTexels = defaults.Paint.Brush2SizeTexels;
+        }
+        if (settings.LayoutVersion < UpdatedDefaultsMigrationLayoutVersion)
+        {
+            if (Math.Abs(settings.Paint.Brush1SizeTexels - 20.0) < 0.000001)
+                settings.Paint.Brush1SizeTexels = defaults.Paint.Brush1SizeTexels;
+            if (Math.Abs(settings.Opacity - 1.0) < 0.000001)
+                settings.Opacity = defaults.Opacity;
+        }
+        if (settings.LayoutVersion < DetailResolution500DefaultLayoutVersion)
+            settings.Paint.DetailResolutionPercent = defaults.Paint.DetailResolutionPercent;
+        if (settings.LayoutVersion < AutoMaterialOnDefaultLayoutVersion)
+            settings.Paint.AutoMaterial = defaults.Paint.AutoMaterial;
     }
 
     private static object ToConfigDto(AppSettings settings) => new
@@ -198,11 +355,17 @@ public sealed class SettingsStore
         _ => "paint"
     };
 
-    private static RegionMode ReadRegionMode(JsonObject root, string key, RegionMode fallback)
+    private static RegionMode ReadRegionMode(
+        JsonObject root,
+        string key,
+        string legacyBoolKey,
+        RegionMode fallback)
     {
         var mode = ReadString(root, key, "");
         if (Enum.TryParse<RegionMode>(mode, true, out var parsed))
             return parsed;
+        if (root.TryGetPropertyValue(legacyBoolKey, out var legacy) && legacy is not null)
+            return legacy.GetValue<bool>() ? RegionMode.Paint : RegionMode.Fill;
         return fallback;
     }
 

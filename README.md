@@ -60,8 +60,10 @@ packaged executable is written to
    detail resolution.
 5. Use **Paint Studio** for presets, preview/restore, undo, and coverage details.
 
-Settings, logs, and module packages remain under
-`%LOCALAPPDATA%\MecchaCamouflage\` for compatibility with existing installs.
+Settings remain at `%LOCALAPPDATA%\MecchaCamouflage\config\config.json` across
+app versions. The first updated launch imports and migrates the newest valid
+legacy version config automatically. Logs, runtime assets, and diagnostics stay
+version-isolated; module packages remain under `%LOCALAPPDATA%\MecchaCamouflage\`.
 
 ## Make your own module
 

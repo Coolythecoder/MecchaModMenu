@@ -11471,7 +11471,7 @@ namespace
             std::to_string(runtime_contract::AdaptiveDetailGeometryCandidateLimit);
         const double tuning_side_source_max_uv = clamp_range(json_number_field(request, "side_source_max_uv", 0.08), 0.001, 0.50);
         const double tuning_front_back_source_max_uv = clamp_range(json_number_field(request, "front_back_source_max_uv", 0.45), 0.001, 2.00);
-        const bool tuning_auto_material = json_bool_field(request, "auto_material", false);
+        const bool tuning_auto_material = json_bool_field(request, "auto_material", true);
         const double tuning_metallic = clamp_range(json_number_field(request, "metallic", 0.0), 0.0, 1.0);
         const double tuning_roughness = clamp_range(json_number_field(request, "roughness", 1.0), 0.0, 1.0);
         const double fill_color_r = clamp_range(json_number_field(request, "fill_color_r", 1.0), 0.0, 1.0);

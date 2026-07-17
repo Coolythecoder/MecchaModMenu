@@ -123,6 +123,7 @@ the repository.
 Important paths:
 
 ```text
+%LOCALAPPDATA%\MecchaCamouflage\config\config.json
 %LOCALAPPDATA%\MecchaCamouflage\versions\<version>\
 %LOCALAPPDATA%\MecchaCamouflage\bridge-instances\
 %LOCALAPPDATA%\MecchaCamouflage\bridge-state\
@@ -130,8 +131,15 @@ Important paths:
 %LOCALAPPDATA%\MecchaCamouflage\module-data\
 ```
 
+User settings live in the stable `config/config.json` file so layout migrations
+and user choices carry across releases. On first use, the app imports the newest
+valid legacy `versions/<version>/config/config.json` (or the original
+`versions/<version>/config.json`) and writes its normalized current-layout
+settings to the stable path.
+
 Versioned app logs, diagnostics, and extracted package assets live under
-`versions/<version>/`. WebView2 user data lives in the stable shared folder
+`versions/<version>/`. They are never copied during settings migration.
+WebView2 user data lives in the stable shared folder
 `%LOCALAPPDATA%\MecchaCamouflage\webview2-user-data\` so it is not tied to a
 single-file extraction directory or app version.
 

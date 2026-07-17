@@ -18,8 +18,11 @@ public sealed class AppPaths
         RootDirectory = Path.Combine(local, "MecchaCamouflage");
         VersionsDirectory = Path.Combine(RootDirectory, "versions");
         VersionRoot = Path.Combine(VersionsDirectory, Version);
-        ConfigDirectory = Path.Combine(VersionRoot, "config");
+        ConfigDirectory = Path.Combine(RootDirectory, "config");
         ConfigPath = Path.Combine(ConfigDirectory, "config.json");
+        VersionConfigDirectory = Path.Combine(VersionRoot, "config");
+        VersionConfigPath = Path.Combine(VersionConfigDirectory, "config.json");
+        LegacyVersionConfigPath = Path.Combine(VersionRoot, "config.json");
         LogDirectory = Path.Combine(VersionRoot, "logs");
         RuntimeDirectory = Path.Combine(VersionRoot, "runtime");
         ModuleHostDirectory = Path.Combine(RuntimeDirectory, "module-hosts");
@@ -38,6 +41,9 @@ public sealed class AppPaths
     public string VersionRoot { get; }
     public string ConfigDirectory { get; }
     public string ConfigPath { get; }
+    public string VersionConfigDirectory { get; }
+    public string VersionConfigPath { get; }
+    public string LegacyVersionConfigPath { get; }
     public string LogDirectory { get; }
     public string RuntimeDirectory { get; }
     public string ModuleHostDirectory { get; }

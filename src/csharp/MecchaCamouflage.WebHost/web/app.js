@@ -360,8 +360,8 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function nonNegativeInteger(value) {
-  return Math.max(0, Math.round(finiteNumber(value, 0)));
+function nonNegativeInteger(value, fallback = 0) {
+  return Math.max(0, Math.round(finiteNumber(value, fallback)));
 }
 
 function safeText(value, maximumLength = 200) {
@@ -871,20 +871,20 @@ function sanitizeSnapshotForModule(snapshot) {
     },
     settings: {
       paint: {
-        brush1SizeTexels: finiteNumber(paint.brush1SizeTexels, 0),
-        brush2SizeTexels: finiteNumber(paint.brush2SizeTexels, 0),
+        brush1SizeTexels: finiteNumber(paint.brush1SizeTexels, 30),
+        brush2SizeTexels: finiteNumber(paint.brush2SizeTexels, 10),
         detailResolutionPercent: clamp(finiteNumber(paint.detailResolutionPercent, 500), 50, 500),
-        packedBatchLimit: nonNegativeInteger(paint.packedBatchLimit),
-        packedBatchPacingMs: nonNegativeInteger(paint.packedBatchPacingMs),
-        autoMaterial: Boolean(paint.autoMaterial),
+        packedBatchLimit: nonNegativeInteger(paint.packedBatchLimit, 20),
+        packedBatchPacingMs: nonNegativeInteger(paint.packedBatchPacingMs, 50),
+        autoMaterial: paint.autoMaterial !== false,
         metallic: clamp(finiteNumber(paint.metallic, 0), 0, 1),
         roughness: clamp(finiteNumber(paint.roughness, 1), 0, 1),
-        frontRegionMode: safeText(paint.frontRegionMode, 16),
-        sideRegionMode: safeText(paint.sideRegionMode, 16),
-        backRegionMode: safeText(paint.backRegionMode, 16),
-        fillColor: safeText(paint.fillColor, 16),
-        fillMetallic: clamp(finiteNumber(paint.fillMetallic, 0), 0, 1),
-        fillRoughness: clamp(finiteNumber(paint.fillRoughness, 1), 0, 1)
+        frontRegionMode: safeText(paint.frontRegionMode, 16) || "fill",
+        sideRegionMode: safeText(paint.sideRegionMode, 16) || "paint",
+        backRegionMode: safeText(paint.backRegionMode, 16) || "paint",
+        fillColor: safeText(paint.fillColor, 16) || "#FFFFFF",
+        fillMetallic: clamp(finiteNumber(paint.fillMetallic, 1), 0, 1),
+        fillRoughness: clamp(finiteNumber(paint.fillRoughness, 0), 0, 1)
       }
     },
     paintStudio: {
