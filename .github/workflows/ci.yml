@@ -32,7 +32,7 @@ jobs:
       - name: Build artifact checks
         shell: pwsh
         run: |
-          if (-not (Test-Path ".build/bin/meccha-camouflage.exe")) { throw "runtime exe missing" }
+          if (-not (Test-Path ".build/bin/meccha-mod-menu.exe")) { throw "runtime exe missing" }
           if (-not (Test-Path ".build/obj/package-native/runtime-bridge.dll")) { throw "runtime bridge dll missing" }
           if (-not (Test-Path ".build/obj/package-native/runtime-injector.exe")) { throw "runtime injector exe missing" }
           if (Test-Path ".build/obj/package-native/bridge-loader.dll") { throw "bridge loader must not be packaged" }
@@ -44,6 +44,6 @@ jobs:
         run: |
           $version = "ci-$env:GITHUB_RUN_NUMBER"
           .\scripts\release.ps1 -Version $version
-          $exePath = ".build/package/meccha-camouflage-$version.exe"
+          $exePath = ".build/package/meccha-mod-menu-$version.exe"
           if (-not (Test-Path $exePath)) { throw "package exe missing" }
           if ((Get-Item $exePath).Length -le 10000000) { throw "package exe is unexpectedly small" }

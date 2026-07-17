@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <title>Example Module</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 1.25rem; background: #111820; color: #edf5ff; }
+    section { max-width: 34rem; padding: 1rem; border: 1px solid #3b536b; border-radius: .6rem; }
+    h1 { margin-top: 0; font-size: 1.15rem; }
+    code { color: #85d7ff; }
+    button { border: 1px solid #5781a8; padding: .55rem .8rem; background: #1b344b; color: inherit; cursor: pointer; }
+    output { display: block; margin-top: .8rem; color: #85d7ff; }
+  </style>
+</head>
+<body>
+  <section>
+    <h1>Example Module</h1>
+    <p>This package declares API v1 and requests only <code>snapshot.read</code>.</p>
+    <button id="refresh" type="button">Read sanitized snapshot</button>
+    <output id="status">Waiting for the host.</output>
+  </section>
+  <script>
+    const status = document.getElementById("status");
+    function requestSnapshot() {
+      window.parent.postMessage({
+        source: "meccha-module",
+        apiVersion: 1,
+        requestId: crypto.randomUUID(),
+        command: "snapshot.get",
+        payload: {}
+      }, "https://meccha.localhost");
+    }
+    window.addEventListener("message", event => {
+      if (event.origin !== "https://meccha.localhost" ||
+          event.data?.source !== "meccha-host" ||
+          event.data?.apiVersion !== 1) return;
+      const snapshot = event.data?.data;
+      if (snapshot?.runtime) {
+        status.textContent = `Game ${snapshot.runtime.process}; detail ${snapshot.settings?.paint?.detailResolutionPercent ?? "?"}%`;
+      }
+    });
+    document.getElementById("refresh").addEventListener("click", requestSnapshot);
+    requestSnapshot();
+  </script>
+</body>
+</html>

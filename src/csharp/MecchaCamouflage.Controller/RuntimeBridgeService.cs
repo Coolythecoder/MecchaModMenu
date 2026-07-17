@@ -723,7 +723,7 @@ public sealed class RuntimeBridgeService
             detail = invocation.StandardError;
         var lower = detail.ToLowerInvariant();
         if (lower.Contains("access denied") || lower.Contains("win32=5"))
-            return "access denied while opening the selected game process. Run Meccha Camouflage with the same privileges as the game, or try Run as administrator.";
+            return "access denied while opening the selected game process. Run Meccha Mod Menu with the same privileges as the game, or try Run as administrator.";
         return detail;
     }
 
@@ -731,7 +731,7 @@ public sealed class RuntimeBridgeService
     {
         var lower = message.ToLowerInvariant();
         if (lower.Contains("access") || lower.Contains("permission") || lower.Contains("denied"))
-            return message + " Run Meccha Camouflage with access to its runtime folder.";
+            return message + " Run Meccha Mod Menu with access to its runtime folder.";
         return message;
     }
 

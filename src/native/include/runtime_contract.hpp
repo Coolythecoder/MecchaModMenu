@@ -461,6 +461,226 @@ namespace runtime_contract
         Back,
     };
 
+    struct Rgb8
+    {
+        std::uint8_t r{0};
+        std::uint8_t g{0};
+        std::uint8_t b{0};
+    };
+
+    // Adaptive detail is deliberately a bounded policy: the base replay remains
+    // unchanged, while only high-contrast probes earn smaller correction strokes.
+    // The resolution percentage scales refinement density inside hard limits so
+    // runtime and replicated-plan growth stay predictable.
+    constexpr int DetailResolutionMinimumPercent = 50;
+    constexpr int DetailResolutionDefaultPercent = 100;
+    constexpr int DetailResolutionMaximumPercent = 500;
+    constexpr int AdaptiveDetailChannelThreshold = 16;
+    // Baseline at 100%; the selected resolution scales this linearly.
+    constexpr std::size_t AdaptiveDetailMaximumStrokes = 512;
+    constexpr std::size_t AdaptiveDetailMaximumPlanStrokes = 100000;
+    constexpr std::size_t AdaptiveDetailGeometryCandidateLimit = 40000;
+    constexpr std::size_t AdaptiveDetailSideSourceCandidateLimit = 512;
+
+    constexpr int clamp_detail_resolution_percent(int detail_resolution_percent)
+    {
+        return detail_resolution_percent < DetailResolutionMinimumPercent
+                   ? DetailResolutionMinimumPercent
+                   : (detail_resolution_percent > DetailResolutionMaximumPercent
+                          ? DetailResolutionMaximumPercent
+                          : detail_resolution_percent);
+    }
+
+    constexpr int adaptive_detail_channel_threshold(
+        int detail_resolution_percent = DetailResolutionDefaultPercent)
+    {
+        const int safe_percent = clamp_detail_resolution_percent(detail_resolution_percent);
+        return (AdaptiveDetailChannelThreshold * DetailResolutionDefaultPercent +
+                safe_percent - 1) /
+               safe_percent;
+    }
+
+    constexpr std::size_t adaptive_detail_maximum_strokes(
+        int detail_resolution_percent = DetailResolutionDefaultPercent)
+    {
+        const auto safe_percent = static_cast<std::size_t>(
+            clamp_detail_resolution_percent(detail_resolution_percent));
+        const std::size_t scaled =
+            (AdaptiveDetailMaximumStrokes * safe_percent +
+             static_cast<std::size_t>(DetailResolutionDefaultPercent - 1)) /
+            static_cast<std::size_t>(DetailResolutionDefaultPercent);
+        return scaled;
+    }
+
+    constexpr std::uint32_t adaptive_detail_color_score(Rgb8 parent, Rgb8 child)
+    {
+        const auto delta = [](std::uint8_t left, std::uint8_t right) -> std::uint32_t {
+            return left > right ? static_cast<std::uint32_t>(left - right)
+                                : static_cast<std::uint32_t>(right - left);
+        };
+        const auto dr = delta(parent.r, child.r);
+        const auto dg = delta(parent.g, child.g);
+        const auto db = delta(parent.b, child.b);
+        return 54U * dr * dr + 183U * dg * dg + 19U * db * db;
+    }
+
+    constexpr bool adaptive_detail_color_eligible(
+        Rgb8 parent,
+        Rgb8 child,
+        int detail_resolution_percent = DetailResolutionDefaultPercent)
+    {
+        const auto delta = [](std::uint8_t left, std::uint8_t right) -> int {
+            return left > right ? static_cast<int>(left - right)
+                                : static_cast<int>(right - left);
+        };
+        return max_value(delta(parent.r, child.r),
+                         max_value(delta(parent.g, child.g), delta(parent.b, child.b))) >=
+               adaptive_detail_channel_threshold(detail_resolution_percent);
+    }
+
+    constexpr std::size_t adaptive_detail_stroke_budget(std::size_t base_fine_strokes,
+                                                         std::size_t base_total_strokes,
+                                                         int detail_resolution_percent =
+                                                             DetailResolutionDefaultPercent)
+    {
+        if (base_fine_strokes == 0 || base_total_strokes >= AdaptiveDetailMaximumPlanStrokes)
+        {
+            return 0;
+        }
+        const auto safe_percent = static_cast<std::size_t>(
+            clamp_detail_resolution_percent(detail_resolution_percent));
+        const std::size_t safe_base_fine_strokes =
+            std::min(base_fine_strokes, AdaptiveDetailMaximumPlanStrokes);
+        const std::size_t fractional =
+            (safe_base_fine_strokes * safe_percent + 499U) / 500U;
+        const std::size_t remaining = AdaptiveDetailMaximumPlanStrokes - base_total_strokes;
+        return std::min(adaptive_detail_maximum_strokes(detail_resolution_percent),
+                        std::min(fractional, remaining));
+    }
+
+    constexpr double adaptive_detail_radius_texels(
+        double brush_2_size_texels,
+        int detail_resolution_percent = DetailResolutionDefaultPercent)
+    {
+        const double baseline =
+            brush_2_size_texels * 0.5 < 2.5 ? 2.5 : brush_2_size_texels * 0.5;
+        return baseline * static_cast<double>(DetailResolutionDefaultPercent) /
+               static_cast<double>(clamp_detail_resolution_percent(detail_resolution_percent));
+    }
+
+    struct AdaptiveDetailCandidate
+    {
+        std::size_t sample_index{0};
+        std::size_t parent_sample_index{0};
+        ReplayRegion region{ReplayRegion::Front};
+        int uv_island{-1};
+        int cell_x{0};
+        int cell_y{0};
+        std::size_t parent_ordinal{0};
+        int child_ordinal{0};
+        Rgb8 parent_color{};
+        Rgb8 child_color{};
+    };
+
+    struct AdaptiveDetailSelection
+    {
+        std::vector<std::size_t> sample_indices{};
+        std::size_t eligible_candidates{0};
+        std::size_t parent_deduplicated{0};
+        std::size_t cell_deduplicated{0};
+        bool budget_limited{false};
+    };
+
+    inline int adaptive_detail_region_priority(ReplayRegion region)
+    {
+        if (region == ReplayRegion::Back)
+            return 0;
+        if (region == ReplayRegion::Side)
+            return 1;
+        return 2;
+    }
+
+    inline AdaptiveDetailSelection select_adaptive_detail_candidates(
+        const std::vector<AdaptiveDetailCandidate>& candidates,
+        std::size_t budget,
+        int detail_resolution_percent = DetailResolutionDefaultPercent)
+    {
+        struct RankedCandidate
+        {
+            const AdaptiveDetailCandidate* candidate{nullptr};
+            std::uint32_t score{0};
+        };
+
+        AdaptiveDetailSelection selection{};
+        std::vector<RankedCandidate> ranked{};
+        ranked.reserve(candidates.size());
+        for (const auto& candidate : candidates)
+        {
+            if (!adaptive_detail_color_eligible(candidate.parent_color,
+                                                candidate.child_color,
+                                                detail_resolution_percent))
+            {
+                continue;
+            }
+            ranked.push_back({&candidate,
+                              adaptive_detail_color_score(candidate.parent_color,
+                                                          candidate.child_color)});
+        }
+        selection.eligible_candidates = ranked.size();
+        std::stable_sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
+            if (left.score != right.score)
+                return left.score > right.score;
+            const auto& a = *left.candidate;
+            const auto& b = *right.candidate;
+            return std::make_tuple(adaptive_detail_region_priority(a.region),
+                                   a.uv_island,
+                                   a.cell_y,
+                                   a.cell_x,
+                                   a.parent_ordinal,
+                                   a.child_ordinal,
+                                   a.parent_sample_index,
+                                   a.sample_index) <
+                   std::make_tuple(adaptive_detail_region_priority(b.region),
+                                   b.uv_island,
+                                   b.cell_y,
+                                   b.cell_x,
+                                   b.parent_ordinal,
+                                   b.child_ordinal,
+                                   b.parent_sample_index,
+                                   b.sample_index);
+        });
+
+        std::set<std::size_t> emitted_parents{};
+        std::set<std::tuple<int, int, int, int>> emitted_cells{};
+        for (const auto& entry : ranked)
+        {
+            const auto& candidate = *entry.candidate;
+            if (emitted_parents.find(candidate.parent_sample_index) != emitted_parents.end())
+            {
+                ++selection.parent_deduplicated;
+                continue;
+            }
+            const auto cell = std::make_tuple(static_cast<int>(candidate.region),
+                                              candidate.uv_island,
+                                              candidate.cell_y,
+                                              candidate.cell_x);
+            if (emitted_cells.find(cell) != emitted_cells.end())
+            {
+                ++selection.cell_deduplicated;
+                continue;
+            }
+            if (selection.sample_indices.size() >= budget)
+            {
+                selection.budget_limited = true;
+                continue;
+            }
+            emitted_parents.insert(candidate.parent_sample_index);
+            emitted_cells.insert(cell);
+            selection.sample_indices.push_back(candidate.sample_index);
+        }
+        return selection;
+    }
+
     enum class ReplayRegionMode
     {
         Paint,
@@ -523,6 +743,7 @@ namespace runtime_contract
         double fallback_z;
         double horizontal;
         std::size_t original_ordinal;
+        bool detail_refinement{false};
     };
 
     struct TwoBrushReplayEntry
@@ -531,6 +752,7 @@ namespace runtime_contract
         ReplayPass pass;
         ReplayRegion region;
         SpatialScanlineKey spatial_key;
+        bool detail_refinement{false};
     };
 
     struct TwoBrushReplayPlan
@@ -541,6 +763,7 @@ namespace runtime_contract
         std::size_t fill_count{0};
         std::size_t coarse_paint_count{0};
         std::size_t fine_paint_count{0};
+        std::size_t detail_refinement_count{0};
         std::size_t fill_candidates{0};
         std::size_t fill_deduplicated{0};
         std::size_t coarse_paint_candidates{0};
@@ -554,7 +777,8 @@ namespace runtime_contract
         int texture_size,
         double brush_1_size_texels,
         double brush_2_size_texels,
-        double fill_radius_texels)
+        double fill_radius_texels,
+        int detail_resolution_percent = DetailResolutionDefaultPercent)
     {
         TwoBrushReplayPlan plan{};
         constexpr ReplayRegion region_order[]{ReplayRegion::Back,
@@ -572,12 +796,7 @@ namespace runtime_contract
                        ? candidate.reference_z
                        : (std::isfinite(candidate.fallback_z) ? candidate.fallback_z : 0.0);
         };
-        for (const auto& candidate : candidates)
-        {
-            if (candidate.mode == ReplayRegionMode::Skip)
-            {
-                continue;
-            }
+        const auto accumulate_vertical_bounds = [&](const TwoBrushReplayCandidate& candidate) {
             const double vertical = selected_vertical(candidate);
             if (!have_vertical_bounds)
             {
@@ -590,9 +809,32 @@ namespace runtime_contract
                 vertical_top = std::max(vertical_top, vertical);
                 vertical_bottom = std::min(vertical_bottom, vertical);
             }
+        };
+        for (const auto& candidate : candidates)
+        {
+            if (candidate.mode == ReplayRegionMode::Skip)
+            {
+                continue;
+            }
             if (!candidate.has_reference_position || !std::isfinite(candidate.reference_z))
             {
                 ++plan.reference_position_fallback_candidates;
+            }
+            if (!candidate.detail_refinement)
+            {
+                accumulate_vertical_bounds(candidate);
+            }
+        }
+        // Refinements are appended after every base pass and must not perturb the
+        // row partitioning (and therefore ordering) of the existing base replay.
+        if (!have_vertical_bounds)
+        {
+            for (const auto& candidate : candidates)
+            {
+                if (candidate.mode != ReplayRegionMode::Skip)
+                {
+                    accumulate_vertical_bounds(candidate);
+                }
             }
         }
         plan.reference_position_fallback_used = plan.reference_position_fallback_candidates > 0;
@@ -600,7 +842,8 @@ namespace runtime_contract
         auto append_pass = [&](ReplayPass pass,
                                ReplayRegionMode required_mode,
                                double dedupe_cell_uv,
-                               double row_size_texels) {
+                               double row_size_texels,
+                               bool required_detail_refinement) {
             std::set<std::tuple<int, int, int, int>> emitted_cells{};
             const double row_height = std::max(
                 0.000001,
@@ -610,7 +853,9 @@ namespace runtime_contract
                 std::vector<TwoBrushReplayEntry> pending{};
                 for (const auto& candidate : candidates)
                 {
-                    if (candidate.region != region || candidate.mode != required_mode)
+                    if (candidate.region != region ||
+                        candidate.mode != required_mode ||
+                        candidate.detail_refinement != required_detail_refinement)
                     {
                         continue;
                     }
@@ -655,7 +900,8 @@ namespace runtime_contract
                                                selected_vertical(candidate),
                                                row_height),
                           candidate.horizontal,
-                          candidate.original_ordinal}});
+                          candidate.original_ordinal},
+                         candidate.detail_refinement});
                 }
                 std::stable_sort(pending.begin(), pending.end(), [](const auto& left, const auto& right) {
                     return spatial_scanline_less(left.spatial_key, right.spatial_key);
@@ -664,20 +910,36 @@ namespace runtime_contract
             }
         };
 
-        append_pass(ReplayPass::Fill, ReplayRegionMode::Fill, fill_cell_uv, fill_radius_texels);
+        append_pass(ReplayPass::Fill,
+                    ReplayRegionMode::Fill,
+                    fill_cell_uv,
+                    fill_radius_texels,
+                    false);
         plan.fill_end = plan.entries.size();
         plan.fill_count = plan.fill_end;
         append_pass(ReplayPass::CoarsePaint,
                     ReplayRegionMode::Paint,
                     coarse_cell_uv,
-                    brush_1_size_texels);
+                    brush_1_size_texels,
+                    false);
         plan.coarse_end = plan.entries.size();
         plan.coarse_paint_count = plan.coarse_end - plan.fill_end;
         append_pass(ReplayPass::FinePaint,
                     ReplayRegionMode::Paint,
                     0.0,
-                    brush_2_size_texels);
+                    brush_2_size_texels,
+                    false);
+        append_pass(ReplayPass::FinePaint,
+                    ReplayRegionMode::Paint,
+                    0.0,
+                    adaptive_detail_radius_texels(brush_2_size_texels,
+                                                  detail_resolution_percent),
+                    true);
         plan.fine_paint_count = plan.entries.size() - plan.coarse_end;
+        plan.detail_refinement_count = static_cast<std::size_t>(std::count_if(
+            plan.entries.begin() + static_cast<std::ptrdiff_t>(plan.coarse_end),
+            plan.entries.end(),
+            [](const auto& entry) { return entry.detail_refinement; }));
         return plan;
     }
 

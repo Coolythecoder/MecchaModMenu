@@ -128,6 +128,13 @@ hash, and protocol version. Only after a successful reply does the client send
 the existing command line on that same connection. `ping`, paint, preview,
 cancel, and shutdown payloads are unchanged after HELLO.
 
+Auto Paint and Paint Studio send `detail_resolution_percent` as bounded paint
+tuning. Native code validates it at 50–500 with a default of 100. The
+correction-stroke budget scales linearly from 512 at 100% to 2,560 at 500%,
+while the 100,000-stroke total-plan safety cap remains fixed. Third-party Web
+modules never connect to this TCP bridge directly; their SDK permissions are
+relayed through the controller's existing allowlisted paint commands.
+
 The client accepts a reply only when PID, GUID, token-associated endpoint, and
 expected build hash match its `BridgeInstance`. It does not read `.port`
 sidecars or probe another bridge for compatibility. The `.progress.path` and

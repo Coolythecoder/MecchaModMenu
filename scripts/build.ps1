@@ -1,7 +1,7 @@
 param(
     [string]$RuntimeRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
     [string]$OutDir = "",
-    [string]$ExeName = "meccha-camouflage",
+    [string]$ExeName = "meccha-mod-menu",
     [string]$Version = "",
     [ValidateSet("ReleaseSingleFile", "DevLooseSelfContained")]
     [string]$BuildMode = "ReleaseSingleFile",
@@ -92,7 +92,7 @@ function Invoke-VsToolCapture {
 function Get-ExeBaseName {
     param([string]$Name)
     $candidate = (New-Object System.IO.FileInfo($Name)).BaseName
-    if ([string]::IsNullOrWhiteSpace($candidate)) { return "meccha-camouflage" }
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return "meccha-mod-menu" }
     return $candidate
 }
 
@@ -322,7 +322,7 @@ try {
     }
 
     Invoke-BuildStep -Name "verify build output" -ScriptBlock {
-        $DefaultControllerOutput = Join-Path $OutDir "meccha-camouflage.exe"
+        $DefaultControllerOutput = Join-Path $OutDir "meccha-mod-menu.exe"
         $ControllerOutput = Join-Path $OutDir "$ExeName.exe"
         if ($DefaultControllerOutput -ne $ControllerOutput -and (Test-Path $DefaultControllerOutput -PathType Leaf)) {
             Move-Item -Force $DefaultControllerOutput $ControllerOutput

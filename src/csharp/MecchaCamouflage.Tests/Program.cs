@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -20,11 +21,20 @@ var tests = new List<(string Name, Action Run)>
     ("native accepts the Brush 1 configured range", NativeAcceptsBrush1ConfiguredRange),
     ("payload includes packed route and fill material", PayloadIncludesPackedRouteAndFillMaterial),
     ("payload sends batch slider values", PayloadSendsBatchSliderValues),
+    ("detail resolution setting clamps and reaches the paint payload", DetailResolutionClampsAndReachesPayload),
     ("pre-mode pacing preserves saved delay", PreModePacingPreservesSavedDelay),
     ("legacy auto pacing migrates to fastest sliders", LegacyAutoPacingMigratesToFastestSliders),
     ("legacy manual pacing migrates to sliders", LegacyManualPacingMigratesToSliders),
     ("legacy compatibility pacing migrates to sliders", LegacyCompatibilityPacingMigratesToSliders),
     ("settings clamp batch sliders", SettingsClampBatchSliders),
+    ("module directory is global across app versions", ModuleDirectoryIsGlobalAcrossVersions),
+    ("module catalog loads a valid API v1 manifest", ModuleCatalogLoadsValidV1Manifest),
+    ("module catalog rejects unsafe manifests without blocking valid modules", ModuleCatalogRejectsUnsafeManifestsNonfatally),
+    ("module catalog enforces file and link boundaries", ModuleCatalogEnforcesFileAndLinkBoundaries),
+    ("module SDK example is a valid package", ModuleSdkExampleIsValid),
+    ("paint preset store saves applies deletes and preserves detail", PaintPresetStoreRoundTripsPaintSettings),
+    ("paint studio preset apply supports undo", PaintStudioPresetApplySupportsUndo),
+    ("paint coverage parser clamps native analysis metadata", PaintCoverageParserClampsNativeMetadata),
     ("locales have complete keys", LocalesHaveCompleteKeys),
     ("color parser accepts rrggbb", ColorParserAcceptsHex),
     ("runtime log keeps repeated guard messages", RuntimeLogKeepsRepeatedGuardMessages),
@@ -49,7 +59,10 @@ var tests = new List<(string Name, Action Run)>
     ("bridge messages are user friendly", BridgeMessagesAreUserFriendly),
     ("settings detect supported system language", SettingsDetectSupportedSystemLanguage),
     ("ui snapshot exposes two-pass brushes and batch sliders", UiSnapshotExposesTwoPassBrushesAndBatchSliders),
+    ("ui snapshot exposes paint studio and external module state", UiSnapshotExposesPaintStudioAndExternalModules),
     ("web ui exposes two-pass brush sliders", WebUiExposesTwoPassBrushSliders),
+    ("web ui exposes auto paint paint studio and external modules", WebUiExposesModMenuModules),
+    ("web host isolates module origins network and frames", WebHostIsolatesModuleOriginsNetworkAndFrames),
     ("web UI keeps theme color on readonly range and checkbox controls", WebUiKeepsThemeColorOnReadonlyControls),
     ("web ui renders pass progress and total eta", WebUiRendersPassProgressAndTotalEta),
     ("global hotkeys suppress key repeat", GlobalHotkeysSuppressKeyRepeat),
@@ -401,6 +414,381 @@ static void PayloadSendsBatchSliderValues()
     Assert(tuning.GetProperty("server_batch_pacing_ms").GetInt32() == 125, "batch pacing should map directly");
 }
 
+static void DetailResolutionClampsAndReachesPayload()
+{
+    var settings = new AppSettings();
+    settings.Paint.DetailResolutionPercent = 999;
+    Assert(SettingsStore.Clamp(settings).Paint.DetailResolutionPercent == 500,
+        "detail resolution should clamp to the supported 500 percent maximum");
+    settings.Paint.DetailResolutionPercent = 1;
+    Assert(SettingsStore.Clamp(settings).Paint.DetailResolutionPercent == 50,
+        "detail resolution should clamp to the supported 50 percent minimum");
+
+    settings.Paint.DetailResolutionPercent = 500;
+    using var payload = JsonDocument.Parse(BridgePayloadBuilder.BuildPaintPayload(
+        settings,
+        42,
+        "Game.exe",
+        new PaintRequestOptions()));
+    Assert(payload.RootElement.GetProperty("tuning").GetProperty("detail_resolution_percent").GetInt32() == 500,
+        "the maximum detail resolution should reach the native paint tuning payload");
+}
+
+static void ModuleDirectoryIsGlobalAcrossVersions()
+{
+    var first = new AppPaths("module-path-v1");
+    var second = new AppPaths("module-path-v2");
+
+    Assert(first.ModulesDirectory == second.ModulesDirectory,
+        "third-party modules should persist across application version directories");
+    Assert(first.ModulesDirectory == Path.Combine(first.RootDirectory, "modules"),
+        "modules should live directly under the persistent application root");
+    Assert(!first.ModulesDirectory.StartsWith(first.VersionRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+        "the global module catalog must not be nested under one version");
+
+    first.EnsureBaseDirectories();
+    Assert(Directory.Exists(first.ModulesDirectory), "base-directory setup should create the module directory");
+}
+
+static void ModuleCatalogLoadsValidV1Manifest()
+{
+    using var temp = new TempDirectory("module-valid-v1-test");
+    var moduleDirectory = CreateModulePackage(
+        temp.Path,
+        "sample.module",
+        """
+        {
+          "schema_version": 1,
+          "api_version": 1,
+          "id": "sample.module",
+          "name": "Sample Module",
+          "version": "1.2.3",
+          "description": "A data-only SDK test module.",
+          "entry": "ui/index.html",
+          "permissions": ["snapshot.read", "paint.preview", "paint.restore"]
+        }
+        """,
+        "ui/index.html");
+
+    var result = ModuleCatalog.ScanDirectory(temp.Path);
+
+    Assert(result.Diagnostics.Count == 0, "a valid module should not produce catalog diagnostics");
+    Assert(result.Modules.Count == 1, "the valid module should be discovered exactly once");
+    var module = result.Modules[0];
+    Assert(module.SchemaVersion == 1 && module.ApiVersion == 1, "descriptor should retain the accepted schema and API versions");
+    Assert(module.Id == "sample.module" && module.Name == "Sample Module" && module.Version == "1.2.3",
+        "descriptor identity should come from the validated manifest");
+    Assert(module.Description == "A data-only SDK test module.", "descriptor should expose its bounded description");
+    Assert(module.Entry == "ui/index.html", "descriptor should preserve the portable relative entry");
+    Assert(module.ModuleDirectory == Path.GetFullPath(moduleDirectory), "descriptor should expose the validated package root");
+    Assert(module.EntryPath == Path.GetFullPath(Path.Combine(moduleDirectory, "ui", "index.html")),
+        "descriptor should resolve the entry within the package root");
+    Assert(module.Permissions.SequenceEqual(new[] { "snapshot.read", "paint.preview", "paint.restore" }),
+        "descriptor should expose only declared, allowlisted permissions");
+
+    var expectedPermissions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "snapshot.read", "paint.start", "paint.preview", "paint.restore", "paint.stop"
+    };
+    Assert(expectedPermissions.SetEquals(ModuleSdkV1.AllowedPermissions), "API v1 permission allowlist changed unexpectedly");
+    Assert(!ModuleSdkV1.IsAllowedPermission("native.command"), "arbitrary native command permission must not exist");
+    Assert(ModuleSdkV1.IdComparer.Equals("sample.module", "SAMPLE.MODULE"),
+        "module ids must be unique without case-based aliases");
+    var sampleHost = ModuleSdkV1.VirtualHostName("sample.module");
+    Assert(sampleHost == ModuleSdkV1.VirtualHostName("sample.module"),
+        "a module id should map to one deterministic virtual host");
+    Assert(sampleHost != ModuleSdkV1.VirtualHostName("another.module") &&
+           sampleHost.EndsWith(".meccha-modules.localhost", StringComparison.Ordinal) &&
+           sampleHost.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '.'),
+        "distinct module ids should receive distinct DNS-safe subdomains");
+    Assert(ModuleSdkV1.IsValidRelativeHtmlEntry("ui/index.html"), "portable nested HTML entries should be valid");
+    Assert(!ModuleSdkV1.IsValidRelativeHtmlEntry("../index.html") &&
+           !ModuleSdkV1.IsValidRelativeHtmlEntry("ui\\index.html") &&
+           !ModuleSdkV1.IsValidRelativeHtmlEntry("C:/index.html") &&
+           !ModuleSdkV1.IsValidRelativeHtmlEntry("ui/module.js"),
+        "rooted, traversal, platform-specific, and non-HTML entries must be rejected");
+}
+
+static void ModuleCatalogRejectsUnsafeManifestsNonfatally()
+{
+    using var temp = new TempDirectory("module-invalid-manifest-test");
+
+    CreateModulePackage(temp.Path, "good.module", """
+    {"schema_version":1,"api_version":1,"id":"good.module","name":"Good","version":"1.0.0","entry":"index.html","permissions":[]}
+    """);
+
+    var traversalDirectory = Path.Combine(temp.Path, "escape.module");
+    Directory.CreateDirectory(traversalDirectory);
+    File.WriteAllText(Path.Combine(temp.Path, "outside.html"), "outside");
+    File.WriteAllText(Path.Combine(traversalDirectory, "module.json"), """
+    {"schema_version":1,"api_version":1,"id":"escape.module","name":"Escape","version":"1","entry":"../outside.html","permissions":[]}
+    """);
+
+    CreateModulePackage(temp.Path, "unsafe-id", """
+    {"schema_version":1,"api_version":1,"id":"Unsafe Id","name":"Unsafe id","version":"1","entry":"index.html","permissions":[]}
+    """);
+    CreateModulePackage(temp.Path, "unsafe.permission", """
+    {"schema_version":1,"api_version":1,"id":"unsafe.permission","name":"Unsafe permission","version":"1","entry":"index.html","permissions":["native.command"]}
+    """);
+    CreateModulePackage(temp.Path, "duplicate.permission", """
+    {"schema_version":1,"api_version":1,"id":"duplicate.permission","name":"Duplicate permission","version":"1","entry":"index.html","permissions":["paint.stop","paint.stop"]}
+    """);
+    CreateModulePackage(temp.Path, "future.schema", """
+    {"schema_version":2,"api_version":1,"id":"future.schema","name":"Future schema","version":"1","entry":"index.html","permissions":[]}
+    """);
+    CreateModulePackage(temp.Path, "script.entry", """
+    {"schema_version":1,"api_version":1,"id":"script.entry","name":"Script entry","version":"1","entry":"module.js","permissions":[]}
+    """, "module.js");
+    CreateModulePackage(temp.Path, "missing.entry", """
+    {"schema_version":1,"api_version":1,"id":"missing.entry","name":"Missing entry","version":"1","entry":"index.html","permissions":[]}
+    """, createEntry: false);
+    CreateModulePackage(temp.Path, "unknown.property", """
+    {"schema_version":1,"api_version":1,"id":"unknown.property","name":"Unknown property","version":"1","entry":"index.html","permissions":[],"native_command":"anything"}
+    """);
+
+    var result = ModuleCatalog.ScanDirectory(temp.Path);
+    var codes = result.Diagnostics.Select(diagnostic => diagnostic.Code).ToHashSet(StringComparer.Ordinal);
+
+    Assert(result.Modules.Count == 1 && result.Modules[0].Id == "good.module",
+        "invalid packages must not prevent an unrelated valid module from loading; loaded=" +
+        string.Join(',', result.Modules.Select(module => module.Id)) + "; diagnostics=" +
+        string.Join(',', result.Diagnostics.Select(diagnostic => diagnostic.Code)));
+    Assert(codes.Contains("manifest_entry"), "traversal and non-HTML entries should produce a manifest entry diagnostic");
+    Assert(codes.Contains("manifest_id"), "invalid module ids should be diagnosed");
+    Assert(codes.Contains("manifest_permissions"), "unknown and duplicate permissions should be diagnosed");
+    Assert(codes.Contains("manifest_schema"), "unsupported schemas should be diagnosed");
+    Assert(codes.Contains("entry_missing"), "missing entry files should be diagnosed");
+    Assert(codes.Contains("manifest_unknown_property"), "unknown manifest properties should be rejected rather than ignored");
+    Assert(result.Diagnostics.All(diagnostic => !string.IsNullOrWhiteSpace(diagnostic.Message)),
+        "every rejected package should have a nonfatal explanatory diagnostic");
+}
+
+static void ModuleCatalogEnforcesFileAndLinkBoundaries()
+{
+    using var temp = new TempDirectory("module-file-boundary-test");
+
+    var largeManifestDirectory = Path.Combine(temp.Path, "large.manifest");
+    Directory.CreateDirectory(largeManifestDirectory);
+    File.WriteAllText(Path.Combine(largeManifestDirectory, "module.json"), new string(' ', ModuleSdkV1.MaxManifestBytes + 1));
+
+    var largeEntryDirectory = CreateModulePackage(temp.Path, "large.entry", """
+    {"schema_version":1,"api_version":1,"id":"large.entry","name":"Large entry","version":"1","entry":"index.html","permissions":[]}
+    """);
+    using (var entry = new FileStream(Path.Combine(largeEntryDirectory, "index.html"), FileMode.Open, FileAccess.Write, FileShare.None))
+        entry.SetLength(ModuleSdkV1.MaxEntryBytes + 1);
+
+    var largeAssetDirectory = CreateModulePackage(temp.Path, "large.asset", """
+    {"schema_version":1,"api_version":1,"id":"large.asset","name":"Large asset","version":"1","entry":"index.html","permissions":[]}
+    """);
+    using (var asset = new FileStream(Path.Combine(largeAssetDirectory, "texture.bin"), FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        asset.SetLength(ModuleSdkV1.MaxAssetBytes + 1);
+
+    var manyFilesDirectory = CreateModulePackage(temp.Path, "many.files", """
+    {"schema_version":1,"api_version":1,"id":"many.files","name":"Many files","version":"1","entry":"index.html","permissions":[]}
+    """);
+    var manyFilesAssets = Path.Combine(manyFilesDirectory, "assets");
+    Directory.CreateDirectory(manyFilesAssets);
+    for (var index = 0; index < ModuleSdkV1.MaxPackageFiles; ++index)
+        File.WriteAllText(Path.Combine(manyFilesAssets, $"asset-{index:D3}.txt"), "x");
+
+    var manyDirectoriesDirectory = CreateModulePackage(temp.Path, "many.directories", """
+    {"schema_version":1,"api_version":1,"id":"many.directories","name":"Many directories","version":"1","entry":"index.html","permissions":[]}
+    """);
+    for (var index = 0; index <= ModuleSdkV1.MaxPackageDirectories; ++index)
+        Directory.CreateDirectory(Path.Combine(manyDirectoriesDirectory, $"directory-{index:D3}"));
+
+    var largePackageDirectory = CreateModulePackage(temp.Path, "large.package", """
+    {"schema_version":1,"api_version":1,"id":"large.package","name":"Large package","version":"1","entry":"index.html","permissions":[]}
+    """);
+    for (var index = 0; index < 4; ++index)
+    {
+        using var asset = new FileStream(
+            Path.Combine(largePackageDirectory, $"aggregate-{index}.bin"),
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None);
+        asset.SetLength(ModuleSdkV1.MaxAssetBytes);
+    }
+
+    var linkCreated = false;
+    var linkDirectory = CreateModulePackage(temp.Path, "linked.asset", """
+    {"schema_version":1,"api_version":1,"id":"linked.asset","name":"Linked asset","version":"1","entry":"index.html","permissions":[]}
+    """);
+    try
+    {
+        var nested = Path.Combine(linkDirectory, "assets", "nested");
+        Directory.CreateDirectory(nested);
+        var outside = Path.Combine(temp.Path, "outside-module-asset.css");
+        File.WriteAllText(outside, "outside");
+        File.CreateSymbolicLink(Path.Combine(nested, "linked.css"), outside);
+        linkCreated = true;
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or NotSupportedException)
+    {
+        try { Directory.Delete(linkDirectory, recursive: true); } catch { }
+    }
+
+    var result = ModuleCatalog.ScanDirectory(temp.Path);
+    var codes = result.Diagnostics.Select(diagnostic => diagnostic.Code).ToHashSet(StringComparer.Ordinal);
+
+    Assert(result.Modules.Count == 0, "packages outside file, directory, aggregate, or link bounds must never become descriptors; loaded=" +
+        string.Join(',', result.Modules.Select(module => module.Id)) + "; diagnostics=" +
+        string.Join(',', result.Diagnostics.Select(diagnostic => diagnostic.Code)));
+    Assert(codes.Contains("manifest_too_large"), "oversized manifests should be rejected before JSON parsing");
+    Assert(codes.Contains("entry_too_large"), "oversized HTML entries should be rejected");
+    Assert(codes.Contains("package_asset_too_large"), "an oversized non-entry asset should reject the whole package");
+    Assert(codes.Contains("package_file_limit"), "packages should have a bounded file count");
+    Assert(codes.Contains("package_directory_limit"), "packages should have a bounded directory count");
+    Assert(codes.Contains("package_too_large"), "packages should have a bounded aggregate byte size");
+    if (linkCreated)
+        Assert(codes.Contains("package_link"), "a nested asset symlink must reject the whole package even when its target exists");
+}
+
+static void ModuleSdkExampleIsValid()
+{
+    using var temp = new TempDirectory("module-sdk-example-test");
+    var source = Path.Combine(FindRepositoryRoot(), "docs", "module-sdk", "example");
+    var target = Path.Combine(temp.Path, "example");
+    Directory.CreateDirectory(target);
+    File.Copy(Path.Combine(source, "module.json"), Path.Combine(target, "module.json"));
+    File.Copy(Path.Combine(source, "index.html"), Path.Combine(target, "index.html"));
+
+    var result = ModuleCatalog.ScanDirectory(temp.Path);
+
+    Assert(result.Diagnostics.Count == 0, "the documented SDK example should pass the production catalog validator; diagnostics=" +
+        string.Join(',', result.Diagnostics.Select(diagnostic => diagnostic.Code + ":" + diagnostic.Message)));
+    Assert(result.Modules.Count == 1 && result.Modules[0].Id == "example", "the SDK example should load as the example module");
+}
+
+static void PaintPresetStoreRoundTripsPaintSettings()
+{
+    using var temp = new TempDirectory("paint-preset-store-test");
+    var store = new PaintPresetStore(temp.Path);
+    var paint = new PaintSettings
+    {
+        Brush1SizeTexels = 18.5,
+        Brush2SizeTexels = 7.5,
+        DetailResolutionPercent = 175,
+        PackedBatchLimit = 9,
+        PackedBatchPacingMs = 140,
+        FrontRegionMode = RegionMode.Paint,
+        SideRegionMode = RegionMode.Skip,
+        BackRegionMode = RegionMode.Fill,
+        AutoMaterial = true,
+        Metallic = 0.35,
+        Roughness = 0.65,
+        FillColor = new RgbColor(0x11, 0x22, 0x33),
+        FillMetallic = 0.45,
+        FillRoughness = 0.55
+    };
+
+    var saved = store.Save("  Detailed  ", paint);
+    paint.DetailResolutionPercent = 50;
+    paint.FillColor = RgbColor.White;
+
+    Assert(saved.Name == "Detailed", "preset names should be trimmed before persistence");
+    Assert(File.Exists(store.Path), "saving a preset should create the persistent preset document");
+    Assert(store.TryGet("detailed", out var loaded), "preset lookup should be case-insensitive");
+    Assert(loaded.Paint.DetailResolutionPercent == 175, "the preset should preserve the saved detail resolution");
+    Assert(Math.Abs(loaded.Paint.Brush1SizeTexels - 18.5) < 0.000001 &&
+           Math.Abs(loaded.Paint.Brush2SizeTexels - 7.5) < 0.000001,
+        "the preset should preserve both brush passes");
+    Assert(loaded.Paint.FillColor.ToHex() == "#112233", "the preset should own a clone of its saved color settings");
+    Assert(loaded.Paint.SideRegionMode == RegionMode.Skip && loaded.Paint.BackRegionMode == RegionMode.Fill,
+        "the preset should preserve region choices");
+
+    loaded.Paint.DetailResolutionPercent = 50;
+    Assert(store.TryGet("Detailed", out var reloaded) && reloaded.Paint.DetailResolutionPercent == 175,
+        "callers should receive a clone rather than mutable stored preset state");
+
+    reloaded.Paint.DetailResolutionPercent = 150;
+    store.Save("DETAILED", reloaded.Paint);
+    Assert(store.Load().Count == 1 && store.Load()[0].Paint.DetailResolutionPercent == 150,
+        "saving a case alias should replace the existing unique preset");
+    Assert(store.Delete("detailed"), "delete should remove an existing preset case-insensitively");
+    Assert(store.Load().Count == 0 && !store.Delete("detailed"), "deleted presets should stay absent");
+}
+
+static void PaintStudioPresetApplySupportsUndo()
+{
+    using var temp = new TempHome();
+    using var presetHome = new TempDirectory("paint-studio-preset-undo-test");
+    var session = new HostSession("paint-studio-preset-undo-test");
+    SetPaintPresetStore(session, new PaintPresetStore(presetHome.Path));
+    var presetSettings = session.UpdateSettings([
+        new SettingChange("paint.brush1SizeTexels", JsonSerializer.SerializeToElement(18.0)),
+        new SettingChange("paint.detailResolutionPercent", JsonSerializer.SerializeToElement(175)),
+        new SettingChange("paint.fillColor", JsonSerializer.SerializeToElement("#123456"))
+    ]);
+    Assert(presetSettings.Success, presetSettings.Message);
+    Assert(session.SavePaintPreset("Detailed").Success, "Paint Studio should save the current paint settings");
+
+    var changed = session.UpdateSettings([
+        new SettingChange("paint.brush1SizeTexels", JsonSerializer.SerializeToElement(28.0)),
+        new SettingChange("paint.detailResolutionPercent", JsonSerializer.SerializeToElement(75)),
+        new SettingChange("paint.fillColor", JsonSerializer.SerializeToElement("#ABCDEF"))
+    ]);
+    Assert(changed.Success, changed.Message);
+
+    var apply = session.ApplyPaintPreset("detailed");
+    Assert(apply.Success, apply.Message);
+    Assert(Math.Abs(session.Settings.Paint.Brush1SizeTexels - 18.0) < 0.000001 &&
+           session.Settings.Paint.DetailResolutionPercent == 175 &&
+           session.Settings.Paint.FillColor.ToHex() == "#123456",
+        "applying a preset should atomically replace the paint settings");
+
+    var snapshot = session.GetSnapshotAsync().GetAwaiter().GetResult();
+    Assert(snapshot.PaintStudio.CanUndoSettings, "the Paint Studio snapshot should advertise preset undo after apply");
+    Assert(snapshot.PaintStudio.Presets.Count == 1 && snapshot.PaintStudio.Presets[0].Name == "Detailed",
+        "the Paint Studio snapshot should expose persistent presets");
+    Assert(snapshot.PaintStudio.DetailResolutionPercent == 175,
+        "the Paint Studio snapshot should expose the currently applied detail resolution");
+
+    var undo = session.UndoPaintSettings();
+    Assert(undo.Success, undo.Message);
+    Assert(Math.Abs(session.Settings.Paint.Brush1SizeTexels - 28.0) < 0.000001 &&
+           session.Settings.Paint.DetailResolutionPercent == 75 &&
+           session.Settings.Paint.FillColor.ToHex() == "#ABCDEF",
+        "undo should restore the complete pre-apply paint settings");
+    Assert(session.DeletePaintPreset("DETAILED").Success, "Paint Studio should delete presets case-insensitively");
+    Assert(session.PresetStore.Load().Count == 0, "deleted Paint Studio presets should be removed from disk");
+}
+
+static void PaintCoverageParserClampsNativeMetadata()
+{
+    var reply = new BridgeReply(
+        Ok: true,
+        Success: true,
+        Stage: "paint_complete",
+        Message: "",
+        Raw: """
+        {"metadata":{"planner_samples_total":100,"planner_samples_enabled":140,"planner_strokes_total":320,"detail_selected_samples":-4,"detail_budget":80}}
+        """);
+
+    var coverage = HostSession.ParsePaintCoverage(reply);
+
+    Assert(coverage is not null && coverage.Available, "native planner metadata should produce available coverage analysis");
+    Assert(coverage!.TotalSamples == 100 && coverage.EnabledSamples == 100 &&
+           Math.Abs(coverage.CoveragePercent - 100.0) < 0.000001,
+        "enabled samples and coverage percent should clamp to the planner total");
+    Assert(coverage.PlannedStrokes == 320 && coverage.DetailSelected == 0 && coverage.DetailBudget == 80,
+        "coverage analysis should retain non-negative stroke and detail metrics");
+    Assert(coverage.Result == "Complete", "a successful native result should be labeled complete");
+
+    var failed = HostSession.ParsePaintCoverage(reply with
+    {
+        Success = false,
+        Message = "planner failed",
+        Raw = """{"metadata":{"replay_strokes_total":12,"replay_strokes_detail_refinement":4}}"""
+    });
+    Assert(failed is not null && failed.PlannedStrokes == 12 && failed.DetailSelected == 4 && failed.Result == "planner failed",
+        "failed paint replies should retain fallback replay metrics and the native failure message");
+    Assert(HostSession.ParsePaintCoverage(reply with { Raw = "not-json" }) is null,
+        "malformed native coverage metadata should be ignored safely");
+    Assert(HostSession.ParsePaintCoverage(reply with { Raw = "{}" }) is null,
+        "a reply without planner metadata should not invent coverage analysis");
+}
+
 static void LocalesHaveCompleteKeys()
 {
     var catalog = LocalizationCatalog.Load();
@@ -644,6 +1032,7 @@ static void UiSnapshotExposesTwoPassBrushesAndBatchSliders()
     var snapshot = new PaintSnapshot(
         17.5,
         7.5,
+        150,
         20,
         50,
         false,
@@ -664,6 +1053,7 @@ static void UiSnapshotExposesTwoPassBrushesAndBatchSliders()
 
     Assert(Math.Abs(doc.RootElement.GetProperty("brush1SizeTexels").GetDouble() - 17.5) < 0.000001, "snapshot should expose brush 1");
     Assert(Math.Abs(doc.RootElement.GetProperty("brush2SizeTexels").GetDouble() - 7.5) < 0.000001, "snapshot should expose brush 2");
+    Assert(doc.RootElement.GetProperty("detailResolutionPercent").GetInt32() == 150, "snapshot should expose Paint Studio detail resolution");
     Assert(doc.RootElement.GetProperty("packedBatchLimit").GetInt32() == 20, "snapshot should expose packedBatchLimit for editing");
     Assert(doc.RootElement.GetProperty("packedBatchPacingMs").GetInt32() == 50, "snapshot should expose packedBatchPacingMs for editing");
     Assert(!doc.RootElement.TryGetProperty("brushSizeTexels", out _), "snapshot should not expose the removed single-brush field");
@@ -673,6 +1063,60 @@ static void UiSnapshotExposesTwoPassBrushesAndBatchSliders()
     Assert(!doc.RootElement.TryGetProperty("adaptiveBatching", out _), "snapshot should not expose adaptiveBatching for editing");
     Assert(!doc.RootElement.TryGetProperty("strokeDelayMs", out _), "snapshot should not expose strokeDelayMs for editing");
     Assert(!doc.RootElement.TryGetProperty("batchSize", out _), "snapshot should not expose renamed batchSize");
+}
+
+static void UiSnapshotExposesPaintStudioAndExternalModules()
+{
+    var snapshot = new
+    {
+        Mods = new ModsSnapshot(
+            new AutoPaintModSnapshot(Available: true, Running: true),
+            new PaintStudioModSnapshot(Available: true)),
+        PaintStudio = new PaintStudioSnapshot(
+            DetailResolutionPercent: 175,
+            Presets: [new PaintPresetSnapshot("Detailed", "2026-07-17T12:00:00.0000000+00:00")],
+            CanUndoSettings: true,
+            Coverage: new PaintCoverageSnapshot(true, 82.5, 825, 1000, 940, 115, 140, "Complete")),
+        ExternalModules = new[]
+        {
+            new ExternalModuleSnapshot(
+                "sample.module",
+                "Sample Module",
+                "1.0.0",
+                "Sample description",
+                $"https://{ModuleSdkV1.VirtualHostName("sample.module")}/index.html",
+                new[] { "snapshot.read" })
+        },
+        ModuleDiagnostics = new[] { new ModuleDiagnosticSnapshot("manifest_entry", "Unsafe entry.", "broken.module") }
+    };
+    var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    });
+    using var document = JsonDocument.Parse(json);
+    var mods = document.RootElement.GetProperty("mods");
+    var autoPaint = mods.GetProperty("autoPaint");
+    var paintStudioMod = mods.GetProperty("paintStudio");
+    var paintStudio = document.RootElement.GetProperty("paintStudio");
+    var externalModule = document.RootElement.GetProperty("externalModules")[0];
+
+    Assert(autoPaint.GetProperty("available").GetBoolean(), "auto paint module should expose bridge availability");
+    Assert(autoPaint.GetProperty("running").GetBoolean(), "auto paint module should expose its action state");
+    Assert(paintStudioMod.GetProperty("available").GetBoolean(), "Paint Studio should be exposed as an available built-in module");
+    Assert(paintStudio.GetProperty("detailResolutionPercent").GetInt32() == 175,
+        "Paint Studio should expose its detail resolution");
+    Assert(paintStudio.GetProperty("canUndoSettings").GetBoolean() &&
+           paintStudio.GetProperty("presets")[0].GetProperty("name").GetString() == "Detailed",
+        "Paint Studio should expose preset and undo state");
+    Assert(Math.Abs(paintStudio.GetProperty("coverage").GetProperty("coveragePercent").GetDouble() - 82.5) < 0.000001,
+        "Paint Studio should expose the latest native coverage analysis");
+    Assert(externalModule.GetProperty("id").GetString() == "sample.module" &&
+           externalModule.GetProperty("entryUrl").GetString() ==
+               $"https://{ModuleSdkV1.VirtualHostName("sample.module")}/index.html" &&
+           externalModule.GetProperty("permissions")[0].GetString() == "snapshot.read",
+        "validated external module descriptors should be represented without native command access");
+    Assert(document.RootElement.GetProperty("moduleDiagnostics")[0].GetProperty("moduleId").GetString() == "broken.module",
+        "nonfatal module diagnostics should be exposed separately from valid descriptors");
 }
 
 static void WebUiExposesTwoPassBrushSliders()
@@ -690,6 +1134,82 @@ static void WebUiExposesTwoPassBrushSliders()
     Assert(app.Contains("paint.brush2SizeTexels", StringComparison.Ordinal), "web UI should bind brush 2");
     Assert(!app.Contains("paint.brushSizeTexels", StringComparison.Ordinal), "web UI should not send the removed single-brush key");
     Assert(!app.Contains("coverageStepTexels", StringComparison.Ordinal), "web UI should not expose internal coverage compatibility");
+}
+
+static void WebUiExposesModMenuModules()
+{
+    var repository = FindRepositoryRoot();
+    var index = File.ReadAllText(Path.Combine(repository, "src", "csharp", "MecchaCamouflage.WebHost", "web", "index.html"));
+    var app = File.ReadAllText(Path.Combine(repository, "src", "csharp", "MecchaCamouflage.WebHost", "web", "app.js"));
+    Assert(index.Contains("id=\"module-auto-paint\"", StringComparison.Ordinal),
+        "the mod menu should expose Auto Paint as its own module");
+    Assert(index.Contains("data-module-target=\"paint-studio\"", StringComparison.Ordinal),
+        "the mod menu should expose Paint Studio as its own module");
+    Assert(index.Contains("id=\"module-app\"", StringComparison.Ordinal),
+        "shared app settings should remain available as a separate module");
+    Assert(index.Contains("id=\"paint-start\"", StringComparison.Ordinal) &&
+           index.Contains("id=\"paint-preview\"", StringComparison.Ordinal) &&
+           index.Contains("id=\"paint-unpreview\"", StringComparison.Ordinal) &&
+           index.Contains("id=\"paint-stop\"", StringComparison.Ordinal),
+        "the Auto Paint module should retain all paint actions");
+    var autoPaintStart = index.IndexOf("id=\"module-auto-paint\"", StringComparison.Ordinal);
+    var paintStudioStart = index.IndexOf("id=\"module-paint-studio\"", StringComparison.Ordinal);
+    var autoDetailStart = index.IndexOf("id=\"auto-detail-resolution\"", StringComparison.Ordinal);
+    Assert(autoDetailStart > autoPaintStart && autoDetailStart < paintStudioStart &&
+           index.Contains("id=\"auto-detail-resolution\" class=\"setting-control\" disabled type=\"range\" min=\"50\" max=\"500\" step=\"5\"", StringComparison.Ordinal),
+        "Auto Paint should expose the full 50-500 percent detail resolution range");
+    Assert(app.Contains("paint.detailResolutionPercent", StringComparison.Ordinal),
+        "Auto Paint and Paint Studio should bind the detail resolution setting");
+    Assert(app.Contains("savePaintPreset", StringComparison.Ordinal) &&
+           app.Contains("applyPaintPreset", StringComparison.Ordinal) &&
+           app.Contains("deletePaintPreset", StringComparison.Ordinal) &&
+           app.Contains("undoPaintSettings", StringComparison.Ordinal),
+        "Paint Studio should expose save, apply, delete, and undo actions");
+    Assert(app.Contains("externalModules", StringComparison.Ordinal) &&
+           app.Contains("moduleDiagnostics", StringComparison.Ordinal) &&
+           app.Contains("reloadModules", StringComparison.Ordinal) &&
+           app.Contains("openModules", StringComparison.Ordinal),
+        "the mod menu should render validated third-party descriptors and catalog diagnostics");
+}
+
+static void WebHostIsolatesModuleOriginsNetworkAndFrames()
+{
+    var repository = FindRepositoryRoot();
+    var mainForm = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.WebHost", "MainForm.cs"));
+    var app = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.WebHost", "web", "app.js"));
+
+    Assert(mainForm.Contains("ModuleSdkV1.VirtualHostName(module.Id)", StringComparison.Ordinal) &&
+           mainForm.Contains("module.ModuleDirectory", StringComparison.Ordinal) &&
+           !mainForm.Contains("ModuleAssetsHostName", StringComparison.Ordinal),
+        "accepted modules should receive separate per-package virtual hosts instead of one shared origin");
+    Assert(mainForm.Contains("AddWebResourceRequestedFilter", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceRequestSourceKinds.All", StringComparison.Ordinal) &&
+           mainForm.Contains("HandleWebResourceRequested", StringComparison.Ordinal) &&
+           mainForm.Contains("403", StringComparison.Ordinal),
+        "module resource requests should be intercepted and denied outside accepted virtual hosts");
+    Assert(mainForm.Contains("PermissionRequested", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2PermissionState.Deny", StringComparison.Ordinal),
+        "embedded modules should not receive browser device or profile permissions");
+    Assert(mainForm.Contains("connect-src 'none'", StringComparison.Ordinal) &&
+           mainForm.Contains("worker-src 'none'", StringComparison.Ordinal) &&
+           mainForm.Contains("TryReadValidatedModuleEntry", StringComparison.Ordinal) &&
+           mainForm.Contains("CoreWebView2WebResourceContext.Document", StringComparison.Ordinal),
+        "module documents should receive a host-enforced CSP that also closes WebSocket and worker egress");
+    Assert(mainForm.Contains("FrameNavigationStarting", StringComparison.Ordinal) &&
+           mainForm.Contains("allowedModuleFrame", StringComparison.Ordinal) &&
+           mainForm.Contains("args.Cancel = !allowedModuleFrame", StringComparison.Ordinal),
+        "child frames should be unable to embed the privileged main interface or external pages");
+    Assert(mainForm.Contains("args.OriginalSourceFrameInfo", StringComparison.Ordinal) &&
+           mainForm.Contains("args.IsUserInitiated", StringComparison.Ordinal),
+        "external browser launches should require a user gesture from the privileged main interface");
+    Assert(app.Contains("event.source === candidate.iframe.contentWindow", StringComparison.Ordinal) &&
+           app.Contains("event.origin === candidate.descriptor.origin", StringComparison.Ordinal) &&
+           app.Contains("[\"snapshot.get\", \"snapshot.read\"]", StringComparison.Ordinal),
+        "the JavaScript relay should bind source, exact origin, and command-specific permission");
 }
 
 static void WebUiKeepsThemeColorOnReadonlyControls()
@@ -2348,6 +2868,34 @@ static void SetActiveBridge(RuntimeBridgeService service, BridgeInstance instanc
     connectedField.SetValue(service, connected);
 }
 
+static void SetPaintPresetStore(HostSession session, PaintPresetStore store)
+{
+    var field = typeof(HostSession).GetField(
+        "<PresetStore>k__BackingField",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("PresetStore backing field missing");
+    field.SetValue(session, store);
+}
+
+static string CreateModulePackage(
+    string modulesDirectory,
+    string directoryName,
+    string manifest,
+    string entry = "index.html",
+    bool createEntry = true)
+{
+    var moduleDirectory = Path.Combine(modulesDirectory, directoryName);
+    Directory.CreateDirectory(moduleDirectory);
+    File.WriteAllText(Path.Combine(moduleDirectory, "module.json"), manifest);
+    if (createEntry)
+    {
+        var entryPath = Path.Combine(moduleDirectory, entry.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(entryPath)!);
+        File.WriteAllText(entryPath, "<!doctype html><title>Module test</title>");
+    }
+    return moduleDirectory;
+}
+
 static int CountOccurrences(string text, string value)
 {
     var count = 0;
@@ -2381,5 +2929,25 @@ sealed class TempHome : IDisposable
     {
         Environment.SetEnvironmentVariable("LOCALAPPDATA", oldLocalAppData);
         try { Directory.Delete(temp, true); } catch { }
+    }
+}
+
+sealed class TempDirectory : IDisposable
+{
+    public TempDirectory(string label)
+    {
+        var safeLabel = string.Concat(label.Select(character =>
+            char.IsLetterOrDigit(character) || character is '-' or '_' ? character : '-'));
+        Path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            "meccha-tests-" + safeLabel + "-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path);
+    }
+
+    public string Path { get; }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(Path, recursive: true); } catch { }
     }
 }

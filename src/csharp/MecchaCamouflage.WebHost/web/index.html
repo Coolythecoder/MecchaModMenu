@@ -3,79 +3,102 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Meccha Camouflage</title>
+  <title>Meccha Mod Menu</title>
   <link rel="icon" href="icon.ico">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="workspace">
-    <section class="column">
-      <section class="panel panel-fill corner-accent">
+    <section class="column module-column">
+      <nav class="module-nav segmented" role="tablist" aria-label="Mods" data-i18n-aria-label="mods">
+        <button id="module-tab-auto-paint" class="active" type="button" role="tab" aria-selected="true" aria-controls="module-auto-paint" data-module-target="auto-paint" data-i18n="mod.auto.paint">Auto Paint</button>
+        <button id="module-tab-paint-studio" type="button" role="tab" aria-selected="false" aria-controls="module-paint-studio" data-module-target="paint-studio" data-i18n="mod.paint.studio">Paint Studio</button>
+        <button id="module-tab-app" type="button" role="tab" aria-selected="false" aria-controls="module-app" data-module-target="app" data-i18n="mod.app">App</button>
+      </nav>
+
+      <section id="module-auto-paint" class="panel panel-fill corner-accent module-panel active" role="tabpanel" aria-labelledby="module-tab-auto-paint" data-module-panel="auto-paint">
         <div class="panel-title">
-          <span data-i18n="settings">Settings</span>
+          <span data-i18n="mod.auto.paint">Auto Paint</span>
+          <b id="auto-paint-state" class="status-token">-</b>
+        </div>
+
+        <div class="module-intro">
+          <p data-i18n="mod.auto.paint.description">Automatically reproduce the current camouflage with coarse, fine, and adaptive detail passes.</p>
+          <p id="auto-paint-message" class="module-runtime-message" hidden></p>
         </div>
 
         <div class="panel-scroll">
           <div class="panel-content settings-stack">
             <div class="group">
-            <div class="group-title" data-i18n="group.geometry">Geometry</div>
-            <div class="setting-grid">
+              <div class="group-title" data-i18n="paint.detail">Detail</div>
               <label class="field">
-                <span data-i18n="brush.1.size">Brush 1 size</span>
+                <span data-i18n="paint.detail.resolution">Detail resolution (%)</span>
                 <div class="range-row">
-                  <input id="brush-1-size" class="setting-control" disabled type="range" min="10" max="30" step="0.5">
-                  <input id="brush-1-size-number" class="setting-control range-number" disabled type="number" min="10" max="30" step="0.5">
-                </div>
-              </label>
-              <label class="field">
-                <span data-i18n="brush.2.size">Brush 2 size</span>
-                <div class="range-row">
-                  <input id="brush-2-size" class="setting-control" disabled type="range" min="5" max="10" step="0.5">
-                  <input id="brush-2-size-number" class="setting-control range-number" disabled type="number" min="5" max="10" step="0.5">
-                </div>
-              </label>
-              <label class="field">
-                <span data-i18n="batch.limit">Batch limit</span>
-                <div class="range-row">
-                  <input id="packed-batch-limit" class="setting-control" disabled type="range" min="1" max="20" step="1">
-                  <input id="packed-batch-limit-number" class="setting-control range-number" disabled type="number" min="1" max="20" step="1">
-                </div>
-              </label>
-              <label class="field">
-                <span data-i18n="batch.pacing">Batch pacing (ms)</span>
-                <div class="range-row">
-                  <input id="packed-batch-pacing" class="setting-control reverse-range" disabled type="range" min="50" max="500" step="1">
-                  <input id="packed-batch-pacing-number" class="setting-control range-number" disabled type="number" min="50" max="500" step="1">
+                  <input id="auto-detail-resolution" class="setting-control" disabled type="range" min="50" max="500" step="5">
+                  <input id="auto-detail-resolution-number" class="setting-control range-number" disabled type="number" min="50" max="500" step="5">
                 </div>
               </label>
             </div>
-          </div>
 
             <div class="group">
-            <div class="group-title" data-i18n="group.material">Material</div>
-            <div class="setting-grid">
-              <label class="field app-wide">
-                <span data-i18n="auto.material">Auto Detect</span>
-                <div class="checkbox-row">
-                  <input id="auto-material" class="setting-control" disabled type="checkbox">
-                </div>
-              </label>
-              <label class="field">
-                <span data-i18n="metallic">Metallic</span>
-                <div class="range-row">
-                  <input id="metallic" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
-                  <input id="metallic-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
-                </div>
-              </label>
-              <label class="field">
-                <span data-i18n="roughness">Roughness</span>
-                <div class="range-row">
-                  <input id="roughness" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
-                  <input id="roughness-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
-                </div>
-              </label>
+              <div class="group-title" data-i18n="group.geometry">Geometry</div>
+              <div class="setting-grid">
+                <label class="field">
+                  <span data-i18n="brush.1.size">Brush 1 size</span>
+                  <div class="range-row">
+                    <input id="brush-1-size" class="setting-control" disabled type="range" min="10" max="30" step="0.5">
+                    <input id="brush-1-size-number" class="setting-control range-number" disabled type="number" min="10" max="30" step="0.5">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="brush.2.size">Brush 2 size</span>
+                  <div class="range-row">
+                    <input id="brush-2-size" class="setting-control" disabled type="range" min="5" max="10" step="0.5">
+                    <input id="brush-2-size-number" class="setting-control range-number" disabled type="number" min="5" max="10" step="0.5">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="batch.limit">Batch limit</span>
+                  <div class="range-row">
+                    <input id="packed-batch-limit" class="setting-control" disabled type="range" min="1" max="20" step="1">
+                    <input id="packed-batch-limit-number" class="setting-control range-number" disabled type="number" min="1" max="20" step="1">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="batch.pacing">Batch pacing (ms)</span>
+                  <div class="range-row">
+                    <input id="packed-batch-pacing" class="setting-control reverse-range" disabled type="range" min="50" max="500" step="1">
+                    <input id="packed-batch-pacing-number" class="setting-control range-number" disabled type="number" min="50" max="500" step="1">
+                  </div>
+                </label>
+              </div>
             </div>
-          </div>
+
+            <div class="group">
+              <div class="group-title" data-i18n="group.material">Material</div>
+              <div class="setting-grid">
+                <label class="field app-wide">
+                  <span data-i18n="auto.material">Auto Detect</span>
+                  <div class="checkbox-row">
+                    <input id="auto-material" class="setting-control" disabled type="checkbox">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="metallic">Metallic</span>
+                  <div class="range-row">
+                    <input id="metallic" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
+                    <input id="metallic-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="roughness">Roughness</span>
+                  <div class="range-row">
+                    <input id="roughness" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
+                    <input id="roughness-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
+                  </div>
+                </label>
+              </div>
+            </div>
 
             <div class="group">
               <div class="group-title" data-i18n="regions">Regions</div>
@@ -90,34 +113,146 @@
             </div>
 
             <div class="group" id="fill-section">
-            <div class="group-title" data-i18n="mode.fill">Fill</div>
-            <div class="setting-grid">
-              <label class="field app-wide">
-                <span data-i18n="fill.color">Color</span>
-                <div class="color-row">
-                  <input id="fill-color-picker" class="setting-control color-picker" disabled type="color">
-                  <input id="fill-color" class="setting-control mono-input" disabled type="text" spellcheck="false" placeholder="#FFFFFF">
-                </div>
-              </label>
+              <div class="group-title" data-i18n="mode.fill">Fill</div>
+              <div class="setting-grid">
+                <label class="field app-wide">
+                  <span data-i18n="fill.color">Color</span>
+                  <div class="color-row">
+                    <input id="fill-color-picker" class="setting-control color-picker" disabled type="color">
+                    <input id="fill-color" class="setting-control mono-input" disabled type="text" spellcheck="false" placeholder="#FFFFFF">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="metallic">Metallic</span>
+                  <div class="range-row">
+                    <input id="fill-metallic" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
+                    <input id="fill-metallic-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
+                  </div>
+                </label>
+                <label class="field">
+                  <span data-i18n="roughness">Roughness</span>
+                  <div class="range-row">
+                    <input id="fill-roughness" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
+                    <input id="fill-roughness-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar mod-action-bar">
+          <button id="paint-stop" type="button" disabled data-i18n="button.stop">Stop</button>
+          <button id="paint-unpreview" type="button" disabled data-i18n="button.restore">Restore</button>
+          <button id="paint-preview" type="button" disabled data-i18n="button.preview">Preview</button>
+          <button id="paint-start" class="primary" type="button" disabled data-i18n="button.start">Start</button>
+        </div>
+      </section>
+
+      <section id="module-paint-studio" class="panel panel-fill corner-accent module-panel" role="tabpanel" aria-labelledby="module-tab-paint-studio" data-module-panel="paint-studio" hidden>
+        <div class="panel-title">
+          <span data-i18n="mod.paint.studio">Paint Studio</span>
+          <b id="paint-studio-state" class="status-token">-</b>
+        </div>
+
+        <div class="module-intro">
+          <p data-i18n="mod.paint.studio.description">Tune paint detail, save reusable presets, preview changes, and inspect planned mesh coverage.</p>
+        </div>
+
+        <div class="panel-scroll">
+          <div class="panel-content studio-stack">
+            <div class="group">
+              <div class="group-title" data-i18n="paint.detail">Detail</div>
               <label class="field">
-                <span data-i18n="metallic">Metallic</span>
+                <span data-i18n="paint.detail.resolution">Detail resolution (%)</span>
                 <div class="range-row">
-                  <input id="fill-metallic" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
-                  <input id="fill-metallic-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
-                </div>
-              </label>
-              <label class="field">
-                <span data-i18n="roughness">Roughness</span>
-                <div class="range-row">
-                  <input id="fill-roughness" class="setting-control" disabled type="range" min="0" max="1" step="0.01">
-                  <input id="fill-roughness-number" class="setting-control range-number" disabled type="number" min="0" max="1" step="0.01">
+                  <input id="detail-resolution" class="setting-control" disabled type="range" min="50" max="500" step="5">
+                  <input id="detail-resolution-number" class="setting-control range-number" disabled type="number" min="50" max="500" step="5">
                 </div>
               </label>
             </div>
-          </div>
-          </div>
 
-          <div class="sub-panel">
+            <div class="group">
+              <div class="group-title" data-i18n="paint.presets">Presets</div>
+              <div class="preset-grid">
+                <label class="field">
+                  <span data-i18n="paint.preset.name">Preset name</span>
+                  <input id="paint-preset-name" class="mono-input" type="text" maxlength="40" spellcheck="false" placeholder="Preset name" data-i18n-placeholder="paint.preset.name">
+                </label>
+                <label class="field">
+                  <span data-i18n="paint.preset.saved">Saved preset</span>
+                  <div class="select-wrap">
+                    <select id="paint-preset-select" class="mono-input">
+                      <option value="" data-i18n="paint.preset.choose">Choose a preset</option>
+                    </select>
+                  </div>
+                </label>
+              </div>
+              <div class="studio-actions">
+                <button id="paint-preset-delete" type="button" disabled data-i18n="button.delete.preset">Delete</button>
+                <button id="paint-settings-undo" type="button" disabled data-i18n="button.undo.settings">Undo settings</button>
+                <button id="paint-preset-apply" type="button" disabled data-i18n="button.apply.preset">Apply</button>
+                <button id="paint-preset-save" class="primary" type="button" disabled data-i18n="button.save.preset">Save preset</button>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="group-title" data-i18n="paint.coverage">Coverage</div>
+              <div class="coverage-grid">
+                <div class="coverage-card">
+                  <span data-i18n="paint.coverage.percent">Coverage</span>
+                  <strong id="paint-coverage-percent">-</strong>
+                </div>
+                <div class="coverage-card">
+                  <span data-i18n="paint.coverage.samples">Enabled samples</span>
+                  <strong id="paint-coverage-samples">-</strong>
+                </div>
+                <div class="coverage-card">
+                  <span data-i18n="paint.coverage.strokes">Planned strokes</span>
+                  <strong id="paint-coverage-strokes">-</strong>
+                </div>
+                <div class="coverage-card">
+                  <span data-i18n="paint.coverage.detail">Adaptive detail</span>
+                  <strong id="paint-coverage-detail">-</strong>
+                </div>
+                <div class="coverage-card coverage-result-card">
+                  <span data-i18n="paint.coverage.result">Result</span>
+                  <strong id="paint-coverage-result">-</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar mod-action-bar">
+          <button id="paint-studio-restore" type="button" disabled data-i18n="button.restore">Restore</button>
+          <button id="paint-studio-preview" class="primary" type="button" disabled data-i18n="button.preview">Preview</button>
+        </div>
+      </section>
+
+      <section id="module-app" class="panel panel-fill corner-accent module-panel" role="tabpanel" aria-labelledby="module-tab-app" data-module-panel="app" hidden>
+        <div class="panel-title">
+          <span data-i18n="mod.app">App</span>
+        </div>
+
+        <div class="module-intro">
+          <p data-i18n="mod.app.description">Configure shared appearance, language, window behavior, and Auto Paint hotkeys.</p>
+        </div>
+
+        <div class="panel-scroll">
+          <div class="panel-content">
+            <div class="module-manager-card">
+              <div>
+                <strong data-i18n="external.modules">External modules</strong>
+                <span data-i18n="external.modules.description">Manage installed local modules and reload their descriptors.</span>
+                <small id="external-modules-diagnostics">-</small>
+              </div>
+              <div class="module-manager-actions">
+                <button id="open-modules" type="button" data-i18n="button.open.modules">Open folder</button>
+                <button id="reload-modules" type="button" data-i18n="button.reload.modules">Reload</button>
+              </div>
+            </div>
+
             <div class="setting-grid app-grid">
               <label class="field app-wide">
                 <span data-i18n="language">Language</span>
@@ -170,14 +305,14 @@
             </div>
           </div>
         </div>
-
-        <div class="action-bar">
-          <button id="reset-settings" type="button" disabled data-i18n="button.reset">Reset</button>
-          <button id="cancel-edit" type="button" disabled data-i18n="button.cancel">Cancel</button>
-          <button id="edit-settings" type="button" data-i18n="button.edit">Edit</button>
-          <button id="save-settings" class="primary" type="button" disabled data-i18n="button.save">Save</button>
-        </div>
       </section>
+
+      <div id="settings-action-bar" class="action-bar settings-action-bar">
+        <button id="reset-settings" type="button" disabled data-i18n="button.reset">Reset</button>
+        <button id="cancel-edit" type="button" disabled data-i18n="button.cancel">Cancel</button>
+        <button id="edit-settings" type="button" data-i18n="button.edit">Edit</button>
+        <button id="save-settings" class="primary" type="button" disabled data-i18n="button.save">Save</button>
+      </div>
     </section>
 
     <section class="column">
@@ -207,9 +342,9 @@
       <span><span data-i18n="footer.bridge">BRIDGE</span>: <b id="footer-bridge" class="status-token">-</b></span>
     </div>
     <div>
-      <a href="https://github.com/acentrist/MecchaCamouflage/blob/main/LICENSE.txt" data-i18n="link.license">License</a>
+      <a href="https://github.com/Coolythecoder/MecchaModMenu/blob/main/LICENSE.txt" data-i18n="link.license">License</a>
       <span>|</span>
-      <a href="https://github.com/acentrist/MecchaCamouflage" data-i18n="link.github">GitHub</a>
+      <a href="https://github.com/Coolythecoder/MecchaModMenu" data-i18n="link.github">GitHub</a>
       <span>|</span>
       <span id="version">dev</span>
     </div>

@@ -481,5 +481,342 @@ int main()
     {
         return 30;
     }
+
+    const runtime_contract::Rgb8 detail_black{0, 0, 0};
+    const runtime_contract::Rgb8 detail_red_below_threshold{15, 0, 0};
+    const runtime_contract::Rgb8 detail_red_at_threshold{16, 0, 0};
+    if (runtime_contract::adaptive_detail_color_eligible(
+            detail_black, detail_red_below_threshold) ||
+        !runtime_contract::adaptive_detail_color_eligible(
+            detail_black, detail_red_at_threshold) ||
+        runtime_contract::adaptive_detail_color_score(
+            detail_black, detail_red_at_threshold) != 54U * 16U * 16U ||
+        runtime_contract::adaptive_detail_color_score(
+            detail_red_at_threshold, detail_black) != 54U * 16U * 16U)
+    {
+        return 31;
+    }
+
+    if (runtime_contract::adaptive_detail_stroke_budget(0, 0) != 0 ||
+        runtime_contract::adaptive_detail_stroke_budget(1, 0) != 1 ||
+        runtime_contract::adaptive_detail_stroke_budget(5, 0) != 1 ||
+        runtime_contract::adaptive_detail_stroke_budget(6, 0) != 2 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 0) != 512 ||
+        runtime_contract::adaptive_detail_stroke_budget(100000, 0) !=
+            runtime_contract::AdaptiveDetailMaximumStrokes ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 99999) != 1 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 100000) != 0 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 100001) != 0 ||
+        runtime_contract::adaptive_detail_radius_texels(5.0) != 2.5 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0) != 5.0)
+    {
+        return 32;
+    }
+
+    const std::vector<runtime_contract::AdaptiveDetailCandidate> dedupe_detail_candidates{
+        {10, 100, runtime_contract::ReplayRegion::Back, 0, 0, 0, 0, 0,
+         detail_black, runtime_contract::Rgb8{0, 128, 0}},
+        {11, 100, runtime_contract::ReplayRegion::Back, 0, 0, 0, 0, 1,
+         detail_black, runtime_contract::Rgb8{255, 255, 255}},
+        {12, 101, runtime_contract::ReplayRegion::Back, 0, 0, 0, 1, 0,
+         detail_black, runtime_contract::Rgb8{250, 0, 0}},
+        {13, 102, runtime_contract::ReplayRegion::Back, 0, 1, 0, 2, 0,
+         detail_black, runtime_contract::Rgb8{0, 0, 200}},
+        {14, 103, runtime_contract::ReplayRegion::Back, 0, 2, 0, 3, 0,
+         detail_black, detail_red_below_threshold},
+    };
+    const auto dedupe_detail_selection =
+        runtime_contract::select_adaptive_detail_candidates(dedupe_detail_candidates, 8);
+    auto reversed_dedupe_detail_candidates = dedupe_detail_candidates;
+    std::reverse(reversed_dedupe_detail_candidates.begin(),
+                 reversed_dedupe_detail_candidates.end());
+    const auto reversed_dedupe_detail_selection =
+        runtime_contract::select_adaptive_detail_candidates(
+            reversed_dedupe_detail_candidates, 8);
+    const std::vector<std::size_t> expected_dedupe_detail_indices{11, 13};
+    if (dedupe_detail_selection.sample_indices != expected_dedupe_detail_indices ||
+        reversed_dedupe_detail_selection.sample_indices != expected_dedupe_detail_indices ||
+        dedupe_detail_selection.eligible_candidates != 4 ||
+        dedupe_detail_selection.parent_deduplicated != 1 ||
+        dedupe_detail_selection.cell_deduplicated != 1 ||
+        dedupe_detail_selection.budget_limited ||
+        reversed_dedupe_detail_selection.eligible_candidates !=
+            dedupe_detail_selection.eligible_candidates ||
+        reversed_dedupe_detail_selection.parent_deduplicated !=
+            dedupe_detail_selection.parent_deduplicated ||
+        reversed_dedupe_detail_selection.cell_deduplicated !=
+            dedupe_detail_selection.cell_deduplicated ||
+        reversed_dedupe_detail_selection.budget_limited)
+    {
+        return 33;
+    }
+
+    const std::vector<runtime_contract::AdaptiveDetailCandidate> tied_detail_candidates{
+        {21, 201, runtime_contract::ReplayRegion::Front, 0, 2, 0, 2, 0,
+         detail_black, detail_red_at_threshold},
+        {22, 202, runtime_contract::ReplayRegion::Back, 0, 0, 0, 0, 0,
+         detail_black, detail_red_at_threshold},
+        {23, 203, runtime_contract::ReplayRegion::Side, 0, 1, 0, 1, 0,
+         detail_black, detail_red_at_threshold},
+    };
+    const auto tied_detail_selection =
+        runtime_contract::select_adaptive_detail_candidates(tied_detail_candidates, 2);
+    auto reversed_tied_detail_candidates = tied_detail_candidates;
+    std::reverse(reversed_tied_detail_candidates.begin(),
+                 reversed_tied_detail_candidates.end());
+    const auto reversed_tied_detail_selection =
+        runtime_contract::select_adaptive_detail_candidates(
+            reversed_tied_detail_candidates, 2);
+    const auto zero_budget_detail_selection =
+        runtime_contract::select_adaptive_detail_candidates(tied_detail_candidates, 0);
+    const std::vector<std::size_t> expected_tied_detail_indices{22, 23};
+    if (tied_detail_selection.sample_indices != expected_tied_detail_indices ||
+        reversed_tied_detail_selection.sample_indices != expected_tied_detail_indices ||
+        !tied_detail_selection.budget_limited ||
+        !reversed_tied_detail_selection.budget_limited ||
+        !zero_budget_detail_selection.sample_indices.empty() ||
+        zero_budget_detail_selection.eligible_candidates != tied_detail_candidates.size() ||
+        !zero_budget_detail_selection.budget_limited)
+    {
+        return 34;
+    }
+
+    const std::vector<runtime_contract::TwoBrushReplayCandidate> refined_replay_candidates{
+        {30, runtime_contract::ReplayRegion::Front, runtime_contract::ReplayRegionMode::Paint,
+         0, 0.10, 0.10, true, 10.0, 10.0, 10.0, 0, false},
+        {31, runtime_contract::ReplayRegion::Front, runtime_contract::ReplayRegionMode::Paint,
+         0, 0.20, 0.20, true, 20.0, 20.0, 20.0, 1, false},
+        {40, runtime_contract::ReplayRegion::Front, runtime_contract::ReplayRegionMode::Paint,
+         0, 0.15, 0.15, true, 5.0, 5.0, -100.0, 2, true},
+        {41, runtime_contract::ReplayRegion::Front, runtime_contract::ReplayRegionMode::Paint,
+         0, 0.25, 0.25, true, 0.0, 0.0, -90.0, 3, true},
+    };
+    const auto refined_replay_plan = runtime_contract::build_two_brush_replay_plan(
+        refined_replay_candidates,
+        1024,
+        20.0,
+        10.0,
+        80.0);
+    const std::size_t base_fine_begin = refined_replay_plan.coarse_end;
+    const std::size_t detail_begin =
+        refined_replay_plan.entries.size() - refined_replay_plan.detail_refinement_count;
+    if (refined_replay_plan.entries.size() != 6 ||
+        refined_replay_plan.fill_end != 0 ||
+        refined_replay_plan.coarse_end != 2 ||
+        refined_replay_plan.coarse_paint_count != 2 ||
+        refined_replay_plan.fine_paint_count != 4 ||
+        refined_replay_plan.detail_refinement_count != 2 ||
+        detail_begin != base_fine_begin + 2)
+    {
+        return 35;
+    }
+    for (std::size_t index = 0; index < refined_replay_plan.entries.size(); ++index)
+    {
+        const auto& entry = refined_replay_plan.entries[index];
+        if ((index < refined_replay_plan.coarse_end &&
+             (entry.pass != runtime_contract::ReplayPass::CoarsePaint ||
+              entry.detail_refinement)) ||
+            (index >= base_fine_begin && index < detail_begin &&
+             (entry.pass != runtime_contract::ReplayPass::FinePaint ||
+              entry.detail_refinement)) ||
+            (index >= detail_begin &&
+             (entry.pass != runtime_contract::ReplayPass::FinePaint ||
+              !entry.detail_refinement)))
+        {
+            return 36;
+        }
+    }
+
+    const std::vector<runtime_contract::TwoBrushReplayCandidate> base_replay_candidates(
+        refined_replay_candidates.begin(),
+        refined_replay_candidates.begin() + 2);
+    const auto base_replay_plan = runtime_contract::build_two_brush_replay_plan(
+        base_replay_candidates,
+        1024,
+        20.0,
+        10.0,
+        80.0);
+    if (base_replay_plan.entries.size() != detail_begin ||
+        base_replay_plan.fill_end != refined_replay_plan.fill_end ||
+        base_replay_plan.coarse_end != refined_replay_plan.coarse_end)
+    {
+        return 37;
+    }
+    for (std::size_t index = 0; index < base_replay_plan.entries.size(); ++index)
+    {
+        const auto& base_entry = base_replay_plan.entries[index];
+        const auto& refined_entry = refined_replay_plan.entries[index];
+        if (base_entry.sample_index != refined_entry.sample_index ||
+            base_entry.pass != refined_entry.pass ||
+            base_entry.region != refined_entry.region ||
+            base_entry.spatial_key.row != refined_entry.spatial_key.row ||
+            base_entry.spatial_key.horizontal != refined_entry.spatial_key.horizontal ||
+            base_entry.spatial_key.original_ordinal !=
+                refined_entry.spatial_key.original_ordinal ||
+            base_entry.detail_refinement || refined_entry.detail_refinement)
+        {
+            return 38;
+        }
+    }
+
+    if (runtime_contract::clamp_detail_resolution_percent(49) != 50 ||
+        runtime_contract::clamp_detail_resolution_percent(100) != 100 ||
+        runtime_contract::clamp_detail_resolution_percent(201) != 201 ||
+        runtime_contract::clamp_detail_resolution_percent(501) != 500 ||
+        runtime_contract::adaptive_detail_channel_threshold(50) != 32 ||
+        runtime_contract::adaptive_detail_channel_threshold(100) != 16 ||
+        runtime_contract::adaptive_detail_channel_threshold(200) != 8 ||
+        runtime_contract::adaptive_detail_channel_threshold(500) != 4 ||
+        runtime_contract::adaptive_detail_channel_threshold() !=
+            runtime_contract::AdaptiveDetailChannelThreshold)
+    {
+        return 39;
+    }
+
+    if (runtime_contract::adaptive_detail_color_eligible(
+            detail_black, runtime_contract::Rgb8{31, 0, 0}, 50) ||
+        !runtime_contract::adaptive_detail_color_eligible(
+            detail_black, runtime_contract::Rgb8{32, 0, 0}, 50) ||
+        runtime_contract::adaptive_detail_color_eligible(
+            detail_black, runtime_contract::Rgb8{7, 0, 0}, 200) ||
+        !runtime_contract::adaptive_detail_color_eligible(
+            detail_black, runtime_contract::Rgb8{8, 0, 0}, 200) ||
+        runtime_contract::adaptive_detail_color_eligible(
+            detail_black, runtime_contract::Rgb8{3, 0, 0}, 500) ||
+        !runtime_contract::adaptive_detail_color_eligible(
+            detail_black, runtime_contract::Rgb8{4, 0, 0}, 500) ||
+        runtime_contract::adaptive_detail_color_eligible(
+            detail_black, detail_red_at_threshold) !=
+            runtime_contract::adaptive_detail_color_eligible(
+                detail_black, detail_red_at_threshold, 100))
+    {
+        return 40;
+    }
+
+    if (runtime_contract::adaptive_detail_maximum_strokes(50) != 256 ||
+        runtime_contract::adaptive_detail_maximum_strokes(100) != 512 ||
+        runtime_contract::adaptive_detail_maximum_strokes(200) != 1024 ||
+        runtime_contract::adaptive_detail_maximum_strokes(500) != 2560 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 0, 50) != 1 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 0, 100) != 2 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 0, 200) != 4 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 0, 500) != 10 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 0, 50) != 256 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 0, 100) != 512 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 0, 200) != 1024 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 0, 500) != 2560 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 99999, 200) != 1 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 100000, 200) != 0 ||
+        runtime_contract::adaptive_detail_stroke_budget(2560, 100001, 200) != 0 ||
+        runtime_contract::adaptive_detail_stroke_budget(10, 0) !=
+            runtime_contract::adaptive_detail_stroke_budget(10, 0, 100) ||
+        runtime_contract::adaptive_detail_radius_texels(5.0, 50) != 5.0 ||
+        runtime_contract::adaptive_detail_radius_texels(5.0, 100) != 2.5 ||
+        runtime_contract::adaptive_detail_radius_texels(5.0, 200) != 1.25 ||
+        runtime_contract::adaptive_detail_radius_texels(5.0, 500) != 0.5 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0, 50) != 10.0 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0, 100) != 5.0 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0, 200) != 2.5 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0, 500) != 1.0 ||
+        runtime_contract::adaptive_detail_radius_texels(10.0) !=
+            runtime_contract::adaptive_detail_radius_texels(10.0, 100))
+    {
+        return 41;
+    }
+
+    const std::vector<runtime_contract::AdaptiveDetailCandidate>
+        resolution_detail_candidates{
+            {49, 499, runtime_contract::ReplayRegion::Back, 0, 3, 0, 3, 0,
+             detail_black, runtime_contract::Rgb8{4, 0, 0}},
+            {50, 500, runtime_contract::ReplayRegion::Back, 0, 0, 0, 0, 0,
+             detail_black, runtime_contract::Rgb8{8, 0, 0}},
+            {51, 501, runtime_contract::ReplayRegion::Back, 0, 1, 0, 1, 0,
+             detail_black, runtime_contract::Rgb8{16, 0, 0}},
+            {52, 502, runtime_contract::ReplayRegion::Back, 0, 2, 0, 2, 0,
+             detail_black, runtime_contract::Rgb8{32, 0, 0}},
+        };
+    const auto resolution_selection_50 =
+        runtime_contract::select_adaptive_detail_candidates(
+            resolution_detail_candidates, 10, 50);
+    const auto resolution_selection_100 =
+        runtime_contract::select_adaptive_detail_candidates(
+            resolution_detail_candidates, 10, 100);
+    const auto resolution_selection_200 =
+        runtime_contract::select_adaptive_detail_candidates(
+            resolution_detail_candidates, 10, 200);
+    const auto resolution_selection_500 =
+        runtime_contract::select_adaptive_detail_candidates(
+            resolution_detail_candidates, 10, 500);
+    const std::vector<std::size_t> expected_resolution_indices_50{52};
+    const std::vector<std::size_t> expected_resolution_indices_100{52, 51};
+    const std::vector<std::size_t> expected_resolution_indices_200{52, 51, 50};
+    const std::vector<std::size_t> expected_resolution_indices_500{52, 51, 50, 49};
+    if (resolution_selection_50.sample_indices != expected_resolution_indices_50 ||
+        resolution_selection_100.sample_indices != expected_resolution_indices_100 ||
+        resolution_selection_200.sample_indices != expected_resolution_indices_200 ||
+        resolution_selection_500.sample_indices != expected_resolution_indices_500 ||
+        resolution_selection_50.eligible_candidates != 1 ||
+        resolution_selection_100.eligible_candidates != 2 ||
+        resolution_selection_200.eligible_candidates != 3 ||
+        resolution_selection_500.eligible_candidates != 4 ||
+        runtime_contract::select_adaptive_detail_candidates(
+            resolution_detail_candidates, 10).sample_indices !=
+            resolution_selection_100.sample_indices)
+    {
+        return 42;
+    }
+
+    const auto refined_replay_plan_200 =
+        runtime_contract::build_two_brush_replay_plan(
+            refined_replay_candidates,
+            1024,
+            20.0,
+            10.0,
+            80.0,
+            200);
+    if (refined_replay_plan_200.entries.size() != refined_replay_plan.entries.size() ||
+        refined_replay_plan_200.fill_end != refined_replay_plan.fill_end ||
+        refined_replay_plan_200.coarse_end != refined_replay_plan.coarse_end ||
+        refined_replay_plan_200.detail_refinement_count !=
+            refined_replay_plan.detail_refinement_count)
+    {
+        return 43;
+    }
+    for (std::size_t index = 0; index < detail_begin; ++index)
+    {
+        const auto& baseline_entry = refined_replay_plan.entries[index];
+        const auto& scaled_entry = refined_replay_plan_200.entries[index];
+        if (baseline_entry.sample_index != scaled_entry.sample_index ||
+            baseline_entry.pass != scaled_entry.pass ||
+            baseline_entry.region != scaled_entry.region ||
+            baseline_entry.spatial_key.row != scaled_entry.spatial_key.row ||
+            baseline_entry.spatial_key.horizontal != scaled_entry.spatial_key.horizontal ||
+            baseline_entry.spatial_key.original_ordinal !=
+                scaled_entry.spatial_key.original_ordinal ||
+            baseline_entry.detail_refinement || scaled_entry.detail_refinement)
+        {
+            return 44;
+        }
+    }
+    bool detail_resolution_changed_row = false;
+    for (std::size_t index = detail_begin;
+         index < refined_replay_plan_200.entries.size();
+         ++index)
+    {
+        detail_resolution_changed_row =
+            detail_resolution_changed_row ||
+            refined_replay_plan_200.entries[index].spatial_key.row !=
+                refined_replay_plan.entries[index].spatial_key.row;
+        if (!refined_replay_plan_200.entries[index].detail_refinement ||
+            refined_replay_plan_200.entries[index].pass !=
+                runtime_contract::ReplayPass::FinePaint)
+        {
+            return 45;
+        }
+    }
+    if (!detail_resolution_changed_row)
+    {
+        return 46;
+    }
     return 0;
 }

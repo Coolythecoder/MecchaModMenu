@@ -14,7 +14,18 @@ public sealed class MainForm : Form
     private const string ManualWebView2RuntimeUrl = "https://developer.microsoft.com/microsoft-edge/webview2/";
     private const string WebUiHostName = "meccha.localhost";
     private const string WebUiStartUri = "https://meccha.localhost/index.html";
+    private const string ModuleDocumentHeaders =
+        "Content-Type: text/html; charset=utf-8\r\n" +
+        "Cache-Control: no-store\r\n" +
+        "X-Content-Type-Options: nosniff\r\n" +
+        "Referrer-Policy: no-referrer\r\n" +
+        "Permissions-Policy: camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=()\r\n" +
+        "Content-Security-Policy: default-src 'self'; base-uri 'none'; connect-src 'none'; object-src 'none'; " +
+        "form-action 'none'; frame-ancestors https://meccha.localhost; frame-src 'self'; worker-src 'none'; " +
+        "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+        "font-src 'self' data:; media-src 'self'";
     private static readonly TimeSpan UiReadyTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan CloseCleanupTimeout = TimeSpan.FromSeconds(12);
     private const int HotkeyStart = 1;
     private const int HotkeyPreview = 2;
     private const int HotkeyUnPreview = 3;
@@ -30,6 +41,9 @@ public sealed class MainForm : Form
 
     private readonly HostSession session;
     private readonly WebViewStartupLifecycle webViewStartup = new();
+    private readonly HashSet<string> moduleVirtualHosts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ModuleDescriptor> moduleVirtualHostModules =
+        new(StringComparer.OrdinalIgnoreCase);
     private WebView2? webView;
     private readonly System.Windows.Forms.Timer statusTimer = new() { Interval = 2000 };
     private CancellationTokenSource? uiReadyTimeoutCancellation;
@@ -41,11 +55,13 @@ public sealed class MainForm : Form
     private string lastHotkeyRegistrationFailure = "";
     private bool webViewRetryUsed;
     private bool webViewRecoveryInProgress;
+    private bool closeCleanupStarted;
+    private bool closeCleanupComplete;
 
     public MainForm(HostSession session)
     {
         this.session = session;
-        Text = "Meccha Camouflage";
+        Text = "Meccha Mod Menu";
         Icon = LoadWindowIcon();
         MinimumSize = new Size(960, 640);
         Width = (int)Math.Round(session.Settings.PanelWidth);
@@ -74,13 +90,7 @@ public sealed class MainForm : Form
                 await HandleWebViewInitializationFailureAsync(ex);
             }
         };
-        FormClosing += (_, _) =>
-        {
-            webReady = false;
-            CancelUiReadyTimeout();
-            PersistWindowSnapshot();
-            UnregisterHotkeys();
-        };
+        FormClosing += HandleFormClosingAsync;
         ResizeEnd += (_, _) => PersistWindowSnapshot();
         Move += (_, _) => PersistWindowSnapshot();
         statusTimer.Tick += async (_, _) =>
@@ -92,6 +102,47 @@ public sealed class MainForm : Form
         };
         session.Log.Changed += (_, _) => PushSnapshotFromAnyThread();
         statusTimer.Start();
+    }
+
+    private async void HandleFormClosingAsync(object? sender, FormClosingEventArgs args)
+    {
+        webReady = false;
+        statusTimer.Stop();
+        CancelUiReadyTimeout();
+        PersistWindowSnapshot();
+        UnregisterHotkeys();
+
+        if (closeCleanupComplete)
+            return;
+
+        args.Cancel = true;
+        if (closeCleanupStarted)
+            return;
+        closeCleanupStarted = true;
+
+        using var cleanupTimeout = new CancellationTokenSource(CloseCleanupTimeout);
+        try
+        {
+            await session.ShutdownBridgeAsync(cleanupTimeout.Token);
+        }
+        catch (Exception ex)
+        {
+            session.Log.Warn("App close cleanup did not complete: " + ex.Message);
+        }
+        finally
+        {
+            closeCleanupComplete = true;
+            if (!IsDisposed && IsHandleCreated)
+            {
+                try
+                {
+                    BeginInvoke((MethodInvoker)Close);
+                }
+                catch (InvalidOperationException) when (IsDisposed || Disposing || !IsHandleCreated)
+                {
+                }
+            }
+        }
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -148,12 +199,26 @@ public sealed class MainForm : Form
         core.NavigationStarting += (sender, args) => HandleNavigationStarting(generation, sender, args);
         core.ContentLoading += (sender, args) => HandleContentLoading(generation, sender, args);
         core.DOMContentLoaded += (sender, args) => HandleDomContentLoaded(generation, sender, args);
+        core.FrameNavigationStarting += HandleFrameNavigationStarting;
         core.NewWindowRequested += (_, args) => HandleNewWindowRequested(args);
         core.ProcessFailed += HandleWebViewProcessFailed;
+        core.WebResourceRequested += HandleWebResourceRequested;
+        core.AddWebResourceRequestedFilter(
+            "*",
+            CoreWebView2WebResourceContext.All,
+            CoreWebView2WebResourceRequestSourceKinds.All);
+        core.PermissionRequested += (_, args) =>
+        {
+            args.State = CoreWebView2PermissionState.Deny;
+            args.SavesInProfile = false;
+            args.Handled = true;
+        };
         core.SetVirtualHostNameToFolderMapping(
             WebUiHostName,
             runtime.WebRoot,
             CoreWebView2HostResourceAccessKind.DenyCors);
+        Directory.CreateDirectory(session.Paths.ModulesDirectory);
+        RefreshModuleVirtualHostMappings(core);
         core.Settings.AreDefaultScriptDialogsEnabled = true;
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
@@ -163,6 +228,170 @@ public sealed class MainForm : Form
         DiagnosticsState.WriteLine("webview2", $"navigation_requested generation={generation} uri={WebUiStartUri}");
         core.Navigate(WebUiStartUri);
         StartUiReadyTimeout();
+    }
+
+    private void HandleFrameNavigationStarting(
+        object? sender,
+        CoreWebView2NavigationStartingEventArgs args)
+    {
+        if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri))
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        var allowedModuleFrame = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            uri.IsDefaultPort &&
+            string.IsNullOrEmpty(uri.UserInfo) &&
+            moduleVirtualHosts.Contains(uri.Host);
+        var harmlessEmptyFrame = string.Equals(uri.Scheme, "about", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase);
+        args.Cancel = !allowedModuleFrame && !harmlessEmptyFrame;
+    }
+
+    private void HandleWebResourceRequested(
+        object? sender,
+        CoreWebView2WebResourceRequestedEventArgs args)
+    {
+        if (sender is not CoreWebView2 core)
+            return;
+
+        if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri))
+        {
+            BlockWebResource(core, args);
+            return;
+        }
+
+        var allowedHttpsOrigin = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            uri.IsDefaultPort &&
+            string.IsNullOrEmpty(uri.UserInfo);
+        if (allowedHttpsOrigin && string.Equals(uri.Host, WebUiHostName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (allowedHttpsOrigin && moduleVirtualHostModules.TryGetValue(uri.Host, out var module))
+        {
+            if (args.ResourceContext != CoreWebView2WebResourceContext.Document)
+                return;
+
+            var expectedPath = "/" + module.Entry;
+            if (!string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal) ||
+                !TryReadValidatedModuleEntry(module, out var entryBytes))
+            {
+                BlockWebResource(core, args);
+                return;
+            }
+
+            args.Response = core.Environment.CreateWebResourceResponse(
+                new MemoryStream(entryBytes, writable: false),
+                200,
+                "OK",
+                ModuleDocumentHeaders);
+            return;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, "ws", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        BlockWebResource(core, args);
+    }
+
+    private static void BlockWebResource(
+        CoreWebView2 core,
+        CoreWebView2WebResourceRequestedEventArgs args)
+    {
+        args.Response = core.Environment.CreateWebResourceResponse(
+            Stream.Null,
+            403,
+            "Blocked",
+            "Content-Type: text/plain\r\nCache-Control: no-store");
+    }
+
+    private static bool TryReadValidatedModuleEntry(
+        ModuleDescriptor module,
+        out byte[] bytes)
+    {
+        bytes = [];
+        try
+        {
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(module.ModuleDirectory));
+            var entryPath = Path.GetFullPath(module.EntryPath);
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            if (!entryPath.StartsWith(root + Path.DirectorySeparatorChar, comparison))
+                return false;
+
+            FileSystemInfo current = new DirectoryInfo(root);
+            current.Refresh();
+            if (!current.Exists || IsLinkedFileSystemEntry(current))
+                return false;
+
+            var segments = module.Entry.Split('/');
+            var currentPath = root;
+            for (var index = 0; index < segments.Length; ++index)
+            {
+                currentPath = Path.Combine(currentPath, segments[index]);
+                current = index == segments.Length - 1
+                    ? new FileInfo(currentPath)
+                    : new DirectoryInfo(currentPath);
+                current.Refresh();
+                if (!current.Exists || IsLinkedFileSystemEntry(current))
+                    return false;
+            }
+
+            var info = (FileInfo)current;
+            if (info.Length > ModuleSdkV1.MaxEntryBytes)
+                return false;
+            bytes = File.ReadAllBytes(entryPath);
+            if (bytes.LongLength > ModuleSdkV1.MaxEntryBytes)
+            {
+                bytes = [];
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   System.Security.SecurityException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsLinkedFileSystemEntry(FileSystemInfo info) =>
+        info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0;
+
+    private void RefreshModuleVirtualHostMappings(CoreWebView2 core)
+    {
+        foreach (var hostName in moduleVirtualHosts)
+        {
+            try
+            {
+                core.ClearVirtualHostNameToFolderMapping(hostName);
+            }
+            catch (ArgumentException)
+            {
+                // A recovering WebView may already have discarded the old mapping.
+            }
+        }
+        moduleVirtualHosts.Clear();
+        moduleVirtualHostModules.Clear();
+
+        foreach (var module in session.Modules.Modules)
+        {
+            var hostName = ModuleSdkV1.VirtualHostName(module.Id);
+            core.SetVirtualHostNameToFolderMapping(
+                hostName,
+                module.ModuleDirectory,
+                CoreWebView2HostResourceAccessKind.DenyCors);
+            moduleVirtualHosts.Add(hostName);
+            moduleVirtualHostModules[hostName] = module;
+        }
     }
 
     private void VerifyPackagedWebAssets(string webRoot)
@@ -201,7 +430,7 @@ public sealed class MainForm : Form
             if (!args.IsSuccess)
             {
                 await RecoverWebViewAsync(
-                    "The Meccha Camouflage interface could not load.",
+                    "The Meccha Mod Menu interface could not load.",
                     new InvalidOperationException($"MC-WV-203 WebView2 navigation failed: {args.WebErrorStatus}"));
                 return;
             }
@@ -251,9 +480,9 @@ public sealed class MainForm : Form
             DiagnosticsState.SetLastCode("MC-WV-101", "Evergreen WebView2 Runtime is not installed");
             var install = MessageBox.Show(
                 this,
-                "Microsoft Edge WebView2 Runtime is required to start Meccha Camouflage.\n\n" +
+                "Microsoft Edge WebView2 Runtime is required to start Meccha Mod Menu.\n\n" +
                 "Install it now? This small Microsoft bootstrapper needs an internet connection.",
-                "Meccha Camouflage",
+                "Meccha Mod Menu",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Information);
             if (install != DialogResult.Yes)
@@ -414,7 +643,7 @@ public sealed class MainForm : Form
                 return;
             uiReadyTimeoutCancellation = null;
             await RecoverWebViewAsync(
-                "The Meccha Camouflage interface did not finish initializing.",
+                "The Meccha Mod Menu interface did not finish initializing.",
                 new TimeoutException("MC-WV-204 Timed out waiting for the web interface uiReady signal."));
         }
         catch (OperationCanceledException)
@@ -465,7 +694,7 @@ public sealed class MainForm : Form
 
     private async Task HandleWebViewInitializationFailureAsync(Exception exception)
     {
-        await RecoverWebViewAsync("Meccha Camouflage could not start its WebView2 interface.", exception);
+        await RecoverWebViewAsync("Meccha Mod Menu could not start its WebView2 interface.", exception);
     }
 
     private async Task RecoverWebViewAsync(string userMessage, Exception exception)
@@ -629,12 +858,20 @@ public sealed class MainForm : Form
     private static void HandleNewWindowRequested(CoreWebView2NewWindowRequestedEventArgs args)
     {
         args.Handled = true;
+        if (!args.IsUserInitiated ||
+            args.OriginalSourceFrameInfo is null ||
+            !IsInternalUri(args.OriginalSourceFrameInfo.Source))
+        {
+            return;
+        }
         OpenExternal(args.Uri);
     }
 
     private static bool IsInternalUri(string uri) =>
         Uri.TryCreate(uri, UriKind.Absolute, out var parsed) &&
         parsed.Scheme == Uri.UriSchemeHttps &&
+        parsed.IsDefaultPort &&
+        string.IsNullOrEmpty(parsed.UserInfo) &&
         string.Equals(parsed.Host, WebUiHostName, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsStartupUri(string uri) =>
@@ -718,7 +955,7 @@ public sealed class MainForm : Form
         if (webReady)
             return;
         await RecoverWebViewAsync(
-            "The Meccha Camouflage interface failed while starting.",
+            "The Meccha Mod Menu interface failed while starting.",
             new InvalidOperationException("MC-WV-205 " + detail));
     }
 
@@ -744,6 +981,14 @@ public sealed class MainForm : Form
             case "copyLogs":
                 Clipboard.SetText(session.ClipboardLogText());
                 return new { success = true };
+            case "openModules":
+                session.OpenModulesDirectory();
+                return new { success = true };
+            case "reloadModules":
+                var reloadResult = session.ReloadModules();
+                if (webView?.CoreWebView2 is { } core)
+                    RefreshModuleVirtualHostMappings(core);
+                return ApplyResult(reloadResult);
             case "setEditing":
                 settingsEditing = command.Payload.GetProperty("editing").GetBoolean();
                 if (!settingsEditing)
@@ -769,6 +1014,14 @@ public sealed class MainForm : Form
                 return ApplyResult(await RunPaintCommandAsync(previewOnly: false, unpreviewOnly: true));
             case "stop":
                 return ApplyResult(await session.StopPaintAsync());
+            case "savePaintPreset":
+                return ApplyResult(session.SavePaintPreset(RequiredString(command.Payload, "name")));
+            case "applyPaintPreset":
+                return ApplyResult(session.ApplyPaintPreset(RequiredString(command.Payload, "name")));
+            case "deletePaintPreset":
+                return ApplyResult(session.DeletePaintPreset(RequiredString(command.Payload, "name")));
+            case "undoPaintSettings":
+                return ApplyResult(session.UndoPaintSettings());
             default:
                 return new { success = false, message = "Unknown command: " + command.Command };
         }
@@ -797,6 +1050,17 @@ public sealed class MainForm : Form
             statusTimer.Interval = session.PaintRunning ? 500 : previousInterval;
             await PushSnapshotAsync();
         }
+    }
+
+    private static string RequiredString(JsonElement payload, string name)
+    {
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty(name, out var value) ||
+            value.ValueKind != JsonValueKind.String)
+        {
+            throw new ArgumentException($"{name} must be a string.");
+        }
+        return value.GetString() ?? "";
     }
 
     private async Task RefreshSnapshotsUntilCancelledAsync(CancellationToken cancellationToken)

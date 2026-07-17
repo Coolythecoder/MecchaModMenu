@@ -165,6 +165,32 @@ a:hover {
   gap: 16px;
 }
 
+.module-column {
+  gap: 10px;
+}
+
+.module-nav {
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: var(--surface-low);
+}
+
+.module-nav button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-panel[hidden],
+.settings-action-bar[hidden],
+.module-runtime-message[hidden] {
+  display: none;
+}
+
+.module-panel.active {
+  display: flex;
+}
+
 .panel,
 .log-panel {
   border: 1px solid var(--hairline);
@@ -206,6 +232,144 @@ a:hover {
   font: 700 12px/17px var(--font-ui);
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.panel-title .status-token {
+  margin-left: auto;
+  letter-spacing: 0;
+}
+
+.module-intro {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--hairline);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.module-intro p {
+  margin: 0;
+  color: var(--muted);
+  font: 13px/18px var(--font-mono);
+  user-select: text;
+}
+
+.module-intro .module-runtime-message {
+  margin-top: 6px;
+  color: var(--text);
+}
+
+.module-intro-card {
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  background: var(--surface-low);
+}
+
+.studio-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.studio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.coverage-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: 10px;
+  background: var(--surface-low);
+}
+
+.coverage-card span {
+  color: var(--muted);
+  font: 12px/16px var(--font-mono);
+}
+
+.coverage-card strong {
+  overflow: hidden;
+  color: var(--text);
+  font: 700 17px/22px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-result-card {
+  grid-column: 1 / -1;
+}
+
+.module-manager-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: 12px;
+  background: var(--surface-low);
+}
+
+.module-manager-card > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.module-manager-card span,
+.module-manager-card small {
+  color: var(--muted);
+  font: 12px/16px var(--font-mono);
+}
+
+.module-manager-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.external-module-panel iframe {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: var(--surface);
+}
+
+.external-module-description {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--hairline);
+  padding: 8px 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font: 12px/16px var(--font-mono);
+}
+
+.external-module-version {
+  margin-left: auto;
+  color: var(--muted);
+  font: 700 11px/13px var(--font-mono);
 }
 
 .panel-content {
@@ -435,6 +599,27 @@ body.editing #fill-section.disabled .field > span {
   gap: 8px;
   border-top: 1px solid var(--hairline);
   padding: 10px 12px;
+}
+
+.segmented.module-nav {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.segmented.module-nav button {
+  min-width: 112px;
+  flex: 1 0 auto;
+}
+
+.settings-action-bar {
+  flex: 0 0 auto;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+}
+
+.mod-action-bar {
+  justify-content: flex-end;
 }
 
 .log-panel {

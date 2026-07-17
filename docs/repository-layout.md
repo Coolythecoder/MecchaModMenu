@@ -25,7 +25,9 @@ src/
 ```
 
 `src/csharp/` contains the supported .NET projects. The supported controller UI
-is `MecchaCamouflage.WebHost`.
+is `MecchaCamouflage.WebHost`. The third-party Paint Studio module manifest,
+catalog, permission boundary, and example package are documented in
+[`docs/module-sdk/`](module-sdk/README.md).
 
 `src/native/` contains native code used by the injected bridge and injector.
 The bridge source is intentionally split conservatively because it depends on
@@ -124,6 +126,7 @@ Important paths:
 %LOCALAPPDATA%\MecchaCamouflage\versions\<version>\
 %LOCALAPPDATA%\MecchaCamouflage\bridge-instances\
 %LOCALAPPDATA%\MecchaCamouflage\bridge-state\
+%LOCALAPPDATA%\MecchaCamouflage\modules\
 ```
 
 Versioned app logs, diagnostics, and extracted package assets live under
@@ -133,6 +136,10 @@ single-file extraction directory or app version.
 
 Bridge live state, such as progress snapshots tied to an injected bridge in the
 game process, lives under `bridge-state/`.
+
+User-installed Paint Studio modules live under `modules/<module-id>/`. Each
+package is discovered from its `module.json` manifest and is served to a
+sandboxed WebView frame; it is not loaded as native code.
 
 Each direct bridge injection stages a uniquely named DLL and its profiles under
 `bridge-instances/<instance-guid>/`. Older bridge instances may remain loaded
