@@ -5,6 +5,8 @@ namespace MecchaCamouflage.Core;
 
 public sealed class SettingsStore
 {
+    private const int DetailResolution500DefaultLayoutVersion = 39;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -49,10 +51,9 @@ public sealed class SettingsStore
 
         var paint = settings.Paint;
         paint.Brush1SizeTexels = ReadDouble(root, "brush_1_size_texels", paint.Brush1SizeTexels);
-        paint.DetailResolutionPercent = ReadInt(
-            root,
-            "detail_resolution_percent",
-            paint.DetailResolutionPercent);
+        paint.DetailResolutionPercent = settings.LayoutVersion < DetailResolution500DefaultLayoutVersion
+            ? 500
+            : ReadInt(root, "detail_resolution_percent", paint.DetailResolutionPercent);
         if (root.TryGetPropertyValue("brush_2_size_texels", out var brush2Value) && brush2Value is not null)
         {
             paint.Brush2SizeTexels = brush2Value.GetValue<double>();

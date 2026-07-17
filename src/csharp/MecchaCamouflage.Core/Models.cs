@@ -63,7 +63,7 @@ public sealed class PaintSettings
 
 public sealed class AppSettings
 {
-    public const int CurrentLayoutVersion = 38;
+    public const int CurrentLayoutVersion = 39;
     public int LayoutVersion { get; set; } = CurrentLayoutVersion;
     public double PanelX { get; set; } = -1.0;
     public double PanelY { get; set; } = -1.0;

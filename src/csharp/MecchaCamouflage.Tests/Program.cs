@@ -11,6 +11,8 @@ var tests = new List<(string Name, Action Run)>
 {
     ("paint defaults expose coarse and detail brushes", PaintDefaultsExposeCoarseAndDetailBrushes),
     ("paint defaults use maximum detail resolution", PaintDefaultsUseMaximumDetailResolution),
+    ("legacy detail resolution migrates to maximum", LegacyDetailResolutionMigratesToMaximum),
+    ("current detail resolution preserves chosen value", CurrentDetailResolutionPreservesChosenValue),
     ("legacy default brush migrates to two-pass defaults", LegacyDefaultBrushMigratesToTwoPassDefaults),
     ("legacy brush migration handles missing layout version", LegacyBrushMigrationHandlesMissingLayoutVersion),
     ("legacy explicit brush migrates to detail brush", LegacyExplicitBrushMigratesToDetailBrush),
@@ -140,9 +142,9 @@ static void PaintDefaultsUseMaximumDetailResolution()
     var defaults = new AppSettings();
     var paths = new AppPaths("detail-resolution-default-test");
     Directory.CreateDirectory(paths.ConfigDirectory);
-    File.WriteAllText(paths.ConfigPath, """
+    File.WriteAllText(paths.ConfigPath, $$"""
     {
-      "layout_version": 38
+      "layout_version": {{AppSettings.CurrentLayoutVersion}}
     }
     """);
 
@@ -152,6 +154,52 @@ static void PaintDefaultsUseMaximumDetailResolution()
         "new paint settings should default to the maximum detail resolution");
     Assert(loaded.Paint.DetailResolutionPercent == 500,
         "a config without detail resolution should inherit the 500 percent default");
+}
+
+static void LegacyDetailResolutionMigratesToMaximum()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("detail-resolution-layout-migration-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    File.WriteAllText(paths.ConfigPath, """
+    {
+      "layout_version": 38,
+      "detail_resolution_percent": 100
+    }
+    """);
+
+    var store = new SettingsStore(paths);
+    var loaded = store.Load();
+
+    Assert(loaded.Paint.DetailResolutionPercent == 500,
+        "a version 38 config should migrate its saved detail resolution to 500 percent");
+    Assert(loaded.LayoutVersion == AppSettings.CurrentLayoutVersion,
+        "the detail resolution migration should advance the layout version");
+
+    loaded.Paint.DetailResolutionPercent = 175;
+    store.Save(loaded);
+    var reloaded = store.Load();
+
+    Assert(reloaded.Paint.DetailResolutionPercent == 175,
+        "a post-migration detail resolution choice should survive save and reload");
+}
+
+static void CurrentDetailResolutionPreservesChosenValue()
+{
+    using var temp = new TempHome();
+    var paths = new AppPaths("detail-resolution-current-layout-test");
+    Directory.CreateDirectory(paths.ConfigDirectory);
+    File.WriteAllText(paths.ConfigPath, $$"""
+    {
+      "layout_version": {{AppSettings.CurrentLayoutVersion}},
+      "detail_resolution_percent": 175
+    }
+    """);
+
+    var loaded = new SettingsStore(paths).Load();
+
+    Assert(loaded.Paint.DetailResolutionPercent == 175,
+        "a current-layout config should preserve the user's chosen detail resolution");
 }
 
 static void LegacyDefaultBrushMigratesToTwoPassDefaults()
