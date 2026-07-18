@@ -125,8 +125,9 @@ Each command uses one short-lived TCP connection. The first line is always a
 
 The bridge validates all three and replies with its PID, instance GUID, build
 hash, and protocol version. Only after a successful reply does the client send
-the existing command line on that same connection. `ping`, paint, preview,
-cancel, and shutdown payloads are unchanged after HELLO.
+the command line on that same connection. `ping`, paint, preview, cancel,
+shutdown, and the fixed module process-memory payloads are accepted only after
+HELLO.
 
 Auto Paint and Paint Studio send `detail_resolution_percent` as bounded paint
 tuning. Native code validates it at 50–500 with a default of 500. The 100%
@@ -135,13 +136,67 @@ scaling baseline remains a channel threshold of 16, a half-brush radius, and a
 that baseline radius, and up to 2,560 correction strokes. The 100,000-stroke
 total-plan safety cap remains fixed. Third-party Web
 modules never connect to this TCP bridge directly; their SDK permissions are
-relayed through the controller's existing allowlisted paint commands.
+relayed through the controller's fixed allowlists for paint and process-memory
+commands.
 
 The client accepts a reply only when PID, GUID, token-associated endpoint, and
 expected build hash match its `BridgeInstance`. It does not read `.port`
 sidecars or probe another bridge for compatibility. The `.progress.path` and
 `.progress.json` sidecars remain solely for paint progress; research event
 watch artifacts remain research-only.
+
+### Relayed module process-memory commands
+
+Third-party Web modules still never open the bridge socket or receive its
+endpoint token. After validating the iframe source, exact module origin,
+current reload generation, and declared permission, the controller may relay
+only these raw-memory operations:
+
+- `process.memory.allocate`
+- `process.memory.read`
+- `process.memory.write`
+- `process.memory.protect`
+- `process.memory.inject`
+- `process.memory.free`
+
+The native command payload contains the controller-derived module owner and no
+module-selected PID. It is accepted only by the active bridge that completed
+HELLO for the exact game process selected by the controller. A disconnected or
+replaced game instance fails the request instead of falling back to another
+process.
+
+`process.memory.read` requires `process.memory.read`. The other five commands
+require `process.memory.write`. Allocate and inject create native allocations
+owned by that module; free succeeds only for one of the caller's owned
+allocation bases. Raw read, write, and protect ranges are validated as complete
+ranges. The bridge rejects malformed, overflowing, inaccessible, partial, and
+oversized operations rather than clamping sizes or reporting partial work as
+success.
+
+Module reload does not discard an allocation: its owner remains the canonical
+module ID so a reloaded frame can free a retained address. Authenticated bridge
+shutdown releases all still-tracked module allocations before that bridge
+instance stops accepting commands. The game process also releases them on exit.
+
+Allocate and inject accept `no-access`, `read-only`, `read-write`, `execute`,
+`execute-read`, and `execute-read-write`; both default to `read-write`.
+`write-copy` and `execute-write-copy` are rejected for these private committed
+allocations instead of being substituted or downgraded. Protect accepts all
+six of those modes plus `write-copy` and `execute-write-copy`, although Windows
+can still reject a protection that is incompatible with the selected range. A
+protect result may describe a range's former state as `mixed`; that value is
+response metadata, not an accepted input. A transfer is limited to 3 MiB, one
+allocation to 64 MiB, and all tracked module allocations combined to 256 MiB.
+
+The HELLO capability metadata publishes the same split without ambiguity:
+`module_process_memory_private_protections` lists the six allocate/inject modes,
+while `module_process_memory_protect_protections` lists all eight protect modes.
+The former single `module_process_memory_protections` field is not emitted.
+
+These operations allocate, copy, inspect, protect, and release bytes inside the
+authenticated game process. They do not call an address, create a thread, or
+execute injected bytes. An executable page-protection request changes memory
+protection only.
 
 Shutdown closes command admission and the listener before cancellation. An
 already accepted handler must recheck admission before dispatch, and paint is

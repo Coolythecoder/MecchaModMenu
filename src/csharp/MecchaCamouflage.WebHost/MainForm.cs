@@ -1073,6 +1073,8 @@ public sealed class MainForm : Form
                 return new { success = true };
             case "moduleData":
                 return await HandleModuleDataAsync(command.Payload);
+            case "moduleProcessMemory":
+                return await HandleModuleProcessMemoryAsync(command.Payload);
             case "reloadModules":
             {
                 HostCommandResult reloadResult;
@@ -1214,6 +1216,81 @@ public sealed class MainForm : Form
         if (!hostedModule.Permissions.Contains(requiredPermission, StringComparer.Ordinal))
             return new ModuleDataCommandResult(false, "permission_denied", "The module does not have permission for this command.", null);
         return await session.ExecuteModuleDataAsync(moduleId, generation, operation, payload);
+    }
+
+    private async Task<ModuleProcessMemoryCommandResult> HandleModuleProcessMemoryAsync(
+        JsonElement request)
+    {
+        if (moduleNetworkTransition)
+        {
+            return new ModuleProcessMemoryCommandResult(
+                false,
+                "stale_generation",
+                "Module reload is in progress.",
+                null);
+        }
+        if (request.ValueKind != JsonValueKind.Object ||
+            !request.TryGetProperty("moduleId", out var moduleIdValue) || moduleIdValue.ValueKind != JsonValueKind.String ||
+            !request.TryGetProperty("generation", out var generationValue) || generationValue.ValueKind != JsonValueKind.String ||
+            !request.TryGetProperty("operation", out var operationValue) || operationValue.ValueKind != JsonValueKind.String ||
+            !request.TryGetProperty("payload", out var payload))
+        {
+            return new ModuleProcessMemoryCommandResult(
+                false,
+                "invalid_payload",
+                "The module process-memory request is invalid.",
+                null);
+        }
+        var allowedFields = new HashSet<string>(
+            ["moduleId", "generation", "operation", "payload"],
+            StringComparer.Ordinal);
+        var foundFields = new HashSet<string>(StringComparer.Ordinal);
+        if (request.EnumerateObject().Any(property =>
+                !allowedFields.Contains(property.Name) || !foundFields.Add(property.Name)) ||
+            foundFields.Count != allowedFields.Count)
+        {
+            return new ModuleProcessMemoryCommandResult(
+                false,
+                "invalid_payload",
+                "The module process-memory request is invalid.",
+                null);
+        }
+
+        var moduleId = moduleIdValue.GetString() ?? "";
+        var generation = generationValue.GetString() ?? "";
+        var operation = operationValue.GetString() ?? "";
+        var requiredPermission = ModuleSdkV1.RequiredPermissionForProcessMemoryCommand(operation);
+        var hostedModule = moduleVirtualHostModules.Values.FirstOrDefault(module =>
+            ModuleSdkV1.IdComparer.Equals(module.Id, moduleId));
+        if (hostedModule is null)
+        {
+            return new ModuleProcessMemoryCommandResult(
+                false,
+                "module_unavailable",
+                "The module is not currently hosted.",
+                null);
+        }
+        if (requiredPermission is null)
+        {
+            return new ModuleProcessMemoryCommandResult(
+                false,
+                "unsupported_command",
+                "Unsupported process-memory command.",
+                null);
+        }
+        if (!hostedModule.Permissions.Contains(requiredPermission, StringComparer.Ordinal))
+        {
+            return new ModuleProcessMemoryCommandResult(
+                false,
+                "permission_denied",
+                "The module does not have permission for this command.",
+                null);
+        }
+        return await session.ExecuteModuleProcessMemoryAsync(
+            hostedModule.Id,
+            generation,
+            operation,
+            payload);
     }
 
     private async Task RefreshSnapshotsUntilCancelledAsync(CancellationToken cancellationToken)

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Process Memory Self-Test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", sans-serif;
+      background: #101419;
+      color: #e8eef5;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    p {
+      color: #aeb9c6;
+      line-height: 1.5;
+    }
+
+    button {
+      border: 1px solid #4c647c;
+      border-radius: 6px;
+      padding: 10px 16px;
+      background: #1c2a37;
+      color: #f4f8fc;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+
+    #result {
+      margin-top: 18px;
+      border: 1px solid #33404d;
+      border-radius: 6px;
+      min-height: 120px;
+      padding: 14px;
+      background: #0b0e12;
+      color: #c9d4df;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    #result.pass {
+      border-color: #29c46d;
+      color: #57e895;
+    }
+
+    #result.fail {
+      border-color: #e25757;
+      color: #ff8585;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Process Memory Self-Test</h1>
+    <p>
+      This test touches only a native allocation owned by this module. It
+      injects a sentinel, verifies every byte, changes protection, restores it,
+      and frees the allocation. It never executes the injected bytes.
+    </p>
+    <button id="run-test" type="button">Run safe self-test</button>
+    <pre id="result" role="status" aria-live="polite">Ready. Attach the game and click the button.</pre>
+  </main>
+
+  <script>
+    const hostOrigin = "https://meccha.localhost";
+    const pending = new Map();
+    const runButton = document.getElementById("run-test");
+    const result = document.getElementById("result");
+
+    function sdkRequest(command, payload = {}) {
+      return new Promise((resolve, reject) => {
+        const requestId = crypto.randomUUID();
+        const timeout = setTimeout(() => {
+          pending.delete(requestId);
+          const error = new Error(`SDK request timed out: ${command}`);
+          error.code = "timeout";
+          reject(error);
+        }, 20_000);
+
+        pending.set(requestId, { resolve, reject, timeout });
+        window.parent.postMessage({
+          source: "meccha-module",
+          apiVersion: 1,
+          requestId,
+          command,
+          payload
+        }, hostOrigin);
+      });
+    }
+
+    function normalizeAddress(address) {
+      if (typeof address !== "string" || !/^0x[0-9a-f]{1,16}$/i.test(address)) {
+        throw new TypeError("address must be a 0x-prefixed hexadecimal string");
+      }
+      const parsed = BigInt(address);
+      if (parsed === 0n) throw new RangeError("address must be nonzero");
+      return `0x${parsed.toString(16)}`;
+    }
+
+    function bytesToHex(value) {
+      if (typeof value === "string") {
+        if (value.length === 0 || value.length % 2 !== 0 ||
+            value.length / 2 > 3 * 1024 * 1024 || !/^[0-9a-f]+$/i.test(value)) {
+          throw new TypeError("hexadecimal bytes must contain complete byte pairs");
+        }
+        return value.toLowerCase();
+      }
+      const bytes = value instanceof Uint8Array
+        ? value
+        : value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : ArrayBuffer.isView(value)
+            ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+            : null;
+      if (!bytes) {
+        throw new TypeError("bytes must be hexadecimal, a Uint8Array, or ArrayBuffer");
+      }
+      if (bytes.length === 0 || bytes.length > 3 * 1024 * 1024) {
+        throw new RangeError("bytes must contain between 1 byte and 3 MiB");
+      }
+      const parts = [];
+      for (let offset = 0; offset < bytes.length; offset += 16_384) {
+        let part = "";
+        const end = Math.min(offset + 16_384, bytes.length);
+        for (let index = offset; index < end; index += 1) {
+          part += bytes[index].toString(16).padStart(2, "0");
+        }
+        parts.push(part);
+      }
+      return parts.join("");
+    }
+
+    function hexToBytes(value) {
+      if (typeof value !== "string" || value.length === 0 ||
+          value.length % 2 !== 0 || value.length / 2 > 3 * 1024 * 1024 ||
+          !/^[0-9a-f]+$/i.test(value)) {
+        throw new TypeError("host returned invalid hexadecimal bytes");
+      }
+      const bytes = new Uint8Array(value.length / 2);
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+      }
+      return bytes;
+    }
+
+    window.addEventListener("message", event => {
+      if (event.source !== window.parent || event.origin !== hostOrigin) return;
+      const message = event.data;
+      if (message?.source !== "meccha-host" || message?.apiVersion !== 1 ||
+          message?.type !== "response") return;
+
+      const request = pending.get(message.requestId);
+      if (!request) return;
+      clearTimeout(request.timeout);
+      pending.delete(message.requestId);
+      if (message.ok) {
+        request.resolve(message.data);
+      } else {
+        const error = new Error(message.error?.message || "SDK request failed");
+        error.code = message.error?.code || "sdk_error";
+        request.reject(error);
+      }
+    });
+
+    const sdk = Object.freeze({
+      processMemory: Object.freeze({
+        allocate: (size, protection = "read-write") =>
+          sdkRequest("process.memory.allocate", { size, protection }),
+        read: async (address, size) => {
+          const response = await sdkRequest("process.memory.read", {
+            address: normalizeAddress(address), size
+          });
+          return Object.freeze({
+            ...response,
+            bytes: hexToBytes(response.dataHex)
+          });
+        },
+        write: (address, bytes) => sdkRequest("process.memory.write", {
+          address: normalizeAddress(address),
+          dataHex: bytesToHex(bytes)
+        }),
+        protect: (address, size, protection) =>
+          sdkRequest("process.memory.protect", {
+            address: normalizeAddress(address), size, protection
+          }),
+        inject: (bytes, protection = "read-write") =>
+          sdkRequest("process.memory.inject", {
+            dataHex: bytesToHex(bytes), protection
+          }),
+        free: address => sdkRequest("process.memory.free", {
+          address: normalizeAddress(address)
+        })
+      })
+    });
+
+    function sameBytes(left, right) {
+      return left.length === right.length &&
+        left.every((value, index) => value === right[index]);
+    }
+
+    function show(kind, text) {
+      result.className = kind;
+      result.textContent = text;
+    }
+
+    async function runSelfTest() {
+      const sentinel = new Uint8Array([
+        0x4d, 0x45, 0x43, 0x43, 0x48, 0x41, 0x2d, 0x4d,
+        0x45, 0x4d, 0x4f, 0x52, 0x59, 0x2d, 0x56, 0x31
+      ]);
+      let allocation = null;
+      const steps = [];
+      runButton.disabled = true;
+      show("", "Running…");
+
+      try {
+        allocation = await sdk.processMemory.inject(sentinel, "read-write");
+        const address = normalizeAddress(allocation.address);
+        const allocationSize = Number(allocation.size);
+        if (!Number.isSafeInteger(allocationSize) || allocationSize < sentinel.length) {
+          throw new Error("Host returned an invalid allocation size");
+        }
+        steps.push(`inject ${sentinel.length} bytes at ${address}`);
+
+        const observed = await sdk.processMemory.read(address, sentinel.length);
+        if (!sameBytes(observed.bytes, sentinel)) {
+          throw new Error("Readback did not match the injected sentinel");
+        }
+        steps.push("readback matched every sentinel byte");
+
+        await sdk.processMemory.protect(address, allocationSize, "read-only");
+        steps.push("protection changed to read-only");
+
+        await sdk.processMemory.protect(address, allocationSize, "read-write");
+        steps.push("protection restored to read-write");
+
+        await sdk.processMemory.free(address);
+        allocation = null;
+        steps.push("owned allocation freed");
+
+        show("pass", `PASS\n${steps.map(step => `• ${step}`).join("\n")}`);
+      } catch (error) {
+        const code = error?.code ? `${error.code}: ` : "";
+        show("fail", `FAIL\n${steps.map(step => `• ${step}`).join("\n")}${steps.length ? "\n" : ""}${code}${error?.message || error}`);
+      } finally {
+        if (allocation?.address) {
+          try {
+            await sdk.processMemory.free(allocation.address);
+          } catch {
+            // Keep the original failure visible. The host logs the cleanup failure.
+          }
+        }
+        runButton.disabled = false;
+      }
+    }
+
+    runButton.addEventListener("click", runSelfTest);
+  </script>
+</body>
+</html>

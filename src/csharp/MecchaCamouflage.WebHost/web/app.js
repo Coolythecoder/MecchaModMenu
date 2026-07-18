@@ -49,10 +49,22 @@ const externalModules = new Map();
 const externalModuleActions = new Map();
 const externalModuleStops = new Map();
 const externalModuleDataCounts = new Map();
+const externalModuleProcessMemoryPending = new Set();
 const ExternalModuleApiVersion = 1;
 const ExternalModuleHostPattern = /^m-[0-9a-f]{32}\.localhost$/;
 const ModuleDataKeyPattern = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const ModuleDataValueMaxBytes = 256 * 1024;
+const ProcessMemoryAddressPattern = /^0x[0-9a-fA-F]{1,16}$/;
+const ProcessMemoryTransferMaxBytes = 3 * 1024 * 1024;
+const ProcessMemoryAllocationMaxBytes = 64 * 1024 * 1024;
+const ProcessMemoryProtectionChangeModes = new Set([
+  "no-access", "read-only", "read-write", "write-copy",
+  "execute", "execute-read", "execute-read-write", "execute-write-copy"
+]);
+const ProcessMemoryPrivateAllocationModes = new Set([
+  "no-access", "read-only", "read-write",
+  "execute", "execute-read", "execute-read-write"
+]);
 const ExternalModuleCommands = new Map([
   ["paint.start", "paint"],
   ["paint.preview", "preview"],
@@ -72,11 +84,21 @@ const ExternalModulePermissions = new Map([
   ["memory.get", "memory.read"],
   ["memory.list", "memory.read"],
   ["memory.set", "memory.write"],
-  ["memory.delete", "memory.write"]
+  ["memory.delete", "memory.write"],
+  ["process.memory.read", "process.memory.read"],
+  ["process.memory.allocate", "process.memory.write"],
+  ["process.memory.write", "process.memory.write"],
+  ["process.memory.protect", "process.memory.write"],
+  ["process.memory.inject", "process.memory.write"],
+  ["process.memory.free", "process.memory.write"]
 ]);
 const ModuleDataCommands = new Set([
   "storage.get", "storage.list", "storage.set", "storage.delete",
   "memory.get", "memory.list", "memory.set", "memory.delete"
+]);
+const ProcessMemoryCommands = new Set([
+  "process.memory.allocate", "process.memory.read", "process.memory.write",
+  "process.memory.protect", "process.memory.inject", "process.memory.free"
 ]);
 
 window.chrome.webview.addEventListener("message", event => {
@@ -455,6 +477,12 @@ function reconcileExternalModules(value) {
 }
 
 window.mecchaUnloadExternalModulesForReload = () => {
+  // Allocate/inject can succeed natively only once and return the sole address
+  // needed to free the owned allocation. Keep the current frame and generation
+  // intact until every process-memory response has been delivered.
+  if (externalModuleProcessMemoryPending.size !== 0) {
+    return false;
+  }
   externalModulesSuspended = true;
   externalModuleGeneration = "";
   for (const module of externalModules.values()) {
@@ -686,6 +714,126 @@ function normalizeModuleDataPayload(command, value) {
   }
 }
 
+function normalizeProcessMemoryPayload(command, value) {
+  const payload = value === undefined ? {} : value;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, code: "invalid_payload", message: "payload must be an object." };
+  }
+
+  const hasExactFields = (required, optional = []) => {
+    const keys = Object.keys(payload);
+    const allowed = new Set([...required, ...optional]);
+    return required.every(key => Object.hasOwn(payload, key)) &&
+      keys.every(key => allowed.has(key)) &&
+      keys.length >= required.length && keys.length <= allowed.size;
+  };
+  const normalizeAddress = value => {
+    if (typeof value !== "string" || !ProcessMemoryAddressPattern.test(value)) {
+      return null;
+    }
+    try {
+      const parsed = BigInt(value);
+      return parsed > 0n ? `0x${parsed.toString(16)}` : null;
+    } catch {
+      return null;
+    }
+  };
+  const normalizeSize = (value, maximum) =>
+    Number.isSafeInteger(value) && value > 0 && value <= maximum ? value : null;
+  const normalizeDataHex = value => {
+    if (typeof value !== "string" || value.length === 0 || (value.length & 1) !== 0 ||
+        value.length / 2 > ProcessMemoryTransferMaxBytes || !/^[0-9a-fA-F]+$/.test(value)) {
+      return null;
+    }
+    return value.toLowerCase();
+  };
+  const normalizeProtection = (value, allowed, fallback = null) => {
+    if (value === undefined && fallback !== null) {
+      return fallback;
+    }
+    return typeof value === "string" && allowed.has(value) ? value : null;
+  };
+
+  if (command === "process.memory.allocate") {
+    if (!hasExactFields(["size"], ["protection"])) {
+      return { ok: false, code: "invalid_payload", message: "allocate accepts size and optional protection." };
+    }
+    const size = normalizeSize(payload.size, ProcessMemoryAllocationMaxBytes);
+    const protection = normalizeProtection(
+      payload.protection,
+      ProcessMemoryPrivateAllocationModes,
+      "read-write"
+    );
+    return size !== null && protection !== null
+      ? { ok: true, payload: { size, protection } }
+      : { ok: false, code: "invalid_payload", message: "size or protection is invalid." };
+  }
+
+  if (command === "process.memory.read") {
+    if (!hasExactFields(["address", "size"])) {
+      return { ok: false, code: "invalid_payload", message: "read requires address and size." };
+    }
+    const address = normalizeAddress(payload.address);
+    const size = normalizeSize(payload.size, ProcessMemoryTransferMaxBytes);
+    return address !== null && size !== null
+      ? { ok: true, payload: { address, size } }
+      : { ok: false, code: "invalid_payload", message: "address or size is invalid." };
+  }
+
+  if (command === "process.memory.write") {
+    if (!hasExactFields(["address", "dataHex"])) {
+      return { ok: false, code: "invalid_payload", message: "write requires address and dataHex." };
+    }
+    const address = normalizeAddress(payload.address);
+    const dataHex = normalizeDataHex(payload.dataHex);
+    return address !== null && dataHex !== null
+      ? { ok: true, payload: { address, dataHex } }
+      : { ok: false, code: "invalid_payload", message: "address or dataHex is invalid." };
+  }
+
+  if (command === "process.memory.protect") {
+    if (!hasExactFields(["address", "size", "protection"])) {
+      return { ok: false, code: "invalid_payload", message: "protect requires address, size, and protection." };
+    }
+    const address = normalizeAddress(payload.address);
+    const size = normalizeSize(payload.size, ProcessMemoryAllocationMaxBytes);
+    const protection = normalizeProtection(
+      payload.protection,
+      ProcessMemoryProtectionChangeModes
+    );
+    return address !== null && size !== null && protection !== null
+      ? { ok: true, payload: { address, size, protection } }
+      : { ok: false, code: "invalid_payload", message: "address, size, or protection is invalid." };
+  }
+
+  if (command === "process.memory.inject") {
+    if (!hasExactFields(["dataHex"], ["protection"])) {
+      return { ok: false, code: "invalid_payload", message: "inject accepts dataHex and optional protection." };
+    }
+    const dataHex = normalizeDataHex(payload.dataHex);
+    const protection = normalizeProtection(
+      payload.protection,
+      ProcessMemoryPrivateAllocationModes,
+      "read-write"
+    );
+    return dataHex !== null && protection !== null
+      ? { ok: true, payload: { dataHex, protection } }
+      : { ok: false, code: "invalid_payload", message: "dataHex or protection is invalid." };
+  }
+
+  if (command === "process.memory.free") {
+    if (!hasExactFields(["address"])) {
+      return { ok: false, code: "invalid_payload", message: "free requires an address." };
+    }
+    const address = normalizeAddress(payload.address);
+    return address !== null
+      ? { ok: true, payload: { address } }
+      : { ok: false, code: "invalid_payload", message: "address is invalid." };
+  }
+
+  return { ok: false, code: "unsupported_command", message: "Unsupported process-memory command." };
+}
+
 async function handleExternalModuleMessage(event) {
   const module = [...externalModules.values()].find(candidate =>
     candidate.descriptor.origin !== "null" &&
@@ -719,6 +867,67 @@ async function handleExternalModuleMessage(event) {
   }
   if (command === "snapshot.get") {
     postExternalModuleResponse(module, requestId, command, true, sanitizeSnapshotForModule(liveSnapshot));
+    return;
+  }
+  if (ProcessMemoryCommands.has(command)) {
+    if (externalModuleProcessMemoryPending.has(module.descriptor.id)) {
+      postExternalModuleResponse(
+        module,
+        requestId,
+        command,
+        false,
+        null,
+        "process_memory_busy",
+        "This module already has a process-memory operation in flight."
+      );
+      return;
+    }
+    const normalized = normalizeProcessMemoryPayload(command, request.payload);
+    if (!normalized.ok) {
+      postExternalModuleResponse(module, requestId, command, false, null, normalized.code, normalized.message);
+      return;
+    }
+    const generation = module.descriptor.generation;
+    externalModuleProcessMemoryPending.add(module.descriptor.id);
+    try {
+      const result = await send("moduleProcessMemory", {
+        moduleId: module.descriptor.id,
+        generation,
+        operation: command,
+        payload: normalized.payload
+      });
+      if (externalModulesSuspended || externalModules.get(module.descriptor.id) !== module ||
+          module.descriptor.generation !== generation) {
+        return;
+      }
+      if (result?.success) {
+        postExternalModuleResponse(module, requestId, command, true, result.data);
+      } else {
+        postExternalModuleResponse(
+          module,
+          requestId,
+          command,
+          false,
+          null,
+          safeText(result?.code, 80) || "process_memory_failed",
+          safeText(result?.message, 500) || "The process-memory command failed."
+        );
+      }
+    } catch (error) {
+      if (!externalModulesSuspended && externalModules.get(module.descriptor.id) === module) {
+        postExternalModuleResponse(
+          module,
+          requestId,
+          command,
+          false,
+          null,
+          "host_error",
+          safeText(error?.message || String(error), 500)
+        );
+      }
+    } finally {
+      externalModuleProcessMemoryPending.delete(module.descriptor.id);
+    }
     return;
   }
   if (ModuleDataCommands.has(command)) {

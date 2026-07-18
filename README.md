@@ -22,8 +22,8 @@
 - **Paint Studio** — saves presets, previews and restores paint, undoes the last
   settings change, and shows planned coverage.
 - **Module SDK v1** — loads trusted local Web modules through validated
-  manifests, isolated origins, and explicit paint, network, persistent-storage,
-  and session-memory permissions.
+  manifests, isolated origins, explicit paint and data permissions, broad
+  browser networking, and native process-memory permissions.
 - **MECCHA CHAMELEON update2.8.0 support** — the current native runtime target.
 
 ## Build and run
@@ -182,10 +182,14 @@ Only declare permissions your module uses:
 | `storage.write` | `sdk.storage.set` and `sdk.storage.delete` for persistent module data |
 | `memory.read` | `sdk.memory.get` and `sdk.memory.list` for this app session |
 | `memory.write` | `sdk.memory.set` and `sdk.memory.delete` for this app session |
+| `process.memory.read` | `sdk.processMemory.read` against the authenticated attached game |
+| `process.memory.write` | `sdk.processMemory.allocate`, `write`, `protect`, `inject`, and `free` |
 
-There is no generic native-command, filesystem, or process permission. Paint
-actions use the current settings configured in Meccha Mod Menu. All accepted
-modules have broad HTTP, HTTPS, WS, WSS, `fetch`, XHR, EventSource,
+There is no generic native-command or filesystem permission. Paint actions use
+the current settings configured in Meccha Mod Menu. Raw process-memory calls
+are available only through the fixed `sdk.processMemory` command set and always
+target the game instance authenticated by the app; modules cannot provide a PID.
+All accepted modules have broad HTTP, HTTPS, WS, WSS, `fetch`, XHR, EventSource,
 `navigator.sendBeacon()`, and hyperlink `ping` access without a network manifest
 permission. For a network-only module, this is valid:
 
@@ -238,7 +242,29 @@ const sessionKeys = await sdk.memory.list();
 
 Both namespaces are per-module, quota-limited key/value stores. “Memory” means
 volatile SDK data only—it never exposes game memory, process addresses, pointers,
-or the native bridge.
+or the native bridge. Raw game memory is deliberately separate under
+`sdk.processMemory` and requires `process.memory.read` or
+`process.memory.write`.
+
+Raw process-memory addresses are hexadecimal strings such as `"0x1234abcd"`;
+JavaScript numbers are not accepted for pointers. The wrapper accepts
+`Uint8Array` bytes or strict hexadecimal and sends strict hexadecimal data.
+Individual transfers are limited to 3 MiB, one allocation is limited to 64 MiB,
+and the bridge tracks at most 256 MiB across all modules. Invalid or oversized
+requests fail instead of being clamped or truncated. `free` releases only
+allocations owned by the calling module.
+
+Allocate and inject accept the six Windows protection modes valid for private
+committed allocations and default to `read-write`. The copy-on-write modes are
+available only through `protect`; requesting either while allocating or
+injecting fails instead of being silently replaced.
+
+These APIs can allocate, inspect, modify, protect, and inject bytes in the
+attached game. They do not create threads or execute injected bytes. A module
+with raw read or write access is native-trusted and can invalidate or crash the
+game; install it only if you trust its code. Start with the safe
+[`process-memory-example`](docs/module-sdk/process-memory-example/) package,
+which touches only an allocation it creates and frees itself.
 
 ### 5. Load and test it
 
@@ -269,8 +295,12 @@ snapshot shape, validation rules, and trust model.
   stay under the current reload generation's cache-busting path.
 - Persistent storage is plain local JSON namespaced by module ID, not a secret vault.
   Replacing a package with another package using the same ID retains that data.
+- Process-memory allocations belong to the module that created them. They exist
+  in the authenticated attached game, are never stored under LocalAppData, and
+  can be freed only by their owner through the SDK.
 - Install only modules you trust. Permission checks and browser isolation reduce
-  accidental access but do not make untrusted local code safe.
+  accidental access but do not make untrusted local code safe. Process-memory
+  permissions grant native-trusted access to the attached game.
 
 ## Development references
 

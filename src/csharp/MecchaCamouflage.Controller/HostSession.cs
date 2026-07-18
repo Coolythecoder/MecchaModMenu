@@ -101,6 +101,7 @@ public sealed class HostSession : IDisposable
     private readonly object paintStudioGate = new();
     private readonly object moduleDataGate = new();
     private readonly SemaphoreSlim moduleDataOperationSlots = new(8, 8);
+    private readonly SemaphoreSlim moduleProcessMemoryOperation = new(1, 1);
     private readonly object moduleDataModuleSlotsGate = new();
     private readonly Dictionary<string, SemaphoreSlim> moduleDataModuleSlots =
         new(ModuleSdkV1.IdComparer);
@@ -121,20 +122,32 @@ public sealed class HostSession : IDisposable
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0)
             return;
-        lock (moduleDataGate)
-            moduleCatalogGeneration = Guid.NewGuid().ToString("N");
 
-        // New operations fail the disposed check. Taking every permit drains
-        // workers that were already admitted before volatile memory is cleared.
-        for (var index = 0; index < 8; ++index)
-            moduleDataOperationSlots.Wait();
+        // Setting disposed closes new admission immediately. An operation which
+        // already passed authorization owns this gate until it has received and
+        // sanitized the native result, so do not rotate its generation early.
+        moduleProcessMemoryOperation.Wait();
         try
         {
-            ModuleData.Dispose();
+            lock (moduleDataGate)
+                moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+
+            // New operations fail the disposed check. Taking every permit drains
+            // workers that were already admitted before volatile memory is cleared.
+            for (var index = 0; index < 8; ++index)
+                moduleDataOperationSlots.Wait();
+            try
+            {
+                ModuleData.Dispose();
+            }
+            finally
+            {
+                moduleDataOperationSlots.Release(8);
+            }
         }
         finally
         {
-            moduleDataOperationSlots.Release(8);
+            moduleProcessMemoryOperation.Release();
         }
         GC.SuppressFinalize(this);
     }
@@ -759,11 +772,19 @@ public sealed class HostSession : IDisposable
     public HostCommandResult ReloadModules()
     {
         var sourceCatalog = ModuleCatalog.Scan(Paths);
-        lock (moduleDataGate)
+        moduleProcessMemoryOperation.Wait();
+        try
         {
-            ModuleSourceCatalog = sourceCatalog;
-            Modules = sourceCatalog;
-            moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+            lock (moduleDataGate)
+            {
+                ModuleSourceCatalog = sourceCatalog;
+                Modules = sourceCatalog;
+                moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+            }
+        }
+        finally
+        {
+            moduleProcessMemoryOperation.Release();
         }
         foreach (var diagnostic in sourceCatalog.Diagnostics)
             Log.Warn($"Module {diagnostic.ModuleId ?? "catalog"}: {diagnostic.Message}");
@@ -774,10 +795,18 @@ public sealed class HostSession : IDisposable
 
     public string BeginModuleHostGeneration()
     {
-        lock (moduleDataGate)
+        moduleProcessMemoryOperation.Wait();
+        try
         {
-            moduleCatalogGeneration = Guid.NewGuid().ToString("N");
-            return moduleCatalogGeneration;
+            lock (moduleDataGate)
+            {
+                moduleCatalogGeneration = Guid.NewGuid().ToString("N");
+                return moduleCatalogGeneration;
+            }
+        }
+        finally
+        {
+            moduleProcessMemoryOperation.Release();
         }
     }
 
@@ -837,6 +866,98 @@ public sealed class HostSession : IDisposable
         finally
         {
             moduleSlot.Release();
+        }
+    }
+
+    public async Task<ModuleProcessMemoryCommandResult> ExecuteModuleProcessMemoryAsync(
+        string moduleId,
+        string generation,
+        string operation,
+        JsonElement payload,
+        CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref disposed) != 0)
+            return ModuleProcessMemoryFailure("module_unavailable", "The module host is shutting down.");
+        if (!ModuleSdkV1.IsValidId(moduleId))
+            return ModuleProcessMemoryFailure("module_unavailable", "The module is not currently hosted.");
+        if (!await moduleProcessMemoryOperation.WaitAsync(0).ConfigureAwait(false))
+        {
+            return ModuleProcessMemoryFailure(
+                "process_memory_busy",
+                "Another process-memory operation is in flight; retry the request.");
+        }
+
+        try
+        {
+            var authorization = CheckModuleProcessMemoryAuthorization(
+                moduleId,
+                generation,
+                operation,
+                out var module);
+            if (authorization is not null)
+                return authorization;
+            if (!ModuleProcessMemoryProtocol.TryBuildBridgeRequest(
+                    module!.Id,
+                    operation,
+                    payload,
+                    out var bridgeRequest,
+                    out var buildCode,
+                    out var buildMessage))
+            {
+                return ModuleProcessMemoryFailure(buildCode, buildMessage);
+            }
+
+            var reply = await Runtime.SendModuleProcessMemoryAsync(
+                bridgeRequest,
+                cancellationToken).ConfigureAwait(false);
+
+            // Reload and disposal must take moduleProcessMemoryOperation before
+            // rotating authorization, so a successful mutation cannot become
+            // stale between the pre-dispatch check and this response check.
+            var finalAuthorization = CheckModuleProcessMemoryAuthorization(
+                module.Id,
+                generation,
+                operation,
+                out _,
+                allowShuttingDown: true);
+            if (finalAuthorization is not null)
+                return finalAuthorization;
+
+            if (!reply.Ok)
+            {
+                var code = reply.Stage is "not_connected" or "transport_error" or "hello_error" or "identity_error"
+                    ? "process_unavailable"
+                    : "bridge_error";
+                var detail = string.IsNullOrWhiteSpace(reply.Message)
+                    ? "The authenticated game bridge is unavailable."
+                    : reply.Message;
+                return ModuleProcessMemoryFailure(code, detail);
+            }
+            if (!reply.Success)
+            {
+                return ModuleProcessMemoryFailure(
+                    NormalizeModuleErrorCode(reply.Stage, "process_memory_failed"),
+                    string.IsNullOrWhiteSpace(reply.Message)
+                        ? "The process-memory operation failed."
+                        : reply.Message);
+            }
+            if (!ModuleProcessMemoryProtocol.TrySanitizeBridgeResponse(
+                    operation,
+                    reply.Raw,
+                    out var data,
+                    out var protocolMessage))
+            {
+                return ModuleProcessMemoryFailure("bridge_protocol_error", protocolMessage);
+            }
+            return new ModuleProcessMemoryCommandResult(true, "", "", data);
+        }
+        catch (OperationCanceledException)
+        {
+            return ModuleProcessMemoryFailure("request_cancelled", "The process-memory request was cancelled.");
+        }
+        finally
+        {
+            moduleProcessMemoryOperation.Release();
         }
     }
 
@@ -975,6 +1096,65 @@ public sealed class HostSession : IDisposable
                 ? null
                 : ModuleDataFailure("permission_denied", "The module does not have permission for this command.");
         }
+    }
+
+    private ModuleProcessMemoryCommandResult? CheckModuleProcessMemoryAuthorization(
+        string moduleId,
+        string generation,
+        string operation,
+        out ModuleDescriptor? module,
+        bool allowShuttingDown = false)
+    {
+        lock (moduleDataGate)
+        {
+            module = null;
+            if (!allowShuttingDown && Volatile.Read(ref disposed) != 0)
+            {
+                return ModuleProcessMemoryFailure(
+                    "module_unavailable",
+                    "The module host is shutting down.");
+            }
+            if (!string.Equals(generation, moduleCatalogGeneration, StringComparison.Ordinal))
+            {
+                return ModuleProcessMemoryFailure(
+                    "stale_generation",
+                    "The module host generation is no longer active.");
+            }
+            module = Modules.Modules.FirstOrDefault(candidate =>
+                ModuleSdkV1.IdComparer.Equals(candidate.Id, moduleId));
+            if (module is null)
+            {
+                return ModuleProcessMemoryFailure(
+                    "module_unavailable",
+                    "The module is not currently hosted.");
+            }
+            var permission = ModuleSdkV1.RequiredPermissionForProcessMemoryCommand(operation);
+            if (permission is null)
+            {
+                return ModuleProcessMemoryFailure(
+                    "unsupported_command",
+                    "Unsupported process-memory command.");
+            }
+            return module.Permissions.Contains(permission, StringComparer.Ordinal)
+                ? null
+                : ModuleProcessMemoryFailure(
+                    "permission_denied",
+                    "The module does not have permission for this command.");
+        }
+    }
+
+    private static ModuleProcessMemoryCommandResult ModuleProcessMemoryFailure(
+        string code,
+        string message) => new(false, code, message, null);
+
+    private static string NormalizeModuleErrorCode(string? value, string fallback)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 80 ||
+            value.Any(character => character is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '_')))
+        {
+            return fallback;
+        }
+        return value;
     }
 
     private static object SanitizeModuleDataWriteResult(

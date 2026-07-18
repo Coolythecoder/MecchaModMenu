@@ -25,9 +25,9 @@ src/
 ```
 
 `src/csharp/` contains the supported .NET projects. The supported controller UI
-is `MecchaCamouflage.WebHost`. The third-party Paint Studio module manifest,
-catalog, permission boundary, and example package are documented in
-[`docs/module-sdk/`](module-sdk/README.md).
+is `MecchaCamouflage.WebHost`. The third-party module manifest, catalog,
+permission boundary, basic example, and safe process-memory example are
+documented in [`docs/module-sdk/`](module-sdk/README.md).
 
 `src/native/` contains native code used by the injected bridge and injector.
 The bridge source is intentionally split conservatively because it depends on
@@ -146,7 +146,7 @@ single-file extraction directory or app version.
 Bridge live state, such as progress snapshots tied to an injected bridge in the
 game process, lives under `bridge-state/`.
 
-User-installed Paint Studio modules live under `modules/<module-id>/`. Each
+User-installed SDK modules live under `modules/<module-id>/`. Each
 package is discovered from its `module.json` manifest and is served to a
 sandboxed WebView frame; it is not loaded as native code.
 
@@ -155,6 +155,13 @@ inside hashed module directories under `module-data/`. Its internal names are
 not a public filesystem API. It is separate from editable module packages,
 per-run secured snapshots, and volatile `sdk.memory` data. Volatile module
 memory exists only in the running app process and is never written here.
+
+Raw `sdk.processMemory` allocations are a fourth, separate concept. They are
+allocated inside the currently authenticated game process, tracked against the
+module that created them, and never written beneath `module-data/` or any other
+LocalAppData directory. A module can free only its own tracked allocations.
+Their addresses and contents are process-instance state, not configuration or
+SDK storage, and must not be migrated between game processes or app versions.
 
 Each direct bridge injection stages a uniquely named DLL and its profiles under
 `bridge-instances/<instance-guid>/`. Older bridge instances may remain loaded

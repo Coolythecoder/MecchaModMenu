@@ -46,6 +46,12 @@ var tests = new List<(string Name, Action Run)>
     ("module catalog rejects unsafe manifests without blocking valid modules", ModuleCatalogRejectsUnsafeManifestsNonfatally),
     ("module catalog enforces file and link boundaries", ModuleCatalogEnforcesFileAndLinkBoundaries),
     ("module SDK example is a valid package", ModuleSdkExampleIsValid),
+    ("process memory SDK example is a valid package", ModuleProcessMemoryExampleIsValid),
+    ("module process memory protocol builds canonical bridge requests", ModuleProcessMemoryProtocolBuildsCanonicalBridgeRequests),
+    ("module process memory protocol rejects invalid requests", ModuleProcessMemoryProtocolRejectsInvalidRequests),
+    ("module process memory response sanitizer enforces typed metadata", ModuleProcessMemoryResponseSanitizerEnforcesTypedMetadata),
+    ("native process memory capabilities split private and protect modes", NativeProcessMemoryCapabilitiesSplitPrivateAndProtectModes),
+    ("module process memory disposal drains admitted operations before generation rotation", ModuleProcessMemoryDisposeDrainsBeforeGenerationRotation),
     ("module data service persists storage and clears session memory", ModuleDataServicePersistsStorageAndClearsSessionMemory),
     ("module data service enforces isolation validation and quotas", ModuleDataServiceEnforcesIsolationValidationAndQuotas),
     ("module data persistence serializes writers and bounds lock waits", ModuleDataPersistenceSerializesWritersAndBoundsLockWaits),
@@ -801,7 +807,7 @@ static void ModuleCatalogLoadsValidV1Manifest()
           "version": "1.2.3",
           "description": "A data-only SDK test module.",
           "entry": "ui/index.html",
-          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.beacon", "network.websocket", "storage.read", "storage.write", "memory.read", "memory.write"]
+          "permissions": ["snapshot.read", "paint.preview", "paint.restore", "network.http", "network.https", "network.beacon", "network.websocket", "storage.read", "storage.write", "memory.read", "memory.write", "process.memory.read", "process.memory.write"]
         }
         """,
         "ui/index.html");
@@ -823,7 +829,8 @@ static void ModuleCatalogLoadsValidV1Manifest()
         {
             "snapshot.read", "paint.preview", "paint.restore",
             "network.http", "network.https", "network.beacon", "network.websocket",
-            "storage.read", "storage.write", "memory.read", "memory.write"
+            "storage.read", "storage.write", "memory.read", "memory.write",
+            "process.memory.read", "process.memory.write"
         }),
         "descriptor should expose only declared, allowlisted permissions");
 
@@ -831,7 +838,8 @@ static void ModuleCatalogLoadsValidV1Manifest()
     {
         "snapshot.read", "paint.start", "paint.preview", "paint.restore", "paint.stop",
         "network.http", "network.https", "network.beacon", "network.websocket",
-        "storage.read", "storage.write", "memory.read", "memory.write"
+        "storage.read", "storage.write", "memory.read", "memory.write",
+        "process.memory.read", "process.memory.write"
     };
     Assert(expectedPermissions.SetEquals(ModuleSdkV1.AllowedPermissions), "API v1 permission allowlist changed unexpectedly");
     Assert(!ModuleSdkV1.IsAllowedPermission("native.command"), "arbitrary native command permission must not exist");
@@ -846,8 +854,19 @@ static void ModuleCatalogLoadsValidV1Manifest()
         "persistent and session data commands should require separate read and write grants");
     Assert(ModuleSdkV1.RequiredPermissionForDataCommand("storage.clear") is null &&
            ModuleSdkV1.RequiredPermissionForDataCommand("memory.clear") is null &&
-           ModuleSdkV1.RequiredPermissionForDataCommand("memory.readProcess") is null,
-        "API v1 should expose exactly four data operations per namespace and no process-memory command");
+           ModuleSdkV1.RequiredPermissionForDataCommand("memory.readProcess") is null &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("process.memory.read") is null &&
+           ModuleSdkV1.RequiredPermissionForDataCommand("process.memory.write") is null,
+        "the JSON data command mapper must not accept process-memory operations");
+    Assert(ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.read") == "process.memory.read" &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.allocate") == "process.memory.write" &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.write") == "process.memory.write" &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.protect") == "process.memory.write" &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.inject") == "process.memory.write" &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.free") == "process.memory.write" &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("memory.get") is null &&
+           ModuleSdkV1.RequiredPermissionForProcessMemoryCommand("process.memory.execute") is null,
+        "process-memory commands should use a separate exact read/write permission map");
     Assert(ModuleSdkV1.IsValidDataKey("example.counter") &&
            !ModuleSdkV1.IsValidDataKey("") &&
            !ModuleSdkV1.IsValidDataKey("../counter") &&
@@ -1305,6 +1324,364 @@ static void ModuleSdkExampleIsValid()
     var broadHtml = File.ReadAllText(Path.Combine(broadStagingDirectory, "index.html"));
     Assert(broadHtml.Contains("connect-src http: https: ws: wss:", StringComparison.Ordinal),
         "a real zero-permission staged module should receive broad browser networking");
+}
+
+static void ModuleProcessMemoryExampleIsValid()
+{
+    using var temp = new TempDirectory("module-process-memory-example-test");
+    var source = Path.Combine(FindRepositoryRoot(), "docs", "module-sdk", "process-memory-example");
+    var target = Path.Combine(temp.Path, "process-memory-example");
+    Directory.CreateDirectory(target);
+    foreach (var fileName in new[] { "module.json", "index.html", "README.md" })
+        File.Copy(Path.Combine(source, fileName), Path.Combine(target, fileName));
+
+    var result = ModuleCatalog.ScanDirectory(temp.Path);
+
+    Assert(result.Diagnostics.Count == 0,
+        "the documented process-memory example should pass the production catalog validator; diagnostics=" +
+        string.Join(',', result.Diagnostics.Select(diagnostic => diagnostic.Code + ":" + diagnostic.Message)));
+    Assert(result.Modules.Count == 1 && result.Modules[0].Id == "process-memory-example",
+        "the process-memory SDK example should load under its documented module ID");
+    Assert(result.Modules[0].Permissions.SequenceEqual(
+            new[] { "process.memory.read", "process.memory.write" },
+            StringComparer.Ordinal),
+        "the process-memory example should declare exactly the separate raw read and write grants");
+
+    var exampleHtml = File.ReadAllText(Path.Combine(target, "index.html"));
+    Assert(exampleHtml.Contains("sdkRequest(\"process.memory.allocate\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"process.memory.read\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"process.memory.write\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"process.memory.protect\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"process.memory.inject\"", StringComparison.Ordinal) &&
+           exampleHtml.Contains("sdkRequest(\"process.memory.free\"", StringComparison.Ordinal),
+        "the process-memory example should exercise every exposed typed operation");
+    Assert(exampleHtml.Contains("event.source !== window.parent", StringComparison.Ordinal) &&
+           exampleHtml.Contains("event.origin !== hostOrigin", StringComparison.Ordinal) &&
+           exampleHtml.Contains("never executes the injected bytes", StringComparison.OrdinalIgnoreCase),
+        "the process-memory example should validate its host and remain a non-executing owned-allocation self-test");
+}
+
+static void ModuleProcessMemoryProtocolBuildsCanonicalBridgeRequests()
+{
+    const string moduleId = "memory.test";
+
+    Assert(ModuleProcessMemoryProtocol.AllowedPrivateAllocationProtections.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(new[]
+            {
+                "no-access", "read-only", "read-write", "execute", "execute-read", "execute-read-write"
+            }),
+        "allocate and inject must expose only protections supported by private committed allocations");
+    Assert(ModuleProcessMemoryProtocol.AllowedProtectionChanges.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(new[]
+            {
+                "no-access", "read-only", "read-write", "write-copy", "execute", "execute-read",
+                "execute-read-write", "execute-write-copy"
+            }),
+        "protect must retain all eight supported page-protection changes");
+
+    AssertRequest(
+        "process.memory.allocate",
+        JsonSerializer.SerializeToElement(new { size = 4096 }),
+        "{\"type\":\"module_process_memory_allocate\",\"owner\":\"memory.test\",\"size\":4096,\"protection\":\"read-write\"}");
+    AssertRequest(
+        "process.memory.read",
+        JsonSerializer.SerializeToElement(new { address = "0X00000000000000AB", size = 32 }),
+        "{\"type\":\"module_process_memory_read\",\"owner\":\"memory.test\",\"address\":\"0xab\",\"size\":32}");
+    AssertRequest(
+        "process.memory.write",
+        JsonSerializer.SerializeToElement(new { address = "0x00000100", dataHex = "Aa00fF" }),
+        "{\"type\":\"module_process_memory_write\",\"owner\":\"memory.test\",\"address\":\"0x100\",\"data_hex\":\"aa00ff\"}");
+    AssertRequest(
+        "process.memory.protect",
+        JsonSerializer.SerializeToElement(new { address = "0x2000", size = 8192, protection = "execute-read" }),
+        "{\"type\":\"module_process_memory_protect\",\"owner\":\"memory.test\",\"address\":\"0x2000\",\"size\":8192,\"protection\":\"execute-read\"}");
+    AssertRequest(
+        "process.memory.protect",
+        JsonSerializer.SerializeToElement(new { address = "0x2000", size = 8192, protection = "write-copy" }),
+        "{\"type\":\"module_process_memory_protect\",\"owner\":\"memory.test\",\"address\":\"0x2000\",\"size\":8192,\"protection\":\"write-copy\"}");
+    AssertRequest(
+        "process.memory.protect",
+        JsonSerializer.SerializeToElement(new { address = "0x2000", size = 8192, protection = "execute-write-copy" }),
+        "{\"type\":\"module_process_memory_protect\",\"owner\":\"memory.test\",\"address\":\"0x2000\",\"size\":8192,\"protection\":\"execute-write-copy\"}");
+    AssertRequest(
+        "process.memory.inject",
+        JsonSerializer.SerializeToElement(new { dataHex = "DEADBEEF", protection = "execute-read-write" }),
+        "{\"type\":\"module_process_memory_inject\",\"owner\":\"memory.test\",\"data_hex\":\"deadbeef\",\"protection\":\"execute-read-write\"}");
+    AssertRequest(
+        "process.memory.free",
+        JsonSerializer.SerializeToElement(new { address = "0x0000000000003000" }),
+        "{\"type\":\"module_process_memory_free\",\"owner\":\"memory.test\",\"address\":\"0x3000\"}");
+
+    // Optional protection has one stable canonical default for both allocation paths.
+    AssertRequest(
+        "process.memory.inject",
+        JsonSerializer.SerializeToElement(new { dataHex = "01" }),
+        "{\"type\":\"module_process_memory_inject\",\"owner\":\"memory.test\",\"data_hex\":\"01\",\"protection\":\"read-write\"}");
+
+    void AssertRequest(string operation, JsonElement payload, string expected)
+    {
+        var built = ModuleProcessMemoryProtocol.TryBuildBridgeRequest(
+            moduleId,
+            operation,
+            payload,
+            out var request,
+            out _,
+            out _);
+        Assert(built, $"{operation} should build a typed bridge request");
+        Assert(request == expected,
+            $"{operation} bridge JSON was not canonical. expected={expected}; actual={request}");
+    }
+}
+
+static void ModuleProcessMemoryProtocolRejectsInvalidRequests()
+{
+    const string moduleId = "memory.test";
+
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = 4096, size = 1 }));
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = "0x0", size = 1 }));
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = "0x10000000000000000", size = 1 }));
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = "1000", size = 1 }));
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = "0xnothex", size = 1 }));
+
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = "0x1", size = 0 }));
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new { address = "0x1", size = 1.5 }));
+    AssertInvalid("process.memory.read", JsonSerializer.SerializeToElement(new
+    {
+        address = "0x1",
+        size = ModuleSdkV1.MaxProcessMemoryTransferBytes + 1
+    }));
+    AssertInvalid("process.memory.allocate", JsonSerializer.SerializeToElement(new
+    {
+        size = ModuleSdkV1.MaxProcessMemoryAllocationBytes + 1
+    }));
+
+    AssertInvalid("process.memory.write", JsonSerializer.SerializeToElement(new { address = "0x1", dataHex = "abc" }));
+    AssertInvalid("process.memory.write", JsonSerializer.SerializeToElement(new { address = "0x1", dataHex = "zz" }));
+    AssertInvalid("process.memory.write", JsonSerializer.SerializeToElement(new { address = "0x1", dataHex = "" }));
+    var oversizedHex = new string('a', checked((ModuleSdkV1.MaxProcessMemoryTransferBytes + 1) * 2));
+    AssertInvalid("process.memory.write", JsonSerializer.SerializeToElement(new { address = "0x1", dataHex = oversizedHex }));
+
+    AssertInvalid("process.memory.allocate", JsonSerializer.SerializeToElement(new { size = 1, protection = "rwx" }));
+    AssertInvalid("process.memory.allocate", JsonSerializer.SerializeToElement(new { size = 1, protection = "write-copy" }));
+    AssertInvalid("process.memory.allocate", JsonSerializer.SerializeToElement(new { size = 1, protection = "execute-write-copy" }));
+    AssertInvalid("process.memory.protect", JsonSerializer.SerializeToElement(new
+    {
+        address = "0x1",
+        size = 1,
+        protection = "READWRITE"
+    }));
+    AssertInvalid("process.memory.inject", JsonSerializer.SerializeToElement(new { dataHex = "00", protection = "unknown" }));
+    AssertInvalid("process.memory.inject", JsonSerializer.SerializeToElement(new { dataHex = "00", protection = "write-copy" }));
+    AssertInvalid("process.memory.inject", JsonSerializer.SerializeToElement(new { dataHex = "00", protection = "execute-write-copy" }));
+
+    AssertInvalid("process.memory.allocate", JsonSerializer.SerializeToElement(new { size = 1, extra = true }));
+    using (var duplicate = JsonDocument.Parse("{\"size\":1,\"size\":2}"))
+        AssertInvalid("process.memory.allocate", duplicate.RootElement);
+    using (var duplicate = JsonDocument.Parse("{\"address\":\"0x1\",\"address\":\"0x2\",\"size\":1}"))
+        AssertInvalid("process.memory.read", duplicate.RootElement);
+
+    var unsupported = ModuleProcessMemoryProtocol.TryBuildBridgeRequest(
+        moduleId,
+        "process.memory.execute",
+        JsonSerializer.SerializeToElement(new { }),
+        out var unsupportedRequest,
+        out var unsupportedCode,
+        out _);
+    Assert(!unsupported && unsupportedRequest.Length == 0 && unsupportedCode == "unsupported_command",
+        "unknown process-memory operations should fail with unsupported_command and no bridge request");
+    Assert(!ModuleProcessMemoryProtocol.TryBuildBridgeRequest(
+            "../other",
+            "process.memory.allocate",
+            JsonSerializer.SerializeToElement(new { size = 1 }),
+            out _,
+            out _,
+            out _),
+        "an invalid module identity must never be serialized as native allocation ownership");
+
+    void AssertInvalid(string operation, JsonElement payload)
+    {
+        var built = ModuleProcessMemoryProtocol.TryBuildBridgeRequest(
+            moduleId,
+            operation,
+            payload,
+            out var request,
+            out var code,
+            out _);
+        Assert(!built && request.Length == 0 && code == "invalid_payload",
+            $"{operation} should reject an invalid payload without emitting bridge JSON");
+    }
+}
+
+static void ModuleProcessMemoryResponseSanitizerEnforcesTypedMetadata()
+{
+    AssertSanitized(
+        "process.memory.allocate",
+        "{\"address\":\"0X0000000000001000\",\"size\":4096,\"protection\":\"read-write\"}",
+        "{\"address\":\"0x1000\",\"size\":4096,\"protection\":\"read-write\"}");
+    AssertSanitized(
+        "process.memory.read",
+        "{\"address\":\"0x1000\",\"size\":2,\"data_hex\":\"AaFf\"}",
+        "{\"address\":\"0x1000\",\"size\":2,\"dataHex\":\"aaff\"}");
+    AssertSanitized(
+        "process.memory.write",
+        "{\"address\":\"0x1000\",\"bytes_written\":2,\"verified\":true}",
+        "{\"address\":\"0x1000\",\"bytesWritten\":2,\"verified\":true}");
+    AssertSanitized(
+        "process.memory.protect",
+        "{\"address\":\"0x1000\",\"size\":4096,\"protection\":\"execute-write-copy\",\"previous_protection\":\"write-copy\"}",
+        "{\"address\":\"0x1000\",\"size\":4096,\"protection\":\"execute-write-copy\",\"previousProtection\":\"write-copy\"}");
+    AssertSanitized(
+        "process.memory.inject",
+        "{\"address\":\"0x2000\",\"size\":2,\"bytes_written\":2,\"protection\":\"read-only\",\"verified\":true}",
+        "{\"address\":\"0x2000\",\"size\":2,\"bytesWritten\":2,\"protection\":\"read-only\",\"verified\":true}");
+    AssertSanitized(
+        "process.memory.free",
+        "{\"address\":\"0x2000\",\"freed\":true}",
+        "{\"address\":\"0x2000\",\"freed\":true}");
+
+    AssertRejected("process.memory.write", "{\"address\":\"0x1000\",\"bytes_written\":1,\"verified\":false}");
+    AssertRejected("process.memory.inject", "{\"address\":\"0x1000\",\"size\":1,\"bytes_written\":1,\"protection\":\"read-write\",\"verified\":false}");
+
+    AssertRejected("process.memory.allocate", "{\"address\":\"0x1000\",\"size\":1}");
+    AssertRejected("process.memory.allocate", "{\"address\":\"0x1000\",\"size\":1,\"protection\":\"write-copy\"}");
+    AssertRejected("process.memory.read", "{\"address\":\"0x1000\",\"size\":2,\"data_hex\":\"00\"}");
+    AssertRejected("process.memory.read", "{\"address\":\"0x1000\",\"size\":1,\"data_hex\":\"zz\"}");
+    AssertRejected("process.memory.protect", "{\"address\":\"0x1000\",\"size\":1,\"protection\":\"read-only\"}");
+    AssertRejected("process.memory.inject", "{\"address\":\"0x1000\",\"size\":2,\"bytes_written\":1,\"protection\":\"read-write\",\"verified\":true}");
+    AssertRejected("process.memory.inject", "{\"address\":\"0x1000\",\"size\":1,\"bytes_written\":1,\"protection\":\"execute-write-copy\",\"verified\":true}");
+    AssertRejected("process.memory.free", "{\"address\":\"0x1000\"}");
+
+    AssertRejected("process.memory.allocate", $"{{\"address\":\"0x1000\",\"size\":{ModuleSdkV1.MaxProcessMemoryAllocationBytes + 1},\"protection\":\"read-write\"}}");
+    AssertRejected("process.memory.read", $"{{\"address\":\"0x1000\",\"size\":{ModuleSdkV1.MaxProcessMemoryTransferBytes + 1},\"data_hex\":\"00\"}}");
+    AssertRejected("process.memory.write", $"{{\"address\":\"0x1000\",\"bytes_written\":{ModuleSdkV1.MaxProcessMemoryTransferBytes + 1},\"verified\":true}}");
+    AssertRejected("process.memory.read", "{\"address\":\"0x0\",\"size\":1,\"data_hex\":\"00\"}");
+    AssertRejected("process.memory.allocate", "{\"address\":\"0x1000\",\"size\":1,\"protection\":\"rwx\"}");
+    AssertRejected("process.memory.free", "{\"address\":4096,\"freed\":true}");
+    AssertRejected("process.memory.execute", "{\"address\":\"0x1000\",\"verified\":true}");
+
+    Assert(!ModuleProcessMemoryProtocol.TrySanitizeBridgeResponse(
+            "process.memory.read",
+            "not-json",
+            out _,
+            out _),
+        "malformed native JSON must be rejected");
+    Assert(!ModuleProcessMemoryProtocol.TrySanitizeBridgeResponse(
+            "process.memory.read",
+            "{\"success\":true}",
+            out _,
+            out _),
+        "a native response without typed metadata must be rejected");
+
+    static string Response(string metadata) =>
+        "{\"success\":true,\"stage\":\"module_process_memory_test\",\"metadata\":" + metadata + "}";
+
+    static void AssertSanitized(string operation, string metadata, string expectedJson)
+    {
+        var accepted = ModuleProcessMemoryProtocol.TrySanitizeBridgeResponse(
+            operation,
+            Response(metadata),
+            out var data,
+            out _);
+        Assert(accepted, $"{operation} should accept complete typed native metadata");
+        var actualJson = JsonSerializer.Serialize(data);
+        Assert(actualJson == expectedJson,
+            $"{operation} sanitizer returned the wrong typed shape. expected={expectedJson}; actual={actualJson}");
+    }
+
+    static void AssertRejected(string operation, string metadata)
+    {
+        var accepted = ModuleProcessMemoryProtocol.TrySanitizeBridgeResponse(
+            operation,
+            Response(metadata),
+            out var data,
+            out _);
+        Assert(!accepted && data is null,
+            $"{operation} should reject partial, unverified, invalid, or oversized native metadata");
+    }
+}
+
+static void NativeProcessMemoryCapabilitiesSplitPrivateAndProtectModes()
+{
+    var native = File.ReadAllText(Path.Combine(
+        FindRepositoryRoot(), "src", "native", "bridge", "bridge.cpp"));
+
+    Assert(native.Contains("module_process_memory_private_protections", StringComparison.Ordinal),
+        "HELLO capabilities must advertise the six modes shared by allocate and inject");
+    Assert(native.Contains("module_process_memory_protect_protections", StringComparison.Ordinal),
+        "HELLO capabilities must advertise all eight protect modes separately");
+    Assert(!native.Contains("\\\"module_process_memory_protections\\\"", StringComparison.Ordinal),
+        "the ambiguous legacy process-memory protection capability must be removed");
+}
+
+static void ModuleProcessMemoryDisposeDrainsBeforeGenerationRotation()
+{
+    using var home = new TempHome();
+    var paths = new AppPaths("module-process-memory-dispose-race-test");
+    Directory.CreateDirectory(paths.ModulesDirectory);
+    CreateModulePackage(paths.ModulesDirectory, "dispose.memory", """
+    {"schema_version":1,"api_version":1,"id":"dispose.memory","name":"Dispose memory","version":"1","entry":"index.html","permissions":["process.memory.write"]}
+    """);
+
+    var session = new HostSession("module-process-memory-dispose-race-test");
+    var generation = session.ModuleHostGeneration;
+    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+    var gate = (SemaphoreSlim?)typeof(HostSession)
+        .GetField("moduleProcessMemoryOperation", flags)?
+        .GetValue(session) ?? throw new InvalidOperationException("process-memory operation gate was not found");
+    var disposedField = typeof(HostSession).GetField("disposed", flags) ??
+        throw new InvalidOperationException("host disposal state was not found");
+    var authorizationMethod = typeof(HostSession).GetMethod(
+        "CheckModuleProcessMemoryAuthorization",
+        flags) ?? throw new InvalidOperationException("process-memory authorization method was not found");
+
+    Task? disposeTask = null;
+    gate.Wait();
+    try
+    {
+        disposeTask = Task.Run(session.Dispose);
+        Assert(SpinWait.SpinUntil(
+                () => (int)(disposedField.GetValue(session) ?? 0) != 0,
+                TimeSpan.FromSeconds(2)),
+            "dispose should close new module process-memory admission before waiting for the active operation");
+        Assert(session.ModuleHostGeneration == generation,
+            "dispose must not rotate the module generation while an admitted process-memory operation is active");
+
+        var newlyAdmitted = session.ExecuteModuleProcessMemoryAsync(
+                "dispose.memory",
+                generation,
+                "process.memory.inject",
+                JsonSerializer.SerializeToElement(new { dataHex = "01" }))
+            .GetAwaiter()
+            .GetResult();
+        Assert(!newlyAdmitted.Success && newlyAdmitted.Code == "module_unavailable",
+            "a process-memory request racing disposal must be rejected before it can acquire the native gate");
+
+        var ordinaryCheckArguments = new object?[]
+        {
+            "dispose.memory", generation, "process.memory.inject", null, false
+        };
+        var ordinaryAuthorization = authorizationMethod.Invoke(session, ordinaryCheckArguments);
+        Assert(ordinaryAuthorization is ModuleProcessMemoryCommandResult { Code: "module_unavailable" },
+            "new authorization must observe that host shutdown has started");
+
+        var finalCheckArguments = new object?[]
+        {
+            "dispose.memory", generation, "process.memory.inject", null, true
+        };
+        var finalAuthorization = authorizationMethod.Invoke(session, finalCheckArguments);
+        Assert(finalAuthorization is null,
+            "an already-authorized operation must be allowed to report its native result during disposal");
+    }
+    finally
+    {
+        gate.Release();
+    }
+
+    Assert(disposeTask is not null && disposeTask.Wait(TimeSpan.FromSeconds(5)),
+        "dispose should finish after the admitted process-memory operation releases its gate");
+    Assert(session.ModuleHostGeneration != generation,
+        "dispose should rotate the module generation after admitted process-memory work drains");
+    session.Dispose();
 }
 
 static void ModuleDataServicePersistsStorageAndClearsSessionMemory()
@@ -2148,6 +2525,9 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
     var moduleData = File.ReadAllText(Path.Combine(
         repository,
         "src", "csharp", "MecchaCamouflage.Controller", "ModuleDataService.cs"));
+    var processMemoryProtocol = File.ReadAllText(Path.Combine(
+        repository,
+        "src", "csharp", "MecchaCamouflage.Controller", "ModuleProcessMemoryProtocol.cs"));
 
     Assert(mainForm.Contains("ModuleSdkV1.VirtualHostName(module.Id)", StringComparison.Ordinal) &&
            mainForm.Contains("ModuleCatalog.TryStagePackage", StringComparison.Ordinal) &&
@@ -2194,6 +2574,35 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
            app.Contains("window.mecchaUnloadExternalModulesForReload", StringComparison.Ordinal) &&
            app.Contains("ExternalModuleHostPattern", StringComparison.Ordinal),
         "module reload must unload old frames, fail the network gate closed, and publish only successfully staged unrelated hosts");
+    var unloadFunction = app.IndexOf(
+        "window.mecchaUnloadExternalModulesForReload = () =>",
+        StringComparison.Ordinal);
+    var pendingMemoryGuard = app.IndexOf(
+        "if (externalModuleProcessMemoryPending.size !== 0)",
+        unloadFunction,
+        StringComparison.Ordinal);
+    var suspensionMutation = app.IndexOf(
+        "externalModulesSuspended = true",
+        unloadFunction,
+        StringComparison.Ordinal);
+    var unloadInvocation = mainForm.IndexOf(
+        "window.mecchaUnloadExternalModulesForReload() === true",
+        StringComparison.Ordinal);
+    var unloadRejection = mainForm.IndexOf(
+        "if (!string.Equals(unloadAcknowledgement, \"true\"",
+        unloadInvocation,
+        StringComparison.Ordinal);
+    var catalogReload = mainForm.IndexOf(
+        "session.ReloadModules()",
+        unloadInvocation,
+        StringComparison.Ordinal);
+    Assert(unloadFunction >= 0 &&
+           pendingMemoryGuard > unloadFunction &&
+           suspensionMutation > pendingMemoryGuard &&
+           unloadInvocation >= 0 &&
+           unloadRejection > unloadInvocation &&
+           catalogReload > unloadRejection,
+        "reload must refuse a pending process-memory operation before suspending frames, rotating generation, or reloading the catalog");
     Assert(mainForm.Contains("args.OriginalSourceFrameInfo", StringComparison.Ordinal) &&
            mainForm.Contains("args.IsUserInitiated", StringComparison.Ordinal),
         "external browser launches should require a user gesture from the privileged main interface");
@@ -2214,11 +2623,33 @@ static void WebHostIsolatesModuleOriginsNetworkAndFrames()
            app.Contains("const generation = module.descriptor.generation", StringComparison.Ordinal) &&
            app.Contains("module.descriptor.generation !== generation", StringComparison.Ordinal),
         "the iframe relay should derive data identity and generation from the matched module and split read/write grants");
+    Assert(app.Contains("[\"process.memory.read\", \"process.memory.read\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"process.memory.allocate\", \"process.memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"process.memory.write\", \"process.memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"process.memory.protect\", \"process.memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"process.memory.inject\", \"process.memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("[\"process.memory.free\", \"process.memory.write\"]", StringComparison.Ordinal) &&
+           app.Contains("send(\"moduleProcessMemory\"", StringComparison.Ordinal) &&
+           app.Contains("normalizeProcessMemoryPayload", StringComparison.Ordinal) &&
+           app.Contains("externalModuleProcessMemoryPending", StringComparison.Ordinal) &&
+           app.Contains("ProcessMemoryProtectionChangeModes", StringComparison.Ordinal) &&
+           CountOccurrences(app, "ProcessMemoryPrivateAllocationModes") >= 3,
+        "raw process-memory commands should use a distinct typed, serialized module relay and reject copy-on-write allocations in the WebView");
     Assert(mainForm.Contains("case \"moduleData\"", StringComparison.Ordinal) &&
            mainForm.Contains("session.ExecuteModuleDataAsync(moduleId, generation, operation, payload)", StringComparison.Ordinal) &&
            hostSession.Contains("RequiredPermissionForDataCommand(operation)", StringComparison.Ordinal) &&
            hostSession.Contains("moduleDataGate", StringComparison.Ordinal),
         "the trusted host should independently recheck module data generation, identity, and permission");
+    Assert(mainForm.Contains("case \"moduleProcessMemory\"", StringComparison.Ordinal) &&
+           mainForm.Contains("HandleModuleProcessMemoryAsync", StringComparison.Ordinal) &&
+           mainForm.Contains("session.ExecuteModuleProcessMemoryAsync", StringComparison.Ordinal) &&
+           hostSession.Contains("RequiredPermissionForProcessMemoryCommand(operation)", StringComparison.Ordinal) &&
+           hostSession.Contains("ModuleProcessMemoryProtocol.TryBuildBridgeRequest", StringComparison.Ordinal) &&
+           hostSession.Contains("ModuleProcessMemoryProtocol.TrySanitizeBridgeResponse", StringComparison.Ordinal) &&
+           processMemoryProtocol.Contains("module_process_memory_allocate", StringComparison.Ordinal) &&
+           processMemoryProtocol.Contains("module_process_memory_inject", StringComparison.Ordinal) &&
+           !processMemoryProtocol.Contains("\"pid\"", StringComparison.OrdinalIgnoreCase),
+        "process memory should have a separate typed host route bound to the active bridge rather than a caller-selected PID");
     Assert(!moduleData.Contains("RuntimeBridgeService", StringComparison.Ordinal) &&
            !moduleData.Contains("BridgeClient", StringComparison.Ordinal) &&
            !moduleData.Contains("ReadProcessMemory", StringComparison.Ordinal) &&
@@ -3362,8 +3793,8 @@ static void ResearchTextureProbeIsExplicitlyDispatched()
 
     Assert(native.Contains(serializedCommand, StringComparison.Ordinal),
         "native probe recognition must include the texture command");
-    Assert(native.Contains("line.find(\"" + serializedCommand + "\")", StringComparison.Ordinal),
-        "bridge request dispatch must include the texture command");
+    Assert(native.Contains("request_type == \"" + command + "\"", StringComparison.Ordinal),
+        "bridge request dispatch must compare the parsed texture command exactly");
     Assert(native.Contains("matches_texture_export_target", StringComparison.Ordinal),
         "texture command must retain the component selected for its export");
     Assert(native.Contains("eventwatch_multicast_packed_receiver", StringComparison.Ordinal),

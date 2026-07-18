@@ -27,6 +27,7 @@
 #include <thread>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -47,6 +48,10 @@ namespace
     // =============================================================================
 
     constexpr std::size_t MaxRequestBytes = 8 * 1024 * 1024;
+    constexpr std::size_t ModuleProcessMemoryMaxTransferBytes = 3 * 1024 * 1024;
+    constexpr std::size_t ModuleProcessMemoryMaxAllocationBytes = 64 * 1024 * 1024;
+    constexpr std::size_t ModuleProcessMemoryMaxTrackedBytes = 256 * 1024 * 1024;
+    constexpr std::size_t ModuleProcessMemoryMaxOwnerLength = 64;
     constexpr int ProcessEventVtableIndex = 0x4C;
     constexpr int AutoEventWatchSampleBytes = 8192;
     constexpr UINT PaintDispatchMessage = WM_APP + 0x4D43;
@@ -140,6 +145,16 @@ namespace
         static_cast<int>(PaintRequestAdmissionState::Idle)};
     std::mutex g_bridge_start_mutex;
     BridgeStartBlockV1 g_bridge_identity{};
+    struct ModuleProcessMemoryAllocation
+    {
+        std::uintptr_t address{0};
+        std::size_t requested_size{0};
+        std::size_t charged_size{0};
+        std::string owner{};
+    };
+    std::mutex g_module_process_memory_mutex;
+    std::unordered_map<std::uintptr_t, ModuleProcessMemoryAllocation> g_module_process_memory_allocations;
+    std::size_t g_module_process_memory_tracked_bytes{0};
     std::atomic<int> g_active_client_handlers{0};
     std::atomic<bool> g_process_event_hook_installed{false};
     std::atomic<std::uintptr_t> g_original_process_event{0};
@@ -21205,6 +21220,1038 @@ namespace
     }
 
     // =============================================================================
+    // Section: Module process-memory operations
+    // Risk: critical. These commands deliberately operate on the attached game's
+    // address space, but never select a PID, load a module, create a thread, or
+    // invoke an address. The authenticated host supplies the canonical owner.
+    // =============================================================================
+
+    struct ModuleProcessMemorySpan
+    {
+        std::uintptr_t address{0};
+        std::size_t size{0};
+        DWORD protection{0};
+    };
+
+    auto module_process_memory_string_field(const std::string& text,
+                                            const std::string& key,
+                                            std::string& value) -> bool
+    {
+        value.clear();
+        const std::string needle = std::string("\"") + key + "\":";
+        const auto field = text.find(needle);
+        if (field == std::string::npos ||
+            text.find(needle, field + needle.size()) != std::string::npos)
+        {
+            return false;
+        }
+        auto pos = field + needle.size();
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
+        {
+            ++pos;
+        }
+        if (pos >= text.size() || text[pos] != '"')
+        {
+            return false;
+        }
+        ++pos;
+        for (; pos < text.size(); ++pos)
+        {
+            const auto ch = static_cast<unsigned char>(text[pos]);
+            if (ch == '"')
+            {
+                ++pos;
+                while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
+                {
+                    ++pos;
+                }
+                return pos == text.size() || text[pos] == ',' || text[pos] == '}';
+            }
+            // All process-memory string fields have canonical ASCII wire forms.
+            // Rejecting escapes avoids alternate spellings and ambiguous ownership.
+            if (ch == '\\' || ch < 0x20 || ch > 0x7e)
+            {
+                value.clear();
+                return false;
+            }
+            value.push_back(static_cast<char>(ch));
+        }
+        value.clear();
+        return false;
+    }
+
+    auto module_process_memory_size_field(const std::string& text,
+                                          const std::string& key,
+                                          std::size_t maximum,
+                                          std::size_t& value) -> bool
+    {
+        value = 0;
+        const std::string needle = std::string("\"") + key + "\":";
+        const auto field = text.find(needle);
+        if (field == std::string::npos ||
+            text.find(needle, field + needle.size()) != std::string::npos)
+        {
+            return false;
+        }
+        auto pos = field + needle.size();
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
+        {
+            ++pos;
+        }
+        const auto first_digit = pos;
+        if (pos >= text.size() || text[pos] < '0' || text[pos] > '9')
+        {
+            return false;
+        }
+        if (text[pos] == '0' && pos + 1 < text.size() && text[pos + 1] >= '0' && text[pos + 1] <= '9')
+        {
+            return false;
+        }
+        for (; pos < text.size() && text[pos] >= '0' && text[pos] <= '9'; ++pos)
+        {
+            const auto digit = static_cast<std::size_t>(text[pos] - '0');
+            if (value > (maximum - digit) / 10)
+            {
+                value = 0;
+                return false;
+            }
+            value = value * 10 + digit;
+        }
+        if (pos == first_digit || value == 0 || value > maximum)
+        {
+            value = 0;
+            return false;
+        }
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
+        {
+            ++pos;
+        }
+        if (pos != text.size() && text[pos] != ',' && text[pos] != '}')
+        {
+            value = 0;
+            return false;
+        }
+        return true;
+    }
+
+    auto module_process_memory_valid_owner(const std::string& owner) -> bool
+    {
+        if (owner.empty() || owner.size() > ModuleProcessMemoryMaxOwnerLength ||
+            owner.front() < 'a' || owner.front() > 'z')
+        {
+            return false;
+        }
+        bool previous_separator = false;
+        for (const char ch : owner)
+        {
+            const bool alphanumeric = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+            if (alphanumeric)
+            {
+                previous_separator = false;
+                continue;
+            }
+            const bool separator = ch == '.' || ch == '-' || ch == '_';
+            if (!separator || previous_separator)
+            {
+                return false;
+            }
+            previous_separator = true;
+        }
+        return !previous_separator;
+    }
+
+    auto module_process_memory_owner_field(const std::string& text, std::string& owner) -> bool
+    {
+        return module_process_memory_string_field(text, "owner", owner) &&
+               module_process_memory_valid_owner(owner);
+    }
+
+    auto module_process_memory_address_field(const std::string& text,
+                                             std::uintptr_t& address) -> bool
+    {
+        std::string encoded{};
+        return module_process_memory_string_field(text, "address", encoded) &&
+               encoded.size() >= 3 && encoded[0] == '0' && encoded[1] == 'x' &&
+               parse_nonzero_hex_address(encoded, address);
+    }
+
+    auto module_process_memory_protection_field(const std::string& text,
+                                                DWORD& protection,
+                                                std::string& protection_name) -> bool
+    {
+        protection = 0;
+        protection_name.clear();
+        if (!module_process_memory_string_field(text, "protection", protection_name))
+        {
+            return false;
+        }
+        if (protection_name == "no-access") protection = PAGE_NOACCESS;
+        else if (protection_name == "read-only") protection = PAGE_READONLY;
+        else if (protection_name == "read-write") protection = PAGE_READWRITE;
+        else if (protection_name == "write-copy") protection = PAGE_WRITECOPY;
+        else if (protection_name == "execute") protection = PAGE_EXECUTE;
+        else if (protection_name == "execute-read") protection = PAGE_EXECUTE_READ;
+        else if (protection_name == "execute-read-write") protection = PAGE_EXECUTE_READWRITE;
+        else if (protection_name == "execute-write-copy") protection = PAGE_EXECUTE_WRITECOPY;
+        else return false;
+        return true;
+    }
+
+    auto module_process_memory_protection_name(DWORD protection) -> const char*
+    {
+        switch (protection & 0xffU)
+        {
+        case PAGE_NOACCESS: return "no-access";
+        case PAGE_READONLY: return "read-only";
+        case PAGE_READWRITE: return "read-write";
+        case PAGE_WRITECOPY: return "write-copy";
+        case PAGE_EXECUTE: return "execute";
+        case PAGE_EXECUTE_READ: return "execute-read";
+        case PAGE_EXECUTE_READWRITE: return "execute-read-write";
+        case PAGE_EXECUTE_WRITECOPY: return "execute-write-copy";
+        default: return "unknown";
+        }
+    }
+
+    auto module_process_memory_is_private_allocation_protection(DWORD protection) -> bool
+    {
+        // PAGE_WRITECOPY and PAGE_EXECUTE_WRITECOPY are valid only for compatible
+        // mapped views. VirtualAlloc-backed private memory rejects both with
+        // ERROR_INVALID_PARAMETER, so allocate/inject must reject them before
+        // creating or modifying any memory.
+        switch (protection)
+        {
+        case PAGE_NOACCESS:
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    auto module_process_memory_is_readable(DWORD protection) -> bool
+    {
+        switch (protection & 0xffU)
+        {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    auto module_process_memory_is_writable(DWORD protection) -> bool
+    {
+        switch (protection & 0xffU)
+        {
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    auto module_process_memory_is_executable(DWORD protection) -> bool
+    {
+        switch (protection & 0xffU)
+        {
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    auto module_process_memory_decode_hex(const std::string& text,
+                                          std::vector<std::uint8_t>& bytes) -> bool
+    {
+        bytes.clear();
+        if (text.empty() || (text.size() % 2U) != 0U ||
+            text.size() > ModuleProcessMemoryMaxTransferBytes * 2U)
+        {
+            return false;
+        }
+        bytes.reserve(text.size() / 2U);
+        for (std::size_t index = 0; index < text.size(); index += 2U)
+        {
+            std::uint8_t high = 0;
+            std::uint8_t low = 0;
+            if (!hex_nibble(text[index], high) || !hex_nibble(text[index + 1U], low))
+            {
+                bytes.clear();
+                return false;
+            }
+            bytes.push_back(static_cast<std::uint8_t>((high << 4U) | low));
+        }
+        return !bytes.empty();
+    }
+
+    auto module_process_memory_page_rounded_size(std::size_t requested,
+                                                 std::size_t& rounded) -> bool
+    {
+        SYSTEM_INFO information{};
+        GetSystemInfo(&information);
+        const auto page_size = static_cast<std::size_t>(information.dwPageSize);
+        if (requested == 0 || page_size == 0 ||
+            requested > std::numeric_limits<std::size_t>::max() - (page_size - 1U))
+        {
+            rounded = 0;
+            return false;
+        }
+        rounded = ((requested + page_size - 1U) / page_size) * page_size;
+        return rounded >= requested;
+    }
+
+    auto module_process_memory_collect_spans(std::uintptr_t address,
+                                             std::size_t size,
+                                             bool require_readable,
+                                             std::vector<ModuleProcessMemorySpan>& spans,
+                                             DWORD& win32_error) -> bool
+    {
+        spans.clear();
+        win32_error = ERROR_SUCCESS;
+        if (!address || !size ||
+            size > std::numeric_limits<std::uintptr_t>::max() - address)
+        {
+            win32_error = ERROR_ARITHMETIC_OVERFLOW;
+            return false;
+        }
+        const auto end = address + size;
+        auto cursor = address;
+        while (cursor < end)
+        {
+            MEMORY_BASIC_INFORMATION information{};
+            if (VirtualQuery(reinterpret_cast<const void*>(cursor),
+                             &information,
+                             sizeof(information)) != sizeof(information))
+            {
+                win32_error = GetLastError();
+                return false;
+            }
+            const auto region = reinterpret_cast<std::uintptr_t>(information.BaseAddress);
+            if (!information.RegionSize || region > cursor ||
+                information.RegionSize > std::numeric_limits<std::uintptr_t>::max() - region)
+            {
+                win32_error = ERROR_INVALID_ADDRESS;
+                return false;
+            }
+            const auto region_end = region + information.RegionSize;
+            if (region_end <= cursor || information.State != MEM_COMMIT ||
+                (information.Protect & PAGE_GUARD) != 0 ||
+                (require_readable && !module_process_memory_is_readable(information.Protect)))
+            {
+                win32_error = ERROR_NOACCESS;
+                return false;
+            }
+            const auto span_end = std::min(end, region_end);
+            spans.push_back({cursor, static_cast<std::size_t>(span_end - cursor), information.Protect});
+            cursor = span_end;
+        }
+        return !spans.empty();
+    }
+
+    auto module_process_memory_span_protections_match(
+        const std::vector<ModuleProcessMemorySpan>& spans,
+        std::size_t count) -> bool
+    {
+        count = std::min(count, spans.size());
+        for (std::size_t index = 0; index < count; ++index)
+        {
+            const auto& span = spans[index];
+            if (span.size > std::numeric_limits<std::uintptr_t>::max() - span.address)
+            {
+                return false;
+            }
+            const auto end = span.address + span.size;
+            auto cursor = span.address;
+            while (cursor < end)
+            {
+                MEMORY_BASIC_INFORMATION information{};
+                if (VirtualQuery(reinterpret_cast<const void*>(cursor),
+                                 &information,
+                                 sizeof(information)) != sizeof(information) ||
+                    information.State != MEM_COMMIT || information.Protect != span.protection)
+                {
+                    return false;
+                }
+                const auto region = reinterpret_cast<std::uintptr_t>(information.BaseAddress);
+                if (!information.RegionSize || region > cursor ||
+                    information.RegionSize > std::numeric_limits<std::uintptr_t>::max() - region)
+                {
+                    return false;
+                }
+                const auto next = std::min(end, region + information.RegionSize);
+                if (next <= cursor)
+                {
+                    return false;
+                }
+                cursor = next;
+            }
+        }
+        return true;
+    }
+
+    auto module_process_memory_range_protection_matches(std::uintptr_t address,
+                                                        std::size_t size,
+                                                        DWORD protection) -> bool
+    {
+        if (!address || !size || size > std::numeric_limits<std::uintptr_t>::max() - address)
+        {
+            return false;
+        }
+        const auto end = address + size;
+        auto cursor = address;
+        while (cursor < end)
+        {
+            MEMORY_BASIC_INFORMATION information{};
+            if (VirtualQuery(reinterpret_cast<const void*>(cursor),
+                             &information,
+                             sizeof(information)) != sizeof(information) ||
+                information.State != MEM_COMMIT || information.Protect != protection)
+            {
+                return false;
+            }
+            const auto region = reinterpret_cast<std::uintptr_t>(information.BaseAddress);
+            if (!information.RegionSize || region > cursor ||
+                information.RegionSize > std::numeric_limits<std::uintptr_t>::max() - region)
+            {
+                return false;
+            }
+            const auto next = std::min(end, region + information.RegionSize);
+            if (next <= cursor)
+            {
+                return false;
+            }
+            cursor = next;
+        }
+        return true;
+    }
+
+    auto module_process_memory_restore_spans(const std::vector<ModuleProcessMemorySpan>& spans,
+                                             std::size_t count) -> bool
+    {
+        count = std::min(count, spans.size());
+        bool restored = true;
+        for (std::size_t remaining = count; remaining > 0; --remaining)
+        {
+            const auto& span = spans[remaining - 1U];
+            DWORD ignored = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(span.address),
+                                span.size,
+                                span.protection,
+                                &ignored))
+            {
+                restored = false;
+            }
+        }
+        return restored && module_process_memory_span_protections_match(spans, count);
+    }
+
+    auto module_process_memory_make_writable(const std::vector<ModuleProcessMemorySpan>& spans,
+                                             std::size_t& changed_count,
+                                             bool& restore_succeeded,
+                                             DWORD& win32_error) -> bool
+    {
+        changed_count = 0;
+        restore_succeeded = true;
+        win32_error = ERROR_SUCCESS;
+        for (const auto& span : spans)
+        {
+            // Keep writable and copy-on-write mappings in their exact current
+            // mode. Promoting a PAGE_WRITECOPY view to PAGE_READWRITE is invalid
+            // even though the existing copy-on-write view is directly writable.
+            const DWORD writable = module_process_memory_is_writable(span.protection)
+                                       ? span.protection
+                                       : module_process_memory_is_executable(span.protection)
+                                             ? PAGE_EXECUTE_READWRITE
+                                             : PAGE_READWRITE;
+            DWORD ignored = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(span.address), span.size, writable, &ignored))
+            {
+                win32_error = GetLastError();
+                restore_succeeded = module_process_memory_restore_spans(spans, changed_count);
+                return false;
+            }
+            ++changed_count;
+        }
+        return true;
+    }
+
+    auto module_process_memory_previous_protection(
+        const std::vector<ModuleProcessMemorySpan>& spans) -> std::string
+    {
+        if (spans.empty())
+        {
+            return "unknown";
+        }
+        const std::string first = module_process_memory_protection_name(spans.front().protection);
+        for (std::size_t index = 1; index < spans.size(); ++index)
+        {
+            if (spans[index].protection != spans.front().protection)
+            {
+                return "mixed";
+            }
+        }
+        return first;
+    }
+
+    auto module_process_memory_metadata_address(std::uintptr_t address) -> std::string
+    {
+        return "\"address\":\"" + hex_address(address) + "\"";
+    }
+
+    auto module_process_memory_failure(const char* stage,
+                                       const std::string& message,
+                                       const std::string& metadata = {}) -> std::string
+    {
+        return response_json(false, stage, 0, 1, message, metadata);
+    }
+
+    auto module_process_memory_allocate(const std::string& request) -> std::string
+    {
+        std::string owner{};
+        std::string protection_name{};
+        std::size_t requested_size = 0;
+        DWORD protection = 0;
+        if (!module_process_memory_owner_field(request, owner) ||
+            !module_process_memory_size_field(request,
+                                              "size",
+                                              ModuleProcessMemoryMaxAllocationBytes,
+                                              requested_size) ||
+            !module_process_memory_protection_field(request, protection, protection_name) ||
+            !module_process_memory_is_private_allocation_protection(protection))
+        {
+            return module_process_memory_failure("module_process_memory_allocate_invalid",
+                                                 "invalid process-memory allocation request");
+        }
+        std::size_t charged_size = 0;
+        if (!module_process_memory_page_rounded_size(requested_size, charged_size))
+        {
+            return module_process_memory_failure("module_process_memory_allocate_invalid",
+                                                 "process-memory allocation size overflowed");
+        }
+
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        if (!g_accepting_bridge_commands.load(std::memory_order_acquire))
+        {
+            return module_process_memory_failure("bridge_stopping",
+                                                 "bridge is stopping and rejected the allocation");
+        }
+        if (charged_size > ModuleProcessMemoryMaxTrackedBytes - g_module_process_memory_tracked_bytes)
+        {
+            return module_process_memory_failure("module_process_memory_allocation_limit",
+                                                 "tracked process-memory allocation limit exceeded");
+        }
+        auto* allocation = VirtualAlloc(nullptr,
+                                        requested_size,
+                                        MEM_RESERVE | MEM_COMMIT,
+                                        protection);
+        if (!allocation)
+        {
+            return module_process_memory_failure("module_process_memory_allocate_failed",
+                                                 "VirtualAlloc failed for the process-memory allocation");
+        }
+        const auto address = reinterpret_cast<std::uintptr_t>(allocation);
+        if (!module_process_memory_range_protection_matches(address, requested_size, protection))
+        {
+            VirtualFree(allocation, 0, MEM_RELEASE);
+            return module_process_memory_failure("module_process_memory_allocate_verify_failed",
+                                                 "the process-memory allocation could not be verified");
+        }
+        try
+        {
+            const auto inserted = g_module_process_memory_allocations.emplace(
+                address,
+                ModuleProcessMemoryAllocation{address, requested_size, charged_size, owner});
+            if (!inserted.second)
+            {
+                VirtualFree(allocation, 0, MEM_RELEASE);
+                return module_process_memory_failure("module_process_memory_allocate_failed",
+                                                     "the process-memory allocation address collided");
+            }
+        }
+        catch (...)
+        {
+            VirtualFree(allocation, 0, MEM_RELEASE);
+            return module_process_memory_failure("module_process_memory_allocate_failed",
+                                                 "the process-memory allocation could not be tracked");
+        }
+        g_module_process_memory_tracked_bytes += charged_size;
+        return response_json(true,
+                             "module_process_memory_allocate",
+                             1,
+                             0,
+                             "process memory allocated",
+                             module_process_memory_metadata_address(address) +
+                                 ",\"size\":" + std::to_string(requested_size) +
+                                 ",\"protection\":\"" + protection_name + "\"" +
+                                 ",\"verified\":true");
+    }
+
+    auto module_process_memory_read(const std::string& request) -> std::string
+    {
+        std::string owner{};
+        std::uintptr_t address = 0;
+        std::size_t size = 0;
+        if (!module_process_memory_owner_field(request, owner) ||
+            !module_process_memory_address_field(request, address) ||
+            !module_process_memory_size_field(request,
+                                              "size",
+                                              ModuleProcessMemoryMaxTransferBytes,
+                                              size))
+        {
+            return module_process_memory_failure("module_process_memory_read_invalid",
+                                                 "invalid process-memory read request");
+        }
+
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        if (!g_accepting_bridge_commands.load(std::memory_order_acquire))
+        {
+            return module_process_memory_failure("bridge_stopping",
+                                                 "bridge is stopping and rejected the read");
+        }
+        std::vector<ModuleProcessMemorySpan> spans{};
+        DWORD win32_error = ERROR_SUCCESS;
+        if (!module_process_memory_collect_spans(address, size, true, spans, win32_error))
+        {
+            return module_process_memory_failure("module_process_memory_read_inaccessible",
+                                                 "the complete process-memory read range is not accessible");
+        }
+        std::vector<std::uint8_t> bytes(size, 0);
+        if (!safe_copy(bytes.data(), reinterpret_cast<const void*>(address), bytes.size()))
+        {
+            return module_process_memory_failure("module_process_memory_read_failed",
+                                                 "the process-memory read did not complete exactly");
+        }
+        const auto encoded = bytes_to_hex(bytes.data(), static_cast<int>(bytes.size()));
+        if (encoded.size() != bytes.size() * 2U)
+        {
+            return module_process_memory_failure("module_process_memory_read_failed",
+                                                 "the process-memory read could not be encoded exactly");
+        }
+        return response_json(true,
+                             "module_process_memory_read",
+                             static_cast<int>(bytes.size()),
+                             0,
+                             "process memory read",
+                             module_process_memory_metadata_address(address) +
+                                 ",\"size\":" + std::to_string(bytes.size()) +
+                                 ",\"data_hex\":\"" + encoded + "\"" +
+                                 ",\"verified\":true");
+    }
+
+    auto module_process_memory_write(const std::string& request) -> std::string
+    {
+        std::string owner{};
+        std::string encoded{};
+        std::uintptr_t address = 0;
+        if (!module_process_memory_owner_field(request, owner) ||
+            !module_process_memory_address_field(request, address) ||
+            !module_process_memory_string_field(request, "data_hex", encoded))
+        {
+            return module_process_memory_failure("module_process_memory_write_invalid",
+                                                 "invalid process-memory write request");
+        }
+        std::vector<std::uint8_t> bytes{};
+        if (!module_process_memory_decode_hex(encoded, bytes))
+        {
+            return module_process_memory_failure("module_process_memory_write_invalid",
+                                                 "process-memory write data is malformed or oversized");
+        }
+
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        if (!g_accepting_bridge_commands.load(std::memory_order_acquire))
+        {
+            return module_process_memory_failure("bridge_stopping",
+                                                 "bridge is stopping and rejected the write");
+        }
+        std::vector<ModuleProcessMemorySpan> spans{};
+        DWORD win32_error = ERROR_SUCCESS;
+        if (!module_process_memory_collect_spans(address, bytes.size(), false, spans, win32_error))
+        {
+            return module_process_memory_failure("module_process_memory_write_inaccessible",
+                                                 "the complete process-memory write range is not committed");
+        }
+        const auto previous_protection = module_process_memory_previous_protection(spans);
+        std::vector<std::uint8_t> verification(bytes.size(), 0);
+        std::size_t changed_count = 0;
+        bool early_restore_succeeded = true;
+        if (!module_process_memory_make_writable(spans,
+                                                 changed_count,
+                                                 early_restore_succeeded,
+                                                 win32_error))
+        {
+            return module_process_memory_failure(
+                early_restore_succeeded
+                    ? "module_process_memory_write_protect_failed"
+                    : "module_process_memory_write_restore_failed",
+                early_restore_succeeded
+                    ? "the complete process-memory range could not be made writable"
+                    : "the process-memory range could not be restored after a protection failure",
+                module_process_memory_metadata_address(address) +
+                    ",\"previous_protection\":\"" + previous_protection + "\"" +
+                    ",\"verified\":false");
+        }
+
+        const bool copied = safe_copy(reinterpret_cast<void*>(address), bytes.data(), bytes.size());
+        const bool read_back = copied &&
+                               safe_copy(verification.data(),
+                                         reinterpret_cast<const void*>(address),
+                                         verification.size());
+        const bool exact = read_back && verification == bytes;
+        const bool restored = module_process_memory_restore_spans(spans, changed_count);
+        const bool flushed = FlushInstructionCache(GetCurrentProcess(),
+                                                   reinterpret_cast<const void*>(address),
+                                                   bytes.size()) != FALSE;
+        const auto result_metadata = module_process_memory_metadata_address(address) +
+                                     ",\"bytes_written\":" +
+                                     std::to_string(exact ? bytes.size() : 0U) +
+                                     ",\"previous_protection\":\"" + previous_protection + "\"";
+        if (!restored)
+        {
+            return module_process_memory_failure("module_process_memory_write_restore_failed",
+                                                 "the process-memory write completed but protection restoration failed",
+                                                 result_metadata + ",\"verified\":false");
+        }
+        if (!exact)
+        {
+            return module_process_memory_failure("module_process_memory_write_failed",
+                                                 "the process-memory write did not complete exactly",
+                                                 result_metadata + ",\"verified\":false");
+        }
+        if (!flushed)
+        {
+            return module_process_memory_failure("module_process_memory_write_flush_failed",
+                                                 "the process-memory write completed but instruction-cache flush failed",
+                                                 result_metadata + ",\"verified\":false");
+        }
+        return response_json(true,
+                             "module_process_memory_write",
+                             static_cast<int>(bytes.size()),
+                             0,
+                             "process memory written",
+                             result_metadata + ",\"verified\":true");
+    }
+
+    auto module_process_memory_protect(const std::string& request) -> std::string
+    {
+        std::string owner{};
+        std::string protection_name{};
+        std::uintptr_t address = 0;
+        std::size_t size = 0;
+        DWORD protection = 0;
+        if (!module_process_memory_owner_field(request, owner) ||
+            !module_process_memory_address_field(request, address) ||
+            !module_process_memory_size_field(request,
+                                              "size",
+                                              ModuleProcessMemoryMaxAllocationBytes,
+                                              size) ||
+            !module_process_memory_protection_field(request, protection, protection_name))
+        {
+            return module_process_memory_failure("module_process_memory_protect_invalid",
+                                                 "invalid process-memory protection request");
+        }
+
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        if (!g_accepting_bridge_commands.load(std::memory_order_acquire))
+        {
+            return module_process_memory_failure("bridge_stopping",
+                                                 "bridge is stopping and rejected the protection change");
+        }
+        std::vector<ModuleProcessMemorySpan> spans{};
+        DWORD win32_error = ERROR_SUCCESS;
+        if (!module_process_memory_collect_spans(address, size, false, spans, win32_error))
+        {
+            return module_process_memory_failure("module_process_memory_protect_inaccessible",
+                                                 "the complete process-memory protection range is not committed");
+        }
+        const auto previous_protection = module_process_memory_previous_protection(spans);
+        std::size_t changed_count = 0;
+        for (; changed_count < spans.size(); ++changed_count)
+        {
+            DWORD ignored = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(spans[changed_count].address),
+                                spans[changed_count].size,
+                                protection,
+                                &ignored))
+            {
+                const bool restored = module_process_memory_restore_spans(spans, changed_count);
+                return module_process_memory_failure(
+                    restored
+                        ? "module_process_memory_protect_failed"
+                        : "module_process_memory_protect_restore_failed",
+                    restored
+                        ? "the complete process-memory protection range could not be changed"
+                        : "the process-memory protection change could not be rolled back",
+                    module_process_memory_metadata_address(address) +
+                        ",\"size\":" + std::to_string(size) +
+                        ",\"protection\":\"" + protection_name + "\"" +
+                        ",\"previous_protection\":\"" + previous_protection + "\"" +
+                        ",\"verified\":false");
+            }
+        }
+        const bool protection_verified =
+            module_process_memory_range_protection_matches(address, size, protection);
+        if (!protection_verified)
+        {
+            const bool restored = module_process_memory_restore_spans(spans, changed_count);
+            return module_process_memory_failure(
+                restored
+                    ? "module_process_memory_protect_verify_failed"
+                    : "module_process_memory_protect_restore_failed",
+                restored
+                    ? "the process-memory protection change could not be verified"
+                    : "the process-memory protection change could not be rolled back",
+                module_process_memory_metadata_address(address) +
+                    ",\"size\":" + std::to_string(size) +
+                    ",\"protection\":\"" + protection_name + "\"" +
+                    ",\"previous_protection\":\"" + previous_protection + "\"" +
+                    ",\"verified\":false");
+        }
+        if (!FlushInstructionCache(GetCurrentProcess(),
+                                   reinterpret_cast<const void*>(address),
+                                   size))
+        {
+            const bool restored = module_process_memory_restore_spans(spans, changed_count);
+            return module_process_memory_failure(
+                restored
+                    ? "module_process_memory_protect_flush_failed"
+                    : "module_process_memory_protect_restore_failed",
+                restored
+                    ? "the process-memory protection changed but instruction-cache flush failed"
+                    : "the process-memory protection change could not be rolled back",
+                module_process_memory_metadata_address(address) +
+                    ",\"size\":" + std::to_string(size) +
+                    ",\"protection\":\"" + protection_name + "\"" +
+                    ",\"previous_protection\":\"" + previous_protection + "\"" +
+                    ",\"verified\":false");
+        }
+        return response_json(true,
+                             "module_process_memory_protect",
+                             1,
+                             0,
+                             "process-memory protection changed",
+                             module_process_memory_metadata_address(address) +
+                                 ",\"size\":" + std::to_string(size) +
+                                 ",\"protection\":\"" + protection_name + "\"" +
+                                 ",\"previous_protection\":\"" + previous_protection + "\"" +
+                                 ",\"verified\":true");
+    }
+
+    auto module_process_memory_inject(const std::string& request) -> std::string
+    {
+        std::string owner{};
+        std::string encoded{};
+        std::string protection_name{};
+        DWORD protection = 0;
+        if (!module_process_memory_owner_field(request, owner) ||
+            !module_process_memory_string_field(request, "data_hex", encoded) ||
+            !module_process_memory_protection_field(request, protection, protection_name) ||
+            !module_process_memory_is_private_allocation_protection(protection))
+        {
+            return module_process_memory_failure("module_process_memory_inject_invalid",
+                                                 "invalid process-memory injection request");
+        }
+        std::vector<std::uint8_t> bytes{};
+        if (!module_process_memory_decode_hex(encoded, bytes))
+        {
+            return module_process_memory_failure("module_process_memory_inject_invalid",
+                                                 "process-memory injection data is malformed or oversized");
+        }
+        std::size_t charged_size = 0;
+        if (!module_process_memory_page_rounded_size(bytes.size(), charged_size))
+        {
+            return module_process_memory_failure("module_process_memory_inject_invalid",
+                                                 "process-memory injection size overflowed");
+        }
+        std::vector<std::uint8_t> verification(bytes.size(), 0);
+
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        if (!g_accepting_bridge_commands.load(std::memory_order_acquire))
+        {
+            return module_process_memory_failure("bridge_stopping",
+                                                 "bridge is stopping and rejected the injection");
+        }
+        if (charged_size > ModuleProcessMemoryMaxTrackedBytes - g_module_process_memory_tracked_bytes)
+        {
+            return module_process_memory_failure("module_process_memory_allocation_limit",
+                                                 "tracked process-memory allocation limit exceeded");
+        }
+        auto* allocation = VirtualAlloc(nullptr,
+                                        bytes.size(),
+                                        MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_READWRITE);
+        if (!allocation)
+        {
+            return module_process_memory_failure("module_process_memory_inject_allocate_failed",
+                                                 "VirtualAlloc failed for the process-memory injection");
+        }
+        const auto address = reinterpret_cast<std::uintptr_t>(allocation);
+        const bool copied = safe_copy(allocation, bytes.data(), bytes.size());
+        const bool read_back = copied && safe_copy(verification.data(), allocation, verification.size());
+        const bool exact = read_back && verification == bytes;
+        if (!exact)
+        {
+            VirtualFree(allocation, 0, MEM_RELEASE);
+            return module_process_memory_failure("module_process_memory_inject_write_failed",
+                                                 "the process-memory injection did not write exactly");
+        }
+        DWORD previous = 0;
+        if (!VirtualProtect(allocation, charged_size, protection, &previous) ||
+            !module_process_memory_range_protection_matches(address, bytes.size(), protection))
+        {
+            VirtualFree(allocation, 0, MEM_RELEASE);
+            return module_process_memory_failure("module_process_memory_inject_protect_failed",
+                                                 "the process-memory injection protection could not be applied exactly");
+        }
+        if (!FlushInstructionCache(GetCurrentProcess(), allocation, bytes.size()))
+        {
+            VirtualFree(allocation, 0, MEM_RELEASE);
+            return module_process_memory_failure("module_process_memory_inject_flush_failed",
+                                                 "the process-memory injection instruction-cache flush failed");
+        }
+        try
+        {
+            const auto inserted = g_module_process_memory_allocations.emplace(
+                address,
+                ModuleProcessMemoryAllocation{address, bytes.size(), charged_size, owner});
+            if (!inserted.second)
+            {
+                VirtualFree(allocation, 0, MEM_RELEASE);
+                return module_process_memory_failure("module_process_memory_inject_failed",
+                                                     "the process-memory injection address collided");
+            }
+        }
+        catch (...)
+        {
+            VirtualFree(allocation, 0, MEM_RELEASE);
+            return module_process_memory_failure("module_process_memory_inject_failed",
+                                                 "the process-memory injection could not be tracked");
+        }
+        g_module_process_memory_tracked_bytes += charged_size;
+        return response_json(true,
+                             "module_process_memory_inject",
+                             static_cast<int>(bytes.size()),
+                             0,
+                             "process memory injected",
+                             module_process_memory_metadata_address(address) +
+                                 ",\"size\":" + std::to_string(bytes.size()) +
+                                 ",\"bytes_written\":" + std::to_string(bytes.size()) +
+                                 ",\"protection\":\"" + protection_name + "\"" +
+                                 ",\"verified\":true");
+    }
+
+    auto module_process_memory_free(const std::string& request) -> std::string
+    {
+        std::string owner{};
+        std::uintptr_t address = 0;
+        if (!module_process_memory_owner_field(request, owner) ||
+            !module_process_memory_address_field(request, address))
+        {
+            return module_process_memory_failure("module_process_memory_free_invalid",
+                                                 "invalid process-memory free request");
+        }
+
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        if (!g_accepting_bridge_commands.load(std::memory_order_acquire))
+        {
+            return module_process_memory_failure("bridge_stopping",
+                                                 "bridge is stopping and rejected the free");
+        }
+        const auto found = g_module_process_memory_allocations.find(address);
+        if (found == g_module_process_memory_allocations.end() || found->second.owner != owner)
+        {
+            return module_process_memory_failure("module_process_memory_free_not_owned",
+                                                 "the allocation is not owned by this module");
+        }
+        const auto allocation = found->second;
+        if (!VirtualFree(reinterpret_cast<void*>(address), 0, MEM_RELEASE))
+        {
+            return module_process_memory_failure("module_process_memory_free_failed",
+                                                 "VirtualFree failed for the owned allocation");
+        }
+        g_module_process_memory_allocations.erase(found);
+        g_module_process_memory_tracked_bytes =
+            allocation.charged_size <= g_module_process_memory_tracked_bytes
+                ? g_module_process_memory_tracked_bytes - allocation.charged_size
+                : 0;
+        return response_json(true,
+                             "module_process_memory_free",
+                             1,
+                             0,
+                             "owned process memory freed",
+                             module_process_memory_metadata_address(address) +
+                                 ",\"size\":" + std::to_string(allocation.requested_size) +
+                                 ",\"freed\":true,\"verified\":true");
+    }
+
+    auto handle_module_process_memory_request(const std::string& request_type,
+                                              const std::string& request) -> std::string
+    {
+        try
+        {
+            if (request_type == "module_process_memory_allocate") return module_process_memory_allocate(request);
+            if (request_type == "module_process_memory_read") return module_process_memory_read(request);
+            if (request_type == "module_process_memory_write") return module_process_memory_write(request);
+            if (request_type == "module_process_memory_protect") return module_process_memory_protect(request);
+            if (request_type == "module_process_memory_inject") return module_process_memory_inject(request);
+            if (request_type == "module_process_memory_free") return module_process_memory_free(request);
+        }
+        catch (...)
+        {
+            return module_process_memory_failure("module_process_memory_internal_error",
+                                                 "the process-memory operation failed internally");
+        }
+        return module_process_memory_failure("unknown_command", "unknown bridge command");
+    }
+
+    auto module_process_memory_release_all() -> void
+    {
+        std::lock_guard<std::mutex> lock(g_module_process_memory_mutex);
+        for (auto entry = g_module_process_memory_allocations.begin();
+             entry != g_module_process_memory_allocations.end();)
+        {
+            if (VirtualFree(reinterpret_cast<void*>(entry->first), 0, MEM_RELEASE))
+            {
+                entry = g_module_process_memory_allocations.erase(entry);
+            }
+            else
+            {
+                ++entry;
+            }
+        }
+        g_module_process_memory_tracked_bytes = 0;
+        for (const auto& entry : g_module_process_memory_allocations)
+        {
+            if (entry.second.charged_size <=
+                std::numeric_limits<std::size_t>::max() - g_module_process_memory_tracked_bytes)
+            {
+                g_module_process_memory_tracked_bytes += entry.second.charged_size;
+            }
+            else
+            {
+                g_module_process_memory_tracked_bytes = ModuleProcessMemoryMaxTrackedBytes;
+                break;
+            }
+        }
+    }
+
+    // =============================================================================
     // Section: Bridge IPC command dispatch and listener lifecycle
     // Risk: very high. C# and WebView2 reach native behavior by command strings.
     // =============================================================================
@@ -21427,7 +22474,7 @@ namespace
                                  1,
                                  "bridge is stopping and rejected the command");
         }
-        if (line.find("\"type\":\"ping\"") != std::string::npos)
+        if (request_type == "ping")
         {
             return response_json(true,
                                  "ping",
@@ -21437,9 +22484,9 @@ namespace
                                  "\"pid\":" + std::to_string(GetCurrentProcessId()) +
                                      ",\"port\":" + std::to_string(g_bound_port.load()));
         }
-        if (line.find("\"type\":\"capabilities\"") != std::string::npos)
+        if (request_type == "capabilities")
         {
-            std::string commands = "[\"ping\",\"capabilities\",\"paint_full_route\",\"paint_replication_probe\",\"paint_replication_pressure_probe\",\"paint_replication_texture_probe\",\"paint_packed_replay_probe\",\"cancel_paint\",\"shutdown\"]";
+            std::string commands = "[\"ping\",\"capabilities\",\"paint_full_route\",\"paint_replication_probe\",\"paint_replication_pressure_probe\",\"paint_replication_texture_probe\",\"paint_packed_replay_probe\",\"module_process_memory_allocate\",\"module_process_memory_read\",\"module_process_memory_write\",\"module_process_memory_protect\",\"module_process_memory_inject\",\"module_process_memory_free\",\"cancel_paint\",\"shutdown\"]";
             return std::string("{\"success\":true,\"stage\":\"capabilities\",\"applied\":0,\"failures\":0,") +
                    "\"message\":\"ok\",\"timing_ms\":{}," +
                    "\"metadata\":{\"commands\":" + commands + "," +
@@ -21453,9 +22500,26 @@ namespace
                    "\"paint_at_uv_with_brush_used\":false," +
                    "\"internal_no_resend_local_apply\":true," +
                    "\"replication\":\"server_paint_batch\"," +
-                   "\"multiplayer_replicated\":true}}\n";
+                   "\"multiplayer_replicated\":true," +
+                   "\"module_process_memory_max_transfer_bytes\":" +
+                   std::to_string(ModuleProcessMemoryMaxTransferBytes) + "," +
+                   "\"module_process_memory_max_allocation_bytes\":" +
+                   std::to_string(ModuleProcessMemoryMaxAllocationBytes) + "," +
+                   "\"module_process_memory_max_tracked_bytes\":" +
+                   std::to_string(ModuleProcessMemoryMaxTrackedBytes) + "," +
+                   "\"module_process_memory_private_protections\":[\"no-access\",\"read-only\",\"read-write\",\"execute\",\"execute-read\",\"execute-read-write\"]," +
+                   "\"module_process_memory_protect_protections\":[\"no-access\",\"read-only\",\"read-write\",\"write-copy\",\"execute\",\"execute-read\",\"execute-read-write\",\"execute-write-copy\"]}}\n";
         }
-        if (line.find("\"type\":\"cancel_paint\"") != std::string::npos)
+        if (request_type == "module_process_memory_allocate" ||
+            request_type == "module_process_memory_read" ||
+            request_type == "module_process_memory_write" ||
+            request_type == "module_process_memory_protect" ||
+            request_type == "module_process_memory_inject" ||
+            request_type == "module_process_memory_free")
+        {
+            return handle_module_process_memory_request(request_type, line);
+        }
+        if (request_type == "cancel_paint")
         {
             const bool cancel_latched = latch_active_paint_request_cancel();
             const int cancelled_active = cancel_executing_paint_jobs("cancel_paint");
@@ -21474,7 +22538,7 @@ namespace
                                          g_paint_request_admission_state.load(std::memory_order_acquire) !=
                                          static_cast<int>(PaintRequestAdmissionState::Idle))));
         }
-        if (line.find("\"type\":\"shutdown\"") != std::string::npos)
+        if (request_type == "shutdown")
         {
             // Close admission/listening before observing jobs.  A handler which
             // was already accepted must pass the dispatch gate above and a paint
@@ -21530,17 +22594,19 @@ namespace
                                      ",\"active_paint_quiescent\":true" +
                                      ",\"hook_callbacks_quiescent\":true");
         }
-        if (line.find("\"type\":\"paint_full_route\"") != std::string::npos)
+        if (request_type == "paint_full_route")
         {
             return paint_full_route_native(line);
         }
-        if (line.find("\"type\":\"paint_replication_probe\"") != std::string::npos ||
-            line.find("\"type\":\"paint_replication_pressure_probe\"") != std::string::npos ||
-            line.find("\"type\":\"paint_replication_texture_probe\"") != std::string::npos)
+        if (request_type == "paint_replication_probe" ||
+            request_type == "paint_replication_pressure_probe" ||
+            request_type == "paint_replication_texture_probe")
         {
+            // Canonical wire member: \"type\":\"paint_replication_texture_probe\".
+            // Dispatch still uses only the parsed request_type equality above.
             return paint_full_route_native(line);
         }
-        if (line.find("\"type\":\"paint_packed_replay_probe\"") != std::string::npos)
+        if (request_type == "paint_packed_replay_probe")
         {
             return paint_full_route_native(line);
         }
@@ -21564,6 +22630,10 @@ namespace
 
         const int timeout_ms = 5000;
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+        // Raw reads can produce a six-megabyte hexadecimal response. Keep a
+        // client which stops reading from pinning this detached handler and the
+        // shutdown allocation sweep indefinitely.
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
         std::string pending{};
         pending.reserve(65536);
         std::string hello{};
@@ -21647,6 +22717,10 @@ namespace
             post_paint_dispatch_message();
             Sleep(50);
         }
+        // Module allocations are scoped to this authenticated bridge lifetime.
+        // All command handlers have drained, so no read/write/protect/free can
+        // race this sweep or survive into a same-module bridge restart.
+        module_process_memory_release_all();
         // A timed-out paint handler may have returned while its game-thread
         // cancellation was still pending.  Keep the old hook alive until that
         // work reaches a terminal state; never tear it down underneath planning
@@ -21780,6 +22854,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI BridgeStartV1(void* remote_block)
                            0);
         return ERROR_ALREADY_EXISTS;
     }
+
+    // A normal stop already performs this sweep after all handlers drain. Retry
+    // defensively before publishing a new identity if VirtualFree previously
+    // failed for an owned allocation.
+    module_process_memory_release_all();
 
     // Texture deltas are research evidence scoped to one authenticated bridge
     // instance. A same-module restart must not treat the previous instance's

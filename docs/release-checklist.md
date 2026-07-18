@@ -100,6 +100,45 @@ These require MECCHA CHAMELEON.
   clean user-data folder, two rapid app launches, and a forced WebView process
   failure. Diagnostics must identify the failed startup stage.
 
+## Module SDK Process-Memory Gates
+
+- Validate the documented `process-memory-example` with the production module
+  catalog before packaging. Its manifest must request only
+  `process.memory.read` and `process.memory.write`.
+- Against a valid attached game, click the example's self-test once and require
+  a visible `PASS`. The sequence must create only a module-owned allocation,
+  inject or write a deterministic sentinel, read and compare every byte, change
+  the complete allocation to `read-only`, restore `read-write`, and free it.
+  The game must remain responsive and the bridge PID, instance GUID, and hash
+  must remain the authenticated values throughout the sequence.
+- Repeat the self-test after a module reload and after restarting the controller
+  against the same game. No stale iframe generation may complete a late native
+  write, and a request admitted for an old bridge instance must not run against
+  the replacement instance.
+- Separately retain one owned allocation across a module reload and verify the
+  reloaded package with the same module ID can free it. Then leave one owned
+  allocation outstanding and verify authenticated bridge shutdown releases it;
+  no allocation address may carry into the next bridge instance.
+- Verify a module cannot submit a PID, bridge endpoint, owner ID, or another
+  module's allocation identity. Cross-module free, double free, zero addresses,
+  overflowing ranges, malformed/odd hexadecimal bytes, inaccessible pages, and
+  unknown protection values must fail without crashing the game or host.
+- Exercise the exact limits: a 3 MiB transfer succeeds and 3 MiB plus one byte
+  fails; a 64 MiB allocation succeeds and 64 MiB plus one byte fails; all
+  modules combined can own exactly 256 MiB and the next allocation fails.
+  Failures must reject the original request, never clamp, truncate, zero-fill,
+  or report partial success.
+- Verify read-only modules cannot allocate, write, protect, inject, or free;
+  write-only modules cannot read. Removing or revoking a permission during
+  reload must prevent every newly admitted operation.
+- With no game, a stopped bridge, multiple same-name processes, and a game that
+  exits during a request, verify raw-memory calls fail against the unavailable
+  authenticated target and never fall back to another process.
+- Confirm all eight documented protection names round-trip exactly. Allocate
+  and inject default to `read-write`; `execute-read` and other executable values
+  change page protection only. No SDK command creates a thread, calls an
+  address, or executes injected bytes.
+
 ## Multiplayer Checks
 
 Collect these separately for painter-as-host and painter-as-joining-client:

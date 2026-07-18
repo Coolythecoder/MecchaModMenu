@@ -28,6 +28,8 @@ public static class ModuleSdkV1
     public const int MaxDataValueBytes = 256 * 1024;
     public const int MaxDataModuleBytes = 4 * 1024 * 1024;
     public const int MaxMemoryTotalBytes = 64 * 1024 * 1024;
+    public const int MaxProcessMemoryTransferBytes = 3 * 1024 * 1024;
+    public const int MaxProcessMemoryAllocationBytes = 64 * 1024 * 1024;
 
     public const string SnapshotReadPermission = "snapshot.read";
     public const string PaintStartPermission = "paint.start";
@@ -42,6 +44,8 @@ public static class ModuleSdkV1
     public const string StorageWritePermission = "storage.write";
     public const string MemoryReadPermission = "memory.read";
     public const string MemoryWritePermission = "memory.write";
+    public const string ProcessMemoryReadPermission = "process.memory.read";
+    public const string ProcessMemoryWritePermission = "process.memory.write";
 
     private static readonly string[] PermissionValues =
     [
@@ -57,7 +61,9 @@ public static class ModuleSdkV1
         StorageReadPermission,
         StorageWritePermission,
         MemoryReadPermission,
-        MemoryWritePermission
+        MemoryWritePermission,
+        ProcessMemoryReadPermission,
+        ProcessMemoryWritePermission
     ];
 
     public static StringComparer IdComparer { get; } = StringComparer.OrdinalIgnoreCase;
@@ -72,6 +78,17 @@ public static class ModuleSdkV1
         "storage.set" or "storage.delete" => StorageWritePermission,
         "memory.get" or "memory.list" => MemoryReadPermission,
         "memory.set" or "memory.delete" => MemoryWritePermission,
+        _ => null
+    };
+
+    public static string? RequiredPermissionForProcessMemoryCommand(string? command) => command switch
+    {
+        "process.memory.read" => ProcessMemoryReadPermission,
+        "process.memory.allocate" or
+        "process.memory.write" or
+        "process.memory.protect" or
+        "process.memory.inject" or
+        "process.memory.free" => ProcessMemoryWritePermission,
         _ => null
     };
 

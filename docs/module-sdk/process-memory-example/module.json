@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "process-memory-example",
+  "name": "Process Memory Self-Test",
+  "version": "1.0.0",
+  "description": "Safely verifies process-memory access using only a module-owned allocation.",
+  "entry": "index.html",
+  "permissions": [
+    "process.memory.read",
+    "process.memory.write"
+  ]
+}

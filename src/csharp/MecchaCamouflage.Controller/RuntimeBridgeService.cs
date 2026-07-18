@@ -156,6 +156,21 @@ public sealed class RuntimeBridgeService
         RequestActiveAsync(client => client.RequestAsync(payload, cancellationToken));
 
     /// <summary>
+    /// Relays one typed process-memory operation to the already authenticated bridge
+    /// in the exact selected game process. Callers cannot choose another PID.
+    /// </summary>
+    public Task<BridgeReply> SendModuleProcessMemoryAsync(
+        string payload,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+        return RequestActiveAsync(client => client.RequestAsync(
+            payload,
+            cancellationToken,
+            TimeSpan.FromSeconds(15)));
+    }
+
+    /// <summary>
     /// Sends one whitelisted, authenticated research request through the controller-owned bridge.
     /// This does not create a second listener or bypass the per-instance HELLO handshake.
     /// </summary>
